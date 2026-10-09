@@ -292,3 +292,9 @@ Guns any hero can use: pistol, SMG, shotgun, assault rifle, sniper, grenade laun
 | Hawkeye + Scarlet Witch | src/heroes/Hawkeye.js, src/heroes/ScarletWitch.js, src/heroes/mystic/* |
 | HUD/UI/audio | src/ui/*, src/audio/* |
 | Existing heroes, combat, enemies | frozen this round (request changes via report) — except ultimate rebinding is automatic via input |
+
+## Aiming & zoom — `game.cam.requestAim(params)` (src/core/camera.js)
+The single way to aim/zoom. Call it **every frame** you want an aimed view; the camera blends in (and back out on frames without a request). Last caller in a frame wins.
+`params = { fov (deg, smaller = more zoom), distance, shoulder, height (above feet), sensitivity (look scale, default fov/baseFov), blend (rate, default 12), scope (bool: HUD draws a scope overlay) }`.
+Read-only: `cam.aimT` (0..1), `cam.aiming`, `cam.scoped`, `cam.aimParams`.
+Suggested presets: over-the-shoulder ADS `{ fov: 50, distance: 2.4, shoulder: 0.85, height: 1.6 }`; rifle/red-dot `{ fov: 38 }`; bow full draw `{ fov: 42 }`; 4x scope `{ fov: 17, distance: 0.15, shoulder: 0.2, height: 1.68, scope: true }` (hide the hero model while scoped); 8x `{ fov: 9 }`. Variable zoom: change fov with weaponNext/weaponPrev (mouse wheel / D-pad) while scoped. Do not write cam.fovKick/targetDistance/shoulder for aiming any more.
