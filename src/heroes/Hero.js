@@ -52,6 +52,15 @@ export class Hero {
     this.active = false;
     this.dead = false;
 
+    // Aim convention (heroes with usesAim = true; ignored while a gun is equipped — the weapons system owns aiming):
+    //   hold aim (RMB / L2) ≥ AIM_HOLD s → this.aiming (camera zooms to this.aimPreset automatically)
+    //   quick tap of RMB → special, quick tap of L2 → ability2   (read via this.pressedSpecial() / this.pressedAbility2())
+    //   while aiming, fire (LMB / R2) is claimed for the hero → this.fireDown() / this.firePressed()
+    this.usesAim = cfg.usesAim ?? false;
+    this.aimPreset = cfg.aimPreset ?? { fov: 50, distance: 2.4, shoulder: 0.85, height: 1.6 };
+    this.aiming = false; this.aimTime = 0;
+    this._aimDown = false; this._aimHeld = 0; this._aimSrc = null; this._aimTap = null; this._fire = false; this._firePrev = false;
+
     this.model = buildCharacter(cfg.modelId ?? cfg.id, { hero: this });
     this.model.group.visible = false;
     game.scene.add(this.model.group);
@@ -85,12 +94,42 @@ export class Hero {
     if (this.comboTimer > 0) { this.comboTimer -= dt; if (this.comboTimer <= 0) this.combo = 0; }
     this.anim.t += dt;
 
+    this._updateAim(dt, input);
     if (!this.dead) this.updateAbilities(dt, input);
     if (!this.customMovement && !this.dead) this.defaultMovement(dt, input);
     this.physicsStep(dt);
     this.syncModel(dt);
     this.updateVisuals(dt);
   }
+
+  _updateAim(dt, input) {
+    this._aimTap = null; this._firePrev = this._fire; this._fire = false;
+    if (!this.usesAim || this.game.weapons?.equipped || this.dead) {
+      this.aiming = false; this.aimTime = 0; this._aimDown = false; return;
+    }
+    const src = input.sources?.aim ?? [];
+    const down = input.down('aim');
+    if (down && !this._aimDown) { this._aimDown = true; this._aimHeld = 0; this._aimSrc = src.some((s) => s[0] === 'm:2') ? 'mouse' : 'pad'; }
+    if (down) this._aimHeld += dt;
+    if (!down && this._aimDown) {
+      this._aimDown = false;
+      if (this._aimHeld < AIM_HOLD) this._aimTap = this._aimSrc === 'mouse' ? 'special' : 'ability2';
+    }
+    // the shared physical button is ours now: stop it also triggering special / ability2 immediately
+    if (down) input.consume('aim');
+    this.aiming = down && this._aimHeld >= AIM_HOLD;
+    this.aimTime = this.aiming ? this.aimTime + dt : 0;
+    if (this.aiming) {
+      this._fire = input.down('fire');
+      input.consume('fire');                   // R2 / LMB fire instead of swing / punch while aiming
+      this.game.cam.requestAim(this.aimPreset);
+      const f = this.game.cam.forward; this.faceTowards(f, dt, 20);
+    }
+  }
+  pressedSpecial() { return this.game.input.pressed('special') || this._aimTap === 'special'; }
+  pressedAbility2() { return this.game.input.pressed('ability2') || this._aimTap === 'ability2'; }
+  fireDown() { return this._fire; }
+  firePressed() { return this._fire && !this._firePrev; }
 
   /** Walk/run/jump with camera-relative controls. */
   defaultMovement(dt, input) {
@@ -201,6 +240,8 @@ export class Hero {
 
   heal(n) { this.hp = Math.min(this.maxHp, this.hp + n); }
 }
+
+const AIM_HOLD = 0.18;
 
 export function approach(v, target, delta) {
   return v < target ? Math.min(v + delta, target) : Math.max(v - delta, target);

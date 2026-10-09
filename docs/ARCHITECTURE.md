@@ -298,3 +298,10 @@ The single way to aim/zoom. Call it **every frame** you want an aimed view; the 
 `params = { fov (deg, smaller = more zoom), distance, shoulder, height (above feet), sensitivity (look scale, default fov/baseFov), blend (rate, default 12), scope (bool: HUD draws a scope overlay) }`.
 Read-only: `cam.aimT` (0..1), `cam.aiming`, `cam.scoped`, `cam.aimParams`.
 Suggested presets: over-the-shoulder ADS `{ fov: 50, distance: 2.4, shoulder: 0.85, height: 1.6 }`; rifle/red-dot `{ fov: 38 }`; bow full draw `{ fov: 42 }`; 4x scope `{ fov: 17, distance: 0.15, shoulder: 0.2, height: 1.68, scope: true }` (hide the hero model while scoped); 8x `{ fov: 9 }`. Variable zoom: change fov with weaponNext/weaponPrev (mouse wheel / D-pad) while scoped. Do not write cam.fovKick/targetDistance/shoulder for aiming any more.
+
+## Hero aim convention (src/heroes/Hero.js) — "focus" zoom for every ranged hero
+Set `usesAim: true` (and optionally `aimPreset`) in the hero's `super(game, cfg)`. While unarmed:
+* hold **aim** (RMB / L2) ≥ 0.18 s → `this.aiming` true, camera zooms to `this.aimPreset` automatically (override per frame with `game.cam.requestAim(...)` after base logic, e.g. deeper zoom for a charged shot), hero faces the camera.
+* quick tap RMB → `this.pressedSpecial()`; quick tap L2 → `this.pressedAbility2()` — use these helpers instead of `input.pressed('special'|'ability2')` so taps still work.
+* while aiming, **fire** (LMB / R2) is claimed for the hero: read `this.fireDown()` / `this.firePressed()`; swing/attack won't trigger from it.
+* show the reticle with `game.hud.setCrosshair?.('web'|'bow'|'repulsor'|'hex'|...)`, clear with `null` when not aiming; call `game.hud.hitMarker?.(headshot)` on hits.
