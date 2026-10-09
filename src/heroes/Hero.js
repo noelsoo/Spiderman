@@ -72,7 +72,7 @@ export class Hero {
   updateAbilities(dt) {}
   /** Extra per-frame visuals (weblines, thrusters, lightning). Called after physics. */
   updateVisuals(dt) {}
-  /** HUD ability list: [{ key: 'special', label: 'Web Shot', cooldown: 0..1 }] */
+  /** HUD ability list: [{ action: 'special', label: 'Web Shot', cooldown: 0..1 }] */
   get abilityHints() { return []; }
 
   // ---- main update ---------------------------------------------------

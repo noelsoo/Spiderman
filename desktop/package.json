@@ -1,0 +1,30 @@
+{
+  "name": "symbiote-city-desktop",
+  "version": "0.1.0",
+  "description": "Electron wrapper for Spider-Man: Symbiote City",
+  "main": "main.cjs",
+  "author": "Symbiote City fans",
+  "license": "ISC",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix .. run build && electron .",
+    "start:fast": "electron .",
+    "dist": "npm --prefix .. run build && electron-builder --win --mac --linux",
+    "dist:win": "npm --prefix .. run build && electron-builder --win",
+    "dist:mac": "npm --prefix .. run build && electron-builder --mac",
+    "dist:linux": "npm --prefix .. run build && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "city.symbiote.game",
+    "productName": "Symbiote City",
+    "directories": { "output": "release" },
+    "files": ["main.cjs", { "from": "../dist", "to": "dist", "filter": ["**/*"] }],
+    "win": { "target": ["nsis", "portable"] },
+    "mac": { "target": ["dmg"], "category": "public.app-category.games" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Game" }
+  }
+}
