@@ -19,7 +19,7 @@ const seconds = Number(args.seconds || 4);
 const out = resolve(args.out || 'tools/shots');
 mkdirSync(out, { recursive: true });
 
-const root = resolve('dist');
+const root = resolve(args.dist || 'dist');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.glb': 'model/gltf-binary', '.png': 'image/png' };
 const server = createServer(async (req, res) => {
   const p = join(root, decodeURIComponent(req.url.split('?')[0]).replace(/\/$/, '/index.html'));
