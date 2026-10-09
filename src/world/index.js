@@ -109,10 +109,10 @@ export class World {
     onProgress(0.8); await tick();
 
     makeTrees(ctx, this.group);
-    this.pools = makePools(ctx, this.group, T.pool);
+    this.pools = globalThis.__NOPOOL ? null : makePools(ctx, this.group, T.pool);
     this.trafficLights = ctx.trafficLights;
     this.signs = ctx.signs;
-    this.skyline = makeSkylineBand(this.group, T, this.atmo);
+    this.skyline = globalThis.__NOSKY ? null : makeSkylineBand(this.group, T, this.atmo);
     this.clouds = quality === 'low' ? new Clouds(rng, this.group, T.cloud, quality) : { step() {} };
     this.steam = new Steam(rng, this.group, T.dot, quality);
     onProgress(0.9); await tick();
@@ -129,7 +129,7 @@ export class World {
     this.ctx = ctx;
     onProgress(0.96); await tick();
     // pre-compile every shader now (loading screen) instead of hitching on the first frame
-    try { renderer.compile(scene, this.game.camera); } catch (e) { console.warn('shader precompile failed', e); }
+    try { if (!globalThis.__NOCOMPILE) renderer.compile(scene, this.game.camera); } catch (e) { console.warn('shader precompile failed', e); }
     onProgress(1);
   }
 

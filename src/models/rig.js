@@ -616,7 +616,7 @@ export class ProcModel {
         _t3.set(p.ikT[i], p.ikT[i + 1], p.ikT[i + 2]); _pole.set(p.ikP[i], p.ikP[i + 1], p.ikP[i + 2]);
         const r = this._solveArm(this.j[aj].position, _t3, sd ? 1 : -1, _pole), w = this._ikp, ci = aj * 3;
         cur[ci] = lerp(cur[ci], r.x, w); cur[ci + 1] = lerp(cur[ci + 1], r.y, w); cur[ci + 2] = lerp(cur[ci + 2], r.z, w);
-        cur[ej * 3] = lerp(cur[ej * 3], r.e, w);
+        cur[ej * 3] = lerp(cur[ej * 3], r.e, w); vel[ci] = vel[ci + 1] = vel[ci + 2] = vel[ej * 3] = 0;
       }
     }
 
@@ -660,7 +660,7 @@ export class ProcModel {
       if (this._al <= 0.01) this.handR.quaternion.identity();
       else {
         const q = this._cq.copy(J_[H].quaternion).multiply(J_[SP].quaternion).multiply(J_[CH].quaternion).multiply(J_[AR].quaternion).multiply(J_[ER].quaternion).multiply(J_[WR].quaternion);
-        q.invert().multiply(_pq.setAxisAngle(_ax, -this._aimP));
+        q.invert().multiply(_pq.setFromAxisAngle(_ax, -this._aimP));
         this.handR.quaternion.identity().slerp(q, this._al);
       }
     }
@@ -695,6 +695,7 @@ export class ProcModel {
       const i = aj * 3, ei = ej * 3;
       this.cur[i] = lerp(this.cur[i], r.x, w); this.cur[i + 1] = lerp(this.cur[i + 1], r.y, w); this.cur[i + 2] = lerp(this.cur[i + 2], r.z, w);
       this.cur[ei] = lerp(this.cur[ei], r.e, w);
+      this.vel[i] = this.vel[i + 1] = this.vel[i + 2] = this.vel[ei] = 0;
     }
   }
 
@@ -712,6 +713,7 @@ export class ProcModel {
     _u.copy(_E).sub(sh).normalize();
     const T = _n.copy(sh).addScaledVector(d, dist);
     const fdir = _Z.copy(T).sub(_E).normalize();
+    const eAng = Math.acos(clamp(_u.dot(fdir), -1, 1));
     const nrm = _X.crossVectors(_u, fdir);
     if (nrm.lengthSq() < 1e-8) nrm.set(1, 0, 0);
     nrm.normalize();
@@ -721,7 +723,7 @@ export class ProcModel {
     _mat.makeBasis(_X, _Y, _Z);
     _q.setFromRotationMatrix(_mat);
     _e.setFromQuaternion(_q, 'XYZ');
-    const e = Math.acos(clamp(_u.dot(fdir), -1, 1));
+    const e = eAng;
     const o = this._ikr; o.x = _e.x; o.y = _e.y; o.z = _e.z; o.e = -e;
     return o;
   }

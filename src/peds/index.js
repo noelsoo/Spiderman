@@ -90,7 +90,7 @@ export class Peds {
     this.target = n;
     for (let i = 0; i < n + 4; i++) this.list.push(new Ped(this, false, i));
     for (let i = 0; i < 8; i++) { const c = new Ped(this, true, i); this.cops.push(c); this.list.push(c); }
-    this.renderR = { low: 55, medium: 70, high: 85, ultra: 95 }[q] ?? 80;
+    this.renderR = { low: 45, medium: 55, high: 65, ultra: 80 }[q] ?? 80;
     // wrap fx.explosion so every blast (heroes included) scares / launches pedestrians
     const fx = g.fx;
     if (fx && fx.explosion && !fx._pedWrapped) {
@@ -593,7 +593,7 @@ export class Peds {
     const r = p.root;
     // animation LOD: far peds update at half rate
     p._lodT = (p._lodT || 0) + dt;
-    const lodStep = d > 55 ? 0.066 : 0;
+    const lodStep = d > 55 ? 0.12 : d > 28 ? 0.05 : 0;
     if (p._lodT < lodStep) { this._place(p); return; }
     const mdt = p._lodT; p._lodT = 0;
     p.anim.t += mdt;

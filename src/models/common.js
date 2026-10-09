@@ -123,7 +123,7 @@ export function rng(seed) {
 }
 
 // ---------------------------------------------------------------- canvas textures
-function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
+function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d', { willReadFrequently: true })]; }
 function tex(c, repeat) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
@@ -415,12 +415,10 @@ export function grainNormal(name = 'grain', cell = 5, strength = 2.2) {
   if (texCache.has(key)) return texCache.get(key);
   const W = Math.min(texRes(), 512), [c, ctx] = canvas(W, W), r = rng(21);
   ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, W);
-  blurOn(ctx, 1.2);
   for (let i = 0; i < W * W / (cell * cell * 2); i++) {
     const x = r() * W, y = r() * W, rr = cell * (0.4 + r() * 0.7), v = 90 + r() * 110;
     ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.3); ctx.fill();
   }
-  blurOff(ctx);
   const t = ntex(heightToNormal(heightOf(ctx, W, W), W, W, strength)); texCache.set(key, t); return t;
 }
 

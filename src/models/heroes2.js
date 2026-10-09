@@ -318,7 +318,7 @@ export function buildScarlet() {
   P(model, hj, G('scHair', () => new THREE.SphereGeometry(1, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55)), hairM, { pos: [0, H.y0 + hr * 0.08, -hr * 0.08], rot: [-0.3, 0, 0], scale: [hr * H.sx * 1.1, hr * 1.1, hr * 1.14] });
   const locks = []; for (const s of [1, -1]) for (let i = 0; i < 3; i++) locks.push({ geo: capsuleGeo(0.02, 0.2 + i * 0.05, 3, 6), pos: [s * (hr * 0.92 - i * 0.012), H.y0 - hr * 0.25 - i * 0.04, hr * (0.2 - i * 0.25)], rot: [0.1, 0, s * 0.06] });
   P(model, hj, mergeParts('scLocks' + hr, locks), hairM, {});
-  addCloth(model, hj, { R: 7, C: 3, len: 0.34 * k, w0: 0.17 * k, w1: 0.2 * k, anchor: new V3(0, H.y0 + hr * 0.45, -hr * 0.85), mat: hairM.clone ? hairMatCloth(hairM) : hairM, resp: 0.8, base: 0.1, billow: 0.03, ph: phase() });
+  addCloth(model, hj, { R: 7, C: 3, len: 0.34 * k, w0: 0.17 * k, w1: 0.2 * k, anchor: new V3(0, H.y0 + hr * 0.45, -hr * 0.85), mat: std(0x7a2c18, { roughness: 0.55, side: THREE.DoubleSide }), resp: 0.8, base: 0.1, billow: 0.03, ph: phase() });
   // tiara: pointed crown
   const gold = metal(0xb08a3a, { roughness: 0.28 });
   const tp = [];

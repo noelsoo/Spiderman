@@ -312,7 +312,7 @@ export function buildCity(ctx) {
   buildRoadDetail(ctx);
   // street-level detail (own rng stream so the base layout never shifts)
   buildLamps(ctx, ctx.group, ctx.quality);
-  ctx.trafficLights = new TrafficLights(ctx, ctx.group, ctx.quality);
+  ctx.trafficLights = globalThis.__NOTL ? null : new TrafficLights(ctx, ctx.group, ctx.quality);
   buildStreetProps(ctx, shops, ctx.quality);
   ctx.signs = buildSigns(ctx, specs, ctx.group, ctx.quality);
 

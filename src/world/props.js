@@ -84,7 +84,7 @@ export class TrafficLights {
         }
       }
     }
-    this.mesh.count = idx;
+    _m.makeScale(0, 0, 0); for (let k = idx; k < n * 6; k++) { this.mesh.setMatrixAt(k, _m); this.mesh.setColorAt(k, col); }
     this.mesh.instanceMatrix.needsUpdate = true;
     group.add(this.mesh);
     this.colors = [new THREE.Color(3.2, 0.22, 0.18), new THREE.Color(3.2, 2.2, 0.2), new THREE.Color(0.25, 3.0, 0.9), new THREE.Color(0.03, 0.03, 0.035)];

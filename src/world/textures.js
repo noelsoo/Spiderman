@@ -5,7 +5,7 @@ import * as THREE from 'three';
 function cv(w, h) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
-  return [c, c.getContext('2d')];
+  return [c, c.getContext('2d', { willReadFrequently: true })];
 }
 function mk(c, aniso, srgb = true) {
   const t = new THREE.CanvasTexture(c);
@@ -15,7 +15,7 @@ function mk(c, aniso, srgb = true) {
   return t;
 }
 const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
-const mul = (c, k) => [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
+const mul = (c = [128, 128, 128], k = 1) => [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
 const gray = (v) => `rgb(${v | 0},${v | 0},${v | 0})`;
 const orm = (rough, metal) => `rgb(255,${(rough * 255) | 0},${(metal * 255) | 0})`;
 
