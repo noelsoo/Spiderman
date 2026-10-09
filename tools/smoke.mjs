@@ -31,11 +31,19 @@ const port = server.address().port;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
-page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e.stack || e)));
+page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
+page.setDefaultTimeout(180000);
+// Software GL (swiftshader) renders slowly; pause the loop, draw one frame, then capture.
+const shot = async (name) => {
+  await page.evaluate(() => { const g = window.game; g.renderer.setAnimationLoop(null); g.composer.render(); });
+  await page.screenshot({ path: join(out, name), timeout: 180000 });
+  await page.evaluate(() => { const g = window.game; g.clock.getDelta(); g.renderer.setAnimationLoop(() => g.frame()); });
+};
 await page.goto(`http://localhost:${port}/index.html`);
 await page.waitForFunction(() => window.game && window.game.state === 'menu', null, { timeout: 60000 });
-await page.screenshot({ path: join(out, 'menu.png') });
+await shot('menu.png');
 
 const fps = {};
 for (const hero of heroes) {
@@ -57,7 +65,7 @@ for (const hero of heroes) {
   await page.waitForTimeout(600);
   const f1 = await page.evaluate(() => window.game.renderer.info.render.frame);
   fps[hero] = ((f1 - f0) / ((Date.now() - t0) / 1000)).toFixed(1);
-  await page.screenshot({ path: join(out, `${hero}.png`) });
+  await shot(`${hero}.png`);
   const st = await page.evaluate(() => ({ state: window.game.state, pos: window.game.player.pos.toArray().map((v) => +v.toFixed(1)), hp: window.game.player.hp, enemies: window.game.enemies.list?.filter?.((e) => e.alive).length }));
   console.log(hero, JSON.stringify(st), 'fps≈', fps[hero]);
 }
