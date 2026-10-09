@@ -50,7 +50,7 @@ export class Physics {
    * Returns { onGround, onWall, wallNormal, hitCeiling, box }.
    */
   resolveSphere(pos, r, vel) {
-    const res = { onGround: false, onWall: false, wallNormal: new THREE.Vector3(), hitCeiling: false, box: null };
+    const res = { onGround: false, onWall: false, wallNormal: new THREE.Vector3(), hitCeiling: false, box: null, wallBox: null, groundBox: null };
     if (pos.y - r < this.groundY) {
       pos.y = this.groundY + r;
       if (vel && vel.y < 0) vel.y = 0;
@@ -86,9 +86,9 @@ export class Physics {
           if (vn < 0) { vel.x -= vn * nx; vel.y -= vn * ny; vel.z -= vn * nz; }
         }
         res.box = b;
-        if (ny > 0.7) res.onGround = true;
+        if (ny > 0.7) { res.onGround = true; res.groundBox = b; }
         else if (ny < -0.7) res.hitCeiling = true;
-        else { res.onWall = true; res.wallNormal.set(nx, 0, nz).normalize(); }
+        else { res.onWall = true; res.wallBox = b; res.wallNormal.set(nx, 0, nz).normalize(); }
       }
     }
     return res;
@@ -99,15 +99,15 @@ export class Physics {
    * Uses three spheres; returns merged result.
    */
   resolveCapsule(feet, r, h, vel) {
-    const out = { onGround: false, onWall: false, wallNormal: new THREE.Vector3(), hitCeiling: false, box: null };
+    const out = { onGround: false, onWall: false, wallNormal: new THREE.Vector3(), hitCeiling: false, box: null, wallBox: null, groundBox: null };
     const offsets = [r, Math.max(r, h * 0.5), Math.max(r, h - r)];
     for (const o of offsets) {
       _v.set(feet.x, feet.y + o, feet.z);
       const res = this.resolveSphere(_v, r, vel);
       feet.set(_v.x, _v.y - o, _v.z);
-      if (res.onGround && o === offsets[0]) out.onGround = true;
+      if (res.onGround && o === offsets[0]) { out.onGround = true; out.groundBox = res.groundBox; }
       if (res.hitCeiling && o === offsets[2]) out.hitCeiling = true;
-      if (res.onWall) { out.onWall = true; out.wallNormal.copy(res.wallNormal); }
+      if (res.onWall) { out.onWall = true; out.wallNormal.copy(res.wallNormal); out.wallBox = res.wallBox; }
       if (res.box) out.box = res.box;
     }
     return out;

@@ -492,7 +492,7 @@ export class SpiderMan extends Hero {
   // ---- WALL ------------------------------------------------------------------
   _canWall(input) {
     if (this.wallNormal.lengthSq() < 0.1) return false;
-    const box = this.lastContact;
+    const box = this.wallContact ?? this.lastContact;
     if (box && box.data?.type === 'prop') return false;
     if (box && box.max.y < this.pos.y + 2.5) return false;
     const wish = this._wish(input, _w); const m = wish.length();
@@ -503,7 +503,7 @@ export class SpiderMan extends Hero {
     return false;
   }
   _enterWall() {
-    this.state = 'wall'; this.wallN.copy(this.wallNormal).setY(0).normalize(); this.wallLost = 0;
+    this.state = 'wall'; this.wallN.copy(this.wallNormal).setY(0).normalize(); this.wallLost = 0; this._wallBox = this.wallContact;
     this.atk = null; this.lash = null; this.lines.swing.hide();
     // convert some momentum into climbing speed
     const sp = Math.hypot(this.vel.x, this.vel.z);
@@ -547,7 +547,8 @@ export class SpiderMan extends Hero {
     this.vel.x = approach(this.vel.x, tx - n.x * stick, acc); this.vel.z = approach(this.vel.z, tz - n.z * stick, acc);
     this.vel.y = approach(this.vel.y, ty, acc);
 
-    const box = this.lastContact;
+    const box = this.wallContact ?? this._wallBox ?? this.lastContact;
+    if (this.wallContact) this._wallBox = this.wallContact;
     // vault over the roof edge
     if (box && box.data?.type !== 'prop' && this.vel.y > 1 && this.pos.y + 0.75 >= box.max.y && up > 0.15) {
       this.vel.set(-n.x * 5.5, 6.5, -n.z * 5.5);
@@ -740,7 +741,7 @@ export class SpiderMan extends Hero {
 
   _doMelee(a) {
     const mul = this._dmgMul(); const air = a.air; const fin = a.step === 2;
-    const dmg = (air ? [10, 10, 16] : [11, 11, 20])[a.step] * mul;
+    const dmg = (air ? [13, 13, 22] : [15, 15, 28])[a.step] * mul;
     const origin = this._center(new THREE.Vector3());
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const hits = this.game.combat?.melee?.({

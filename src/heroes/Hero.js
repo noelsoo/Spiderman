@@ -40,6 +40,8 @@ export class Hero {
     this.onWall = false;
     this.wallNormal = new THREE.Vector3();
     this.lastContact = null;          // last physics box touched
+    this.wallContact = null;          // box of the wall currently touched (null when not on a wall)
+    this.groundContact = null;        // box currently stood on (null on the street / in the air)
     this.customMovement = false;      // subclass sets true while swinging / flying / etc.
     this.gravityScale = 1;
     this.invuln = 0;                  // seconds of i-frames
@@ -124,16 +126,18 @@ export class Hero {
     const dist = this.vel.length() * dt;
     const steps = Math.min(8, Math.max(1, Math.ceil(dist / (this.radius * 0.9))));
     const sdt = dt / steps;
-    let onGround = false, onWall = false;
+    let onGround = false, onWall = false, wallBox = null, groundBox = null;
     for (let i = 0; i < steps; i++) {
       this.pos.addScaledVector(this.vel, sdt);
       const res = this.game.physics.resolveCapsule(this.pos, this.radius, this.height, this.vel);
       if (res.onGround) onGround = true;
-      if (res.onWall) { onWall = true; this.wallNormal.copy(res.wallNormal); }
+      if (res.onWall) { onWall = true; wallBox = res.wallBox; this.wallNormal.copy(res.wallNormal); }
+      if (res.onGround) groundBox = res.groundBox;
       if (res.box) this.lastContact = res.box;
     }
     const wasAir = !this.onGround;
     this.onGround = onGround; this.onWall = onWall;
+    this.wallContact = wallBox; this.groundContact = groundBox;
     if (wasAir && onGround) this.onLand?.(dt);
     this.game.world?.constrain?.(this);
   }

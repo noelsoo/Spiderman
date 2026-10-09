@@ -55,7 +55,7 @@ If you need a change in a file you do not own, do not edit it: write the request
 addBox(min, max, data)                         register a solid AABB (buildings, rooftop props, bridge decks)
 query(minX, minZ, maxX, maxZ) → box[]           broad-phase by XZ
 resolveSphere(pos, r, vel) → {onGround,onWall,wallNormal,hitCeiling,box}
-resolveCapsule(feet, r, h, vel) → same          used by heroes and enemies
+resolveCapsule(feet, r, h, vel) → same + {wallBox, groundBox}   used by heroes and enemies (Hero exposes wallContact / groundContact)
 raycast(origin, dirNormalised, maxDist, {ignoreGround}) → {point, normal, distance, box} | null
 lineOfSight(a, b) → bool
 heightAt(x, z, maxY) → number                   top of highest box below maxY (or 0)
