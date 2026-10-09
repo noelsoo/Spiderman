@@ -89,10 +89,13 @@ export class Input {
     addEventListener('mouseup', (e) => this.mouseButtons.delete(e.button));
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('mousemove', (e) => {
-      if (!this.pointerLocked) return;
+      // If pointer lock was refused (some embedded frames), still steer the camera with raw mouse movement.
+      if (!this.pointerLocked && !this.lockFailed) return;
       this.mouseDX += e.movementX; this.mouseDY += e.movementY;
     });
     addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); }, { passive: true });
+    this.lockFailed = false;
+    document.addEventListener('pointerlockerror', () => { this.lockFailed = true; });
     document.addEventListener('pointerlockchange', () => {
       this.listeners.pointerlock.forEach((f) => f(this.pointerLocked));
     });
@@ -109,7 +112,12 @@ export class Input {
   on(evt, fn) { this.listeners[evt]?.push(fn); }
 
   get pointerLocked() { return document.pointerLockElement === this.canvas; }
-  requestPointerLock() { try { this.canvas.requestPointerLock?.()?.catch?.(() => {}); } catch { /* ignore */ } }
+  requestPointerLock() {
+    try {
+      if (!this.canvas.requestPointerLock) { this.lockFailed = true; return; }
+      this.canvas.requestPointerLock()?.catch?.(() => { this.lockFailed = true; });
+    } catch { this.lockFailed = true; }
+  }
   exitPointerLock() { if (this.pointerLocked) document.exitPointerLock(); }
 
   _dz(v) { const a = Math.abs(v); return a < this.deadzone ? 0 : Math.sign(v) * (a - this.deadzone) / (1 - this.deadzone); }
