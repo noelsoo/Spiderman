@@ -353,3 +353,7 @@ table.kt td:last-child { color: #aab3d6; }
   .btn { padding: 10px 24px; font-size: 14px; } .btn.big { padding: 12px 40px; font-size: 18px; }
   .panel { padding: 16px 22px; } .row { padding: 7px 12px; }
 }
+
+.wpn .rl { height: 3px; margin-top: 4px; background: rgba(255,255,255,0.12); } .wpn .rl b { display: block; height: 100%; width: 0; background: #ffe58a; }
+.rally { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); padding: 4px 18px; font-weight: 900; letter-spacing: 0.4em; font-size: 13px; background: rgba(47,107,216,0.55); border: 1px solid #9fc2ff; animation: lowblink 1s infinite; }
+.xhair[class*='k-'] svg { transform: scale(calc(1 + var(--spread, 0px) / 60)); }

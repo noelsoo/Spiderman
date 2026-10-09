@@ -123,6 +123,7 @@ export class HUD {
     addEventListener('mousemove', (e) => { if (this._wheelOn) { this._mdx += e.movementX || 0; this._mdy += e.movementY || 0; } });
     this._registerSW();
     this._bindEvents();
+    this.handlesWeapons = true;
   }
 
   // ------------------------------------------------------------------ setup
@@ -200,7 +201,8 @@ export class HUD {
             <div class="focus" data-r="focus"><div class="ult" data-r="ult">ULTIMATE READY</div><b data-r="focusb"></b></div>
           </div>
         </div>
-        <div class="wpn hidden" data-r="wpn"><div class="wn" data-r="wpnn"></div><div class="wa"><b data-r="wpnc"></b><span data-r="wpnr"></span></div></div>
+        <div class="wpn hidden" data-r="wpn"><div class="wn" data-r="wpnn"></div><div class="wa"><b data-r="wpnc"></b><span data-r="wpnr"></span></div><div class="rl"><b data-r="wpnrl"></b></div></div>
+        <div class="rally hidden" data-r="rally">RALLY</div>
         <div class="speedo hidden" data-r="speedo">
           <svg viewBox="0 0 120 70"><path class="tr" d="M10 62A50 50 0 0 1 110 62" pathLength="100"/><path class="fl" data-r="spdarc" d="M10 62A50 50 0 0 1 110 62" pathLength="100" stroke-dasharray="0 100"/></svg>
           <div class="sv"><b data-r="spdn">0</b><small>KM/H</small></div>
@@ -343,8 +345,9 @@ export class HUD {
   }
 
   /** Weapons system: 'pistol'|'rifle'|'shotgun'|'sniper'|'bow'|null. Sniper shows the scope overlay. */
-  setCrosshair(kind) {
+  setCrosshair(kind, spreadPx) {
     kind = kind || null;
+    if (typeof spreadPx === 'number') this.$.xhair.style.setProperty('--spread', `${Math.max(0, Math.min(60, spreadPx))}px`);
     if (kind === this._xk) return;
     this._xk = kind;
     const xh = this.$.xhair;
@@ -1069,7 +1072,7 @@ export class HUD {
       const wid = w.id ?? w.name;
       const st = g.weapons.owned?.get ? g.weapons.owned.get(wid) : null;
       const nm = String(w.name || w.id || '').toUpperCase();
-      const clip = st?.clip, res = st?.ammo;
+      const clip = st?.clip, res = st?.reserve ?? st?.ammo;
       const a = clip !== undefined ? `${clip}` : (res !== undefined ? (Number.isFinite(res) ? `${res}` : '∞') : '');
       const b = clip !== undefined && res !== undefined ? (Number.isFinite(res) ? ` / ${res}` : ' / ∞') : '';
       const key = `${nm}|${a}|${b}`;
@@ -1079,6 +1082,8 @@ export class HUD {
       }
     }
 
+    const rp = g.weapons?.reloadProgress; this.$.wpnrl.style.width = rp > 0 && rp < 1 ? `${rp * 100}%` : '0';
+    this.$.rally.classList.toggle('hidden', !(g.rallyUntil && g.time < g.rallyUntil));
     // crosshair: weapon-specific via setCrosshair(), otherwise the small default ring
     const cam = g.cam, aimT = cam?.aimT ?? (g.weapons?.aiming ? 1 : 0);
     const scoped = !!cam?.scoped && aimT > 0.35;
@@ -1272,6 +1277,10 @@ const XH = {
   rifle: XS('<circle r="1.2" fill="#fff" stroke="none"/><path d="M-8 0h-12M8 0h12M0 8v12"/>'),
   shotgun: XS('<circle r="15"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M0 -15v-4M0 15v4M-15 0h-4M15 0h4"/>'),
   sniper: XS('<circle r="1.2" fill="#f33" stroke="none"/>'),
+  gun: XS('<circle r="1.4" fill="#fff" stroke="none"/><path d="M-13 0h-6M13 0h6M0 -13v-6M0 13v6"/>'),
+  launcher: XS('<circle r="13"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M-13 0h-6M13 0h6M0 13v6"/>'),
+  hammer: XS('<path d="M-9 -9h18v8h-18zM0 -1v12"/>'),
+  shield: XS('<circle r="11"/><circle r="5"/><circle r="1.2" fill="#fff" stroke="none"/>'),
   web: XS('<circle r="11"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M0 -11v-8M0 11v8M-11 0h-8M11 0h8M8 -8l4 -4M-8 -8l-4 -4M8 8l4 4M-8 8l-4 4" stroke-width="1.2"/>'),
   repulsor: XS('<circle r="10"/><circle r="5"/><circle r="1.2" fill="#fff" stroke="none"/>'),
   hex: XS('<path d="M0 -12 10.4 -6V6L0 12-10.4 6V-6z"/><circle r="1.4" fill="#fff" stroke="none"/>'),
