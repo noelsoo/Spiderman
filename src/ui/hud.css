@@ -113,15 +113,21 @@
 .xhair[class*='k-']::after { display: none; }
 .xhair[class*='k-'] svg { width: 100%; height: 100%; filter: drop-shadow(0 0 2px #000); }
 .xhair[class*='k-'].on { opacity: 0.95; }
-.xhair.k-pistol, .xhair.k-rifle { transform: scale(0.8); } .xhair.aim { transform: scale(0.7); }
-.xhair.k-shotgun.aim { transform: scale(0.85); }
 .xhair.k-sniper { display: none; }
-.scope { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 0.12s;
-  background: radial-gradient(circle at 50% 50%, transparent 0, transparent 31vmin, #000 31.6vmin); }
-.scope::before, .scope::after { content: ''; position: absolute; background: rgba(0,0,0,0.85); }
-.scope::before { left: 50%; top: calc(50% - 31vmin); height: 62vmin; width: 2px; margin-left: -1px; }
-.scope::after { top: 50%; left: calc(50% - 31vmin); width: 62vmin; height: 2px; margin-top: -1px; }
+.scope { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 0.1s;
+  background: radial-gradient(circle at 50% 50%, transparent 0, transparent 30.5vmin, rgba(0,0,0,0.55) 31vmin, #000 32.2vmin); }
+.scope svg { position: absolute; left: 50%; top: 50%; width: 100vmin; height: 100vmin; transform: translate(-50%, -50%); }
+.scope::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, transparent 0, transparent 29vmin, rgba(120,170,255,0.10) 30.8vmin, transparent 31vmin); }
+.scope .zm { position: absolute; left: calc(50% + 24vmin); top: calc(50% + 24vmin); font-weight: 900; font-size: 18px; letter-spacing: 0.1em; color: #e9edff; text-shadow: 0 0 6px #000; }
 .scope.on { opacity: 1; }
+.hitm { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.hitm i { position: absolute; width: 12px; height: 2.5px; background: #fff; box-shadow: 0 0 4px #000; left: -6px; top: -1px; }
+.hitm i:nth-child(1) { transform: rotate(45deg) translateX(-14px); } .hitm i:nth-child(2) { transform: rotate(-45deg) translateX(14px); }
+.hitm i:nth-child(3) { transform: rotate(-45deg) translateX(-14px); } .hitm i:nth-child(4) { transform: rotate(45deg) translateX(14px); }
+.hitm.on { animation: hitm 0.22s ease-out; } .hitm.hs i { background: #ff3b4e; width: 16px; }
+@keyframes hitm { 0% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0; transform: scale(0.9); } }
+.zoomi { position: absolute; left: calc(50% + 40px); top: calc(50% + 22px); font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity 0.15s; }
+.zoomi.on { opacity: 0.85; }
 .hud-game.scoped .badge, .hud-game.scoped .abil, .hud-game.scoped .rcol { opacity: 0.25; }
 
 /* right column: hero strip, minimap, cash, wanted */

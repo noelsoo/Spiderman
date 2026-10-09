@@ -27,27 +27,60 @@ varying vec3 vDir;
 void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`;
 const SKY_FRAG = /* glsl */`
 uniform vec3 uZen, uMid, uHor, uSunDir, uSun;
-uniform float uStars;
+uniform float uStars, uTime, uCloud;
 varying vec3 vDir;
 float hash(vec3 p){ p = fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p){
+  float a = 0.5, s = 0.0;
+  for (int i = 0; i < CLOUD_OCT; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; }
+  return s;
+}
 void main(){
   vec3 d = normalize(vDir);
   float h = d.y;
   float up = clamp(h, 0.0, 1.0);
   vec3 col = mix(uHor, uMid, smoothstep(0.0, 0.28, up));
   col = mix(col, uZen, smoothstep(0.18, 0.85, up));
+  // warm haze hugging the horizon
+  col = mix(col, uHor * 1.05, exp(-max(h, 0.0) * 11.0) * 0.38);
   // below horizon fades to a warm-dark haze
   col = mix(col, uHor * 0.45, smoothstep(0.0, -0.25, h));
   float sd = max(dot(d, uSunDir), 0.0);
   // horizon glow toward the sun, broad + tight
   float hz = exp(-abs(h) * 5.0);
-  col += uSun * (pow(sd, 6.0) * 0.55 * hz + pow(sd, 3.0) * 0.18) ;
+  col += uSun * (pow(sd, 6.0) * 0.55 * hz + pow(sd, 3.0) * 0.18);
   col += uSun * pow(sd, 48.0) * 0.8;
+  #ifdef CLOUDS
+  if (h > 0.005 && uCloud > 0.0) {
+    vec2 p = d.xz / (h + 0.09) * 0.55 + vec2(uTime * 0.0035, uTime * 0.0012);
+    float dens = fbm(p * 1.6);
+    float cov = smoothstep(0.46, 0.74, dens);
+    // sun-ward sample: lit rims where density falls off toward the sun, dark bellies elsewhere
+    vec2 sdir = normalize(uSunDir.xz + vec2(1e-3));
+    float dens2 = fbm((p + sdir * 0.07) * 1.6);
+    float shade = clamp(0.5 + (dens - dens2) * 4.5, 0.0, 1.0);
+    vec3 belly = mix(uMid, uZen, 0.35) * 0.55 + uHor * 0.22;
+    vec3 lit = uSun * 0.95 + uHor * 0.35 + vec3(0.05);
+    vec3 cc = mix(belly, lit, shade);
+    cc += uSun * pow(sd, 10.0) * (1.0 - cov * 0.4) * 0.5;      // silver lining
+    float fade = smoothstep(0.0, 0.22, h);
+    col = mix(col, cc, cov * fade * uCloud);
+  }
+  #endif
+  // sun: hard disc with a soft limb
   float disc = smoothstep(0.99955, 0.99985, sd);
   col += uSun * disc * 14.0 * step(-0.02, uSunDir.y + 0.02);
   if (uStars > 0.01 && h > 0.0) {
     float s = step(0.9985, hash(floor(d * 380.0)));
     col += vec3(s) * uStars * smoothstep(0.0, 0.3, h);
+    // moon opposite the sun
+    float md = max(dot(d, -uSunDir), 0.0);
+    col += vec3(0.75, 0.85, 1.0) * (smoothstep(0.9993, 0.9997, md) * 2.4 + pow(md, 400.0) * 0.5 + pow(md, 40.0) * 0.04) * min(uStars, 1.0);
   }
   gl_FragColor = vec4(col, 1.0);
 }`;
@@ -70,7 +103,9 @@ export class Atmosphere {
       uniforms: {
         uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uHor: { value: new THREE.Color() },
         uSunDir: { value: this.sunDir }, uSun: { value: new THREE.Color() }, uStars: { value: 0 },
+        uTime: { value: 0 }, uCloud: { value: quality === 'low' ? 0 : 1 },
       },
+      defines: quality === 'low' ? { CLOUD_OCT: 3 } : { CLOUDS: 1, CLOUD_OCT: quality === 'ultra' ? 6 : 5 },
       side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
     });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), this.skyMat);
@@ -83,13 +118,18 @@ export class Atmosphere {
     this.sun = new THREE.DirectionalLight(0xffc080, 3);
     this.sun.castShadow = quality !== 'low';
     if (this.sun.castShadow) {
-      this.sun.shadow.mapSize.set(2048, 2048);
+      const sm = quality === 'ultra' ? 4096 : 2048;
+      this.sun.shadow.mapSize.set(sm, sm);
       const c = this.sun.shadow.camera;
       c.left = -75; c.right = 75; c.top = 75; c.bottom = -75; c.near = 5; c.far = 1500;
       this.sun.shadow.bias = -0.0003;
       this.sun.shadow.normalBias = 0.35;
     }
     scene.add(this.sun, this.sun.target);
+    // cool moonlight so the streets are readable at night
+    this.moon = new THREE.DirectionalLight(0x86a6ff, 0);
+    scene.add(this.moon, this.moon.target);
+    this.night = 0;
     scene.fog = new THREE.FogExp2(0xcc8855, 0.00072);
 
     // reflection environment rendered from a tiny copy of the sky
@@ -119,13 +159,16 @@ export class Atmosphere {
     u.uStars.value = THREE.MathUtils.clamp((-e - 0.02) * 6, 0, 1.2);
     this.hemi.color.copy(p.hs); this.hemi.groundColor.copy(p.hg); this.hemi.intensity = p.hI;
     this.sun.color.copy(p.sun); this.sun.intensity = p.sunI;
-    this.sun.visible = p.sunI > 0.02;
+    this.sun.visible = true; // never toggle: changing the light count would recompile every material
+    this.night = THREE.MathUtils.smoothstep(p.glow, 0.5, 1.5);
+    this.moon.intensity = 0.55 * THREE.MathUtils.smoothstep(-e, -0.02, 0.2);
     const fog = this.game.scene.fog;
     fog.color.copy(p.fog);
     fog.density = 0.00072 * (e < 0.05 ? 1.15 : 1);
     this.game.scene.background = null;
     for (const m of this.wallMats) m.emissiveIntensity = p.glow;
     if (this.waterUniforms) this.updateWater();
+    for (const fn of this.onChange) fn(p, this.night);
     if (!skipEnv) this.refreshEnv();
   }
 
@@ -156,6 +199,8 @@ export class Atmosphere {
       this.setTime(this.t, false, !refresh);
     }
     this.sky.position.copy(camera.position);
+    this.skyMat.uniforms.uTime.value += dt;
+    if (this.moon.intensity > 0.01) { this.moon.target.position.copy(focus); this.moon.position.copy(focus).addScaledVector(this.sunDir, -400); this.moon.target.updateMatrixWorld(); }
     // shadow frustum follows the focus point, snapped to texels to avoid shimmering
     const sun = this.sun, T = sun.target.position;
     T.copy(focus);
@@ -163,7 +208,7 @@ export class Atmosphere {
     if (sun.castShadow) {
       const bx = this._bx.set(0, 1, 0).cross(dir).normalize();
       const by = this._by.copy(dir).cross(bx).normalize();
-      const texel = 150 / 2048;
+      const texel = 150 / this.sun.shadow.mapSize.x;
       const px = T.dot(bx), py = T.dot(by);
       T.addScaledVector(bx, Math.round(px / texel) * texel - px).addScaledVector(by, Math.round(py / texel) * texel - py);
     }

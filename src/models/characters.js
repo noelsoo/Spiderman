@@ -192,7 +192,7 @@ const SPIDER_VARIANTS = () => {
 export function buildSpiderMan(opts = {}) {
   const dims = makeDims(0.95, { headR: 0.108, shW: 0.182 });
   const rig = buildRig(dims, 1.06);
-  const model = new ProcModel('spiderman', rig, { prof: { stance: 'ready', cadence: 1.05, stride: 1.05, lean: 1.1, flipDodge: true, shoot: 'web' } });
+  const model = new ProcModel('spiderman', rig, { prof: { stance: 'ready', cadence: 1.05, stride: 1.05, lean: 1.1, flipDodge: true, shoot: 'web', aimStyle: 'web' } });
   model.variants = SPIDER_VARIANTS();
   const v0 = model.variants.classic;
   const info = buildBody(model, {
@@ -278,9 +278,10 @@ export function buildSpiderMan(opts = {}) {
 export function buildIronMan() {
   const dims = makeDims(1.0, { headR: 0.11 });
   const rig = buildRig(dims, 1.1);
-  const model = new ProcModel('ironman', rig, { prof: { stance: 'relaxed', flyStyle: 'iron', hover: 'iron', flipDodge: false, cadence: 0.92, stride: 0.95, armSwing: 0.8, shoot: 'palm', lean: 1.0 } });
-  const red = metal(0xa0101a, { roughness: 0.26, metalness: 0.88 });
-  const gold = metal(0xd9a53b, { roughness: 0.22, metalness: 0.95 });
+  const model = new ProcModel('ironman', rig, { prof: { stance: 'relaxed', flyStyle: 'iron', hover: 'iron', flipDodge: false, cadence: 0.92, stride: 0.95, armSwing: 0.8, shoot: 'palm', lean: 1.0, landStyle: 'hero' } });
+  const pm = panelMaps(1), nS = new V2(0.75, 0.75);
+  const red = withRim(phys(0xa0101a, { roughness: 0.34, metalness: 0.86, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 1, clearcoatRoughness: 0.07 }), 0xffc9a0, 0.14);
+  const gold = withRim(phys(0xd9a53b, { roughness: 0.3, metalness: 0.95, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.6, clearcoatRoughness: 0.1 }), 0xfff0c0, 0.12);
   const dark = std(0x24242a, { metalness: 0.7, roughness: 0.45 });
   const info = buildBody(model, {
     mats: { default: red, abdomen: gold, pelvis: gold, neck: dark, head: red, shoulder: red, upperArm: red, foreArm: gold, hand: gold, thigh: red, shin: gold, foot: red, chest: red },
@@ -301,7 +302,18 @@ export function buildIronMan() {
   const ringGeo = G('arcring', () => new THREE.TorusGeometry(0.05, 0.012, 8, 20));
   P(model, cj, ringGeo, gold, { pos: [0, 0.22, cr.rz + 0.008] });
   P(model, cj, G('arcdisc', () => new THREE.CircleGeometry(0.043, 20)), glow(0xaee8ff, 3.2), { pos: [0, 0.22, cr.rz + 0.012], cast: false });
-  // chest gold trim
+  // chest gold trim: two curved side plates + collar
+  for (const s of [1, -1]) P(model, cj, sphereGeo(1, 12, 8), gold, { pos: [s * cr.rx * 0.78, 0.12, cr.rz * 0.45], scale: [0.055, 0.1, 0.05], rot: [0, s * 0.5, s * 0.25] });
+  P(model, model.j[J.NK], cylGeo(0.062 * dims.k, 0.07 * dims.k, 0.05, seg(14, 8)), gold, { pos: [0, 0.0, 0] });
+  // jaw plates + helmet crest
+  for (const s of [1, -1]) P(model, hj, sphereGeo(1, 10, 8), gold, { pos: [s * H.R * 0.58, H.y0 - H.R * 0.4, H.R * 0.62], scale: [H.R * 0.4, H.R * 0.5, H.R * 0.45] });
+  // elbow + knee caps, shin guards
+  for (const s of [1, -1]) {
+    P(model, model.j[s > 0 ? J.EL : J.ER], sphereGeo(1, 12, 8), gold, { pos: [0, 0, -0.01], scale: [0.058, 0.05, 0.062] });
+    P(model, model.j[s > 0 ? J.KL : J.KR], sphereGeo(1, 12, 8), red, { pos: [0, 0.01, 0.03], scale: [0.07, 0.07, 0.06] });
+    P(model, model.j[s > 0 ? J.WL : J.WR], cylGeo(0.05, 0.052, 0.085, seg(14, 8)), red, { pos: [0, 0.0, 0] }); // gauntlet cuff
+  }
+  P(model, model.j[J.SP], cylGeo(0.14 * dims.k, 0.15 * dims.k, 0.045, seg(18, 10)), red, { pos: [0, 0.05, 0], scale: [1.32, 1, 0.9] }); // belt
   // shoulders (pauldrons)
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.AL : J.AR], sphereGeo(0.092, 14, 10), red, { pos: [s * 0.02, 0.02, 0], scale: [1.1, 0.9, 1.05] });
   // knee + elbow gold caps
@@ -333,10 +345,12 @@ export function buildIronMan() {
 export function buildHulk() {
   const dims = makeDims(1.42, { headR: 0.098, neck: 0.1 });
   const rig = buildRig(dims, 1.0);
-  const model = new ProcModel('hulk', rig, { prof: { stance: 'hulk', cadence: 0.78, stride: 1.05, armSwing: 1.0, lean: 1.25, bob: 2.0, flipDodge: false, throwStyle: 'two', wide: 0.12, tempo: 0.9 } });
-  const skin = std(0x4f9d3b, { roughness: 0.58, metalness: 0.02 });
-  const skinD = std(0x3f8530, { roughness: 0.6 });
-  const shorts = std(0x5a2d86, { roughness: 0.8 });
+  const model = new ProcModel('hulk', rig, { prof: { stance: 'hulk', cadence: 0.78, stride: 1.05, armSwing: 1.0, lean: 1.25, bob: 2.0, flipDodge: false, throwStyle: 'two', wide: 0.12, tempo: 0.9, knuckle: true } });
+  const sm_ = skinMaps();
+  sm_.map.repeat.set(2, 2); sm_.normal.repeat.set(2, 2);
+  const skin = withRim(phys(0xffffff, { map: sm_.map, normalMap: sm_.normal, normalScale: new V2(1.1, 1.1), roughness: 0.52, metalness: 0.0, sheen: 0.6, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xa8ff90), clearcoat: 0.08, clearcoatRoughness: 0.6 }), 0xb8ff9a, 0.1);
+  const skinD = std(0x3f8530, { roughness: 0.6, normalMap: sm_.normal, normalScale: new V2(0.8, 0.8) });
+  const shorts = std(0x5a2d86, { roughness: 0.85, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
   const info = buildBody(model, {
     mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin },
     torso: { sx: 1.62, sz: 0.95, chestR: 1.38, waistR: 1.05 },
@@ -368,6 +382,16 @@ export function buildHulk() {
   P(model, hj, boxGeo(hr * 0.7, hr * 0.12, hr * 0.12), std(0x1c2a18), { pos: [0, H.y0 - hr * 0.5, hr * 0.92] }); // mouth
   const hairM = std(0x15150f, { roughness: 0.9 });
   P(model, hj, G('hulkhair', () => new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.52)), hairM, { pos: [0, H.y0 + hr * 0.12, -hr * 0.1], scale: [hr * 1.06, hr * 1.04, hr * 1.12], rot: [-0.25, 0, 0] });
+  // face: painted angry eyes/mouth + nose + ears
+  addFace(model, H, { tex: { skin: '#4f9d3b', iris: '#7fd05a', brow: '#17300f', lip: '#1c3a14', mood: 'angry', brows: false }, skin: skinD });
+  // abs
+  const absP = [];
+  for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) absP.push({ geo: sphereGeo(1, 10, 8), pos: [sd * 0.045 * k, -0.04 * k + i * 0.065 * k, 0.13 * k], scale: [0.05 * k, 0.034 * k, 0.03 * k] });
+  P(model, model.j[J.SP], mergeParts('hulkabs' + k, absP), skinD, {});
+  // wild hair spikes
+  const hs = [];
+  for (let i = 0; i < 9; i++) { const a = (i / 8 - 0.5) * 2.6; hs.push({ geo: coneGeo(0.03, 0.09, 5), pos: [Math.sin(a) * hr * 0.9, H.y0 + hr * 0.75 + Math.cos(a * 2) * 0.01, -Math.cos(a) * hr * 0.35], rot: [-0.5 + Math.cos(a) * 0.2, 0, -Math.sin(a) * 0.7] }); }
+  P(model, hj, mergeParts('hulkspikes' + hr, hs), hairM, {});
   // fists knuckles
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.WL : J.WR], sphereGeo(1, 10, 8), skinD, { pos: [0, -dims.hand * 0.78, 0.045 * k], scale: [0.06 * k, 0.035 * k, 0.04 * k] });
   return finish(model);
@@ -377,11 +401,11 @@ export function buildHulk() {
 export function buildThor() {
   const dims = makeDims(1.04, { headR: 0.112 });
   const rig = buildRig(dims, 1.06);
-  const model = new ProcModel('thor', rig, { prof: { stance: 'relaxed', flyStyle: 'super', hover: 'thor', flipDodge: true, cadence: 0.9, stride: 1.0, lean: 1.0, throwStyle: 'one' } });
-  const suit = std(0x1d2230, { roughness: 0.75 });
-  const leather = std(0x3a2a20, { roughness: 0.8 });
-  const silver = metal(0xb8bec8, { roughness: 0.3, metalness: 0.95 });
-  const skin = std(0xe0b090, { roughness: 0.65 });
+  const model = new ProcModel('thor', rig, { prof: { stance: 'relaxed', flyStyle: 'super', hover: 'thor', flipDodge: true, cadence: 0.9, stride: 1.0, lean: 1.0, throwStyle: 'one', landStyle: 'hero' } });
+  const suit = withRim(phys(0x1d2230, { roughness: 0.7, normalMap: fabricNormal(5, 0.55, 'thorfab'), normalScale: new V2(0.8, 0.8), sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x6a8cff) }), 0x9fc0ff, 0.14);
+  const leather = std(0x3a2a20, { roughness: 0.75, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9) });
+  const silver = withRim(phys(0xb8bec8, { roughness: 0.28, metalness: 0.95, clearcoat: 0.5, clearcoatRoughness: 0.15, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.4, 0.4) }), 0xffffff, 0.12);
+  const skin = std(0xe0b090, { roughness: 0.62 });
   const info = buildBody(model, {
     mats: { default: suit, chest: suit, abdomen: suit, pelvis: leather, neck: skin, head: skin, shoulder: silver, upperArm: suit, foreArm: suit, hand: leather, thigh: suit, shin: leather, foot: leather },
     torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
@@ -419,15 +443,15 @@ export function buildThor() {
   for (let i = 0; i < 7; i++) { const a = (i / 6 - 0.5) * 2.0; strands.push({ geo: capsuleGeo(0.022, 0.2, 3, 6), pos: [Math.sin(a) * hr * 0.95, H.y0 - hr * 0.5 - 0.02 * Math.abs(a), -Math.cos(a) * hr * 0.9], rot: [0.12, 0, -Math.sin(a) * 0.15], scale: [1.3, 1.1 - Math.abs(a) * 0.15, 1] }); }
   P(model, hj, mergeParts('thorstrands' + hr, strands), hair, {});
   P(model, hj, sphereGeo(1, 12, 8), hair, { pos: [0, H.y0 - hr * 0.7, hr * 0.42], scale: [hr * 0.55, hr * 0.3, hr * 0.45] }); // beard
-  const eyeM = std(0x7fb8ff, { emissive: 0x4aa0ff, emissiveIntensity: 0.9 });
-  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.26, hr * 0.1, hr * 0.06), eyeM, { pos: [s * hr * 0.38, H.y0 + hr * 0.06, hr * 0.9], rot: [0, s * 0.25, 0], cast: false });
+  addFace(model, H, { tex: { skin: '#e0b090', iris: '#5aa0e8', brow: '#a8802c', lip: '#a8564e', mood: 'smirk', stubble: 0.5 }, skin });
+  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.5, hr * 0.07, hr * 0.12), hair, { pos: [s * hr * 0.4, H.y0 + hr * 0.27, hr * 0.86], rot: [0.0, s * 0.25, -s * 0.12] }); // brow ridge
   // shoulder cape clasps
   for (const s of [1, -1]) P(model, cj, sphereGeo(0.032, 8, 6), silver, { pos: [s * 0.2 * k, 0.35 * k, -0.02 * k] });
 
   // ---- cape: one cloth mesh driven by a lagged chain
   const R = 9, C = 4, capeLen = 1.1 * k, capeW0 = 0.46 * k, capeW1 = 0.8 * k;
   const cgeo = new THREE.PlaneGeometry(1, 1, C, R);
-  const cmat = std(0xa4121b, { roughness: 0.82, side: THREE.DoubleSide, metalness: 0.0 });
+  const cmat = std(0xa4121b, { roughness: 0.8, side: THREE.DoubleSide, metalness: 0.0, normalMap: fabricNormal(10, 0.5, 'capefab'), normalScale: new V2(0.6, 0.6) });
   const cape = new THREE.Mesh(cgeo, cmat); cape.frustumCulled = false; cape.castShadow = true;
   cj.add(cape); model.parts.push(cape); cape.userData.mat = cmat;
   const ang = new Float32Array(R + 1).fill(0.15), rol = new Float32Array(R + 1);
@@ -481,6 +505,13 @@ export function buildThor() {
   const loop = new THREE.Mesh(G('hammerloop', () => new THREE.TorusGeometry(0.035, 0.007, 6, 12)), strap); loop.position.set(0, -0.27, 0); hammer.add(loop);
   hammer.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
   const hw = 0.82;
+  let spinA = 0, spinK = 0;
+  model.hammerSpin = false;
+  addHook(model, (c) => { // hammer twirl while summoning (cast) or on demand
+    const want = model.hammerAttached && (model.hammerSpin || c.st === 'cast') ? 1 : 0;
+    spinK += (want - spinK) * (1 - Math.exp(-10 * c.dt));
+    if (spinK > 0.02) { spinA += c.dt * 16 * spinK; hammer.rotation.set(Math.PI - 0.15, spinA, 0.1); } else if (spinK > 0 && model.hammerAttached) place();
+  });
   const grip = { pos: new V3(0, -0.2 * hw, 0.0), rot: new THREE.Euler(Math.PI - 0.15, 0, 0.1) };
   const place = () => { hammer.position.copy(grip.pos); hammer.rotation.copy(grip.rot); hammer.scale.setScalar(hw); };
   model.handR.add(hammer); place();
@@ -503,7 +534,8 @@ export function buildVenom() {
   const dims = makeDims(1.3, { headR: 0.165, neck: 0.14 });
   const rig = buildRig(dims, 1.05);
   const model = new ProcModel('venom', rig, { prof: { stance: 'hulk', cadence: 0.82, stride: 1.05, armSwing: 1.1, lean: 1.35, bob: 1.6, flipDodge: false, wide: 0.1, tempo: 0.95 } });
-  const sym = symMat({ id: 'venom', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16 });
+  const vn = grainNormal('venom', 9, 3.2);
+  const sym = symMat({ id: 'venom', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16, normalMap: vn, normalScale: 0.9 });
   const info = buildBody(model, {
     mats: { default: sym },
     torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
@@ -532,6 +564,10 @@ export function buildVenom() {
     teeth.push({ geo: coneGeo(0.011, sz * 1.5, 5), pos: [x, yL + sz * 0.5, z * 0.97 + 0.0], rot: [-0.1, -phi, 0] });
   }
   P(model, hj, mergeParts('venomteeth', teeth), std(0xf2efe4, { roughness: 0.35 }), { cast: false });
+  // inner teeth row + gum ridge
+  const t2 = [];
+  for (let i = 0; i < 9; i++) { const u = i / 8 * 2 - 1, phi = u * 0.85; t2.push({ geo: coneGeo(0.008, 0.03, 4), pos: [Math.sin(phi) * hr * H.sx * 0.86, H.y0 - hr * 0.42 + u * u * hr * 0.15, Math.cos(phi) * hr * H.sz * 0.82], rot: [Math.PI + 0.15, -phi, 0] }); }
+  P(model, hj, mergeParts('venomteeth2', t2), std(0xe4e0d0, { roughness: 0.4 }), { cast: false });
   // tongue
   const tongueMat = std(0xb01020, { roughness: 0.35, emissive: 0x300004, emissiveIntensity: 0.4 });
   const tongue = new Tendril({ segs: 14, radial: 6, r0: 0.026, r1: 0.007, material: tongueMat, ref: new V3(0, 1, 0) });
@@ -559,7 +595,7 @@ export function buildVenom() {
   P(model, model.j[J.CH], curvedPlane(0.34 * k, 0.34 * k, cr.rx, cr.rz, 0.006), embM, { pos: [0, 0.2 * k, 0], cast: false });
   // back tendrils
   const tends = [];
-  const tm = symMat({ id: 'venomt', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16 });
+  const tm = symMat({ id: 'venomt', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16, normalMap: vn, normalScale: 0.9 });
   const roots = [[0.14, 0.3, -0.12, 0.9, 0.45, -0.7], [-0.14, 0.3, -0.12, -0.9, 0.45, -0.7], [0.08, 0.15, -0.14, 0.7, 0.0, -1.0], [-0.08, 0.15, -0.14, -0.7, 0.0, -1.0], [0.0, 0.34, -0.12, 0.0, 0.7, -0.8]];
   roots.forEach((r, i) => {
     const t = new Tendril({ segs: 16, radial: 6, r0: 0.075 * k * 0.8, r1: 0.014, material: tm, ref: new V3(0, 1, 0) });
@@ -600,8 +636,9 @@ export function buildGoon(opts = {}) {
   const dims = makeDims(kk * 0.96, { headR: 0.108 });
   const rig = buildRig(dims, 1.05);
   const model = new ProcModel('goon', rig, { prof: { stance: 'thug', cadence: 0.95, stride: 0.95, armSwing: 0.9, lean: 1.1, flipDodge: false } });
-  const top = std(st.top, { roughness: 0.85 }), top2 = std(st.top2, { roughness: 0.85 });
-  const legs = std(st.legs, { roughness: 0.85 }), shoes = std(st.shoes, { roughness: 0.6 }), skin = std(st.skin, { roughness: 0.7 });
+  const fn = fabricNormal(6, 0.55, 'goonfab'), fnS = new V2(0.7, 0.7);
+  const top = std(st.top, { roughness: 0.85, normalMap: fn, normalScale: fnS }), top2 = std(st.top2, { roughness: 0.85, normalMap: fn, normalScale: fnS });
+  const legs = std(st.legs, { roughness: 0.85, normalMap: fn, normalScale: fnS }), shoes = std(st.shoes, { roughness: 0.6, normalMap: grainNormal('leather', 5, 2.4), normalScale: fnS }), skin = std(st.skin, { roughness: 0.7 });
   const sym = symMat({ id: 'goon', rim: 0x4a3aff, rimK: 0.7 });
   const info = buildBody(model, {
     mats: { default: top, chest: top, abdomen: top2, pelvis: legs, neck: skin, head: skin, shoulder: top, upperArm: top, foreArm: top2, hand: skin, thigh: legs, shin: legs, foot: shoes },
@@ -617,6 +654,8 @@ export function buildGoon(opts = {}) {
   if (st.hat === 'beanie') P(model, hj, G('goonbeanie', () => new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5)), hatM, { pos: [0, H.y0 + hr * 0.25, 0], scale: [hr * 1.08, hr * 1.0, hr * 1.1] });
   else if (st.hat === 'hair') P(model, hj, G('goonhair', () => new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.42)), hatM, { pos: [0, H.y0 + hr * 0.3, -hr * 0.05], scale: [hr * 1.04, hr * 1.0, hr * 1.08] });
   else P(model, hj, G('goonhood', () => new THREE.SphereGeometry(1, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.72)), hatM, { pos: [0, H.y0 + hr * 0.12, -hr * 0.12], scale: [hr * 1.18, hr * 1.2, hr * 1.2] });
+  // jaw / nose / ears + brow (symbiote-bright eyes stay)
+  addFace(model, H, { tex: { skin: '#' + st.skin.toString(16).padStart(6, '0'), eyes: false, brows: true, brow: '#1a120c', mood: 'angry', stubble: 0.6 }, skin });
   // glowing eyes
   const eyeM = glow(0xf4f8ff, 2.6);
   addEyes(model, H, 'goon', eyeM, null, { grow: 1.5, dy: 0.02, lift: 0.007, depth: 0.004 });
@@ -644,12 +683,13 @@ export function buildGoon(opts = {}) {
 export function buildHunter() {
   const dims = makeDims(0.99, { headR: 0.108 });
   const rig = buildRig(dims, 1.05);
-  const model = new ProcModel('hunter', rig, { prof: { stance: 'rifle', cadence: 1.0, stride: 1.0, armSwing: 0.4, lean: 1.0, flipDodge: false, shoot: 'rifle' } });
-  const camo = std(0xffffff, { map: camoTexture(), roughness: 0.9 });
-  const khaki = std(0x8b7d56, { roughness: 0.9 });
+  const model = new ProcModel('hunter', rig, { prof: { stance: 'rifle', cadence: 1.0, stride: 1.0, armSwing: 0.4, lean: 1.0, flipDodge: false, shoot: 'rifle', aimStyle: 'gun' } });
+  const hn = fabricNormal(6, 0.55, 'hunfab'), hnS = new V2(0.8, 0.8);
+  const camo = std(0xffffff, { map: camoTexture(), roughness: 0.9, normalMap: hn, normalScale: hnS });
+  const khaki = std(0x8b7d56, { roughness: 0.9, normalMap: hn, normalScale: hnS });
   const leo = std(0xffffff, { map: leopardTexture(), roughness: 0.85 });
   const dk = std(0x2b2a22, { roughness: 0.9 });
-  const leather = std(0x3b2b1c, { roughness: 0.8 });
+  const leather = std(0x3b2b1c, { roughness: 0.75, normalMap: grainNormal('leather', 5, 2.4), normalScale: hnS });
   const skin = std(0xc89c78, { roughness: 0.7 });
   const info = buildBody(model, {
     mats: { default: khaki, chest: khaki, abdomen: khaki, pelvis: camo, neck: skin, head: dk, shoulder: khaki, upperArm: khaki, foreArm: khaki, hand: leather, thigh: camo, shin: camo, foot: leather },

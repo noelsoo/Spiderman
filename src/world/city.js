@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { Bucket, WHITE } from './geo.js';
 import { STYLES } from './materials.js';
+import { planShops, buildShops } from './shops.js';
+import { buildLamps, buildStreetProps, buildSigns, fireEscape, roofExtras, TrafficLights } from './props.js';
 
 export const L = {
   PX: 100, PZ: 70, BW: 78, BD: 54, COLS: 10, ROWS: 17,
@@ -118,6 +120,7 @@ function decorateRoof(ctx, rng, x0, z0, x1, z1, y, o) {
       ctx.glow.boxAll(px - 0.3, y + hh, pz - 0.3, px + 0.3, y + hh + 0.6, pz + 0.3, 1, [5, 0.25, 0.15]);
     }
   }
+  roofExtras(ctx, ctx.rng2, x0, z0, x1, z1, y, !!o.antenna);
 }
 
 function snap3(v) { return Math.floor(v / 3) * 3; }
@@ -209,8 +212,9 @@ function emitBuilding(ctx, rng, s, idx) {
   const b0 = s.tiers[0];
   if (s.h > 9) {
     const sf = ctx.chunks.bucket(s.x, s.z, 'storefront');
-    sf.walls(b0.x0 - 0.15, 0, b0.z0 - 0.15, b0.x1 + 0.15, 4.8, b0.z1 + 0.15, 12, 4.8, Math.floor(rng() * 4) / 4, WHITE);
+    sf.walls(b0.x0 - 0.15, 0, b0.z0 - 0.15, b0.x1 + 0.15, 4.8, b0.z1 + 0.15, 24, 4.8, Math.floor(rng() * 6) / 6, WHITE);
   }
+  if (ctx.detail && (s.style === 'brownstone' || s.style === 'redbrick') && s.h < 62 && ctx.rng2() < 0.55) fireEscape(ctx, ctx.rng2, s);
   if (s.noProps) return;
   const top = s.tiers[s.tiers.length - 1];
   const low = s.h < 90;
@@ -298,10 +302,19 @@ export function buildCity(ctx) {
 
   specs.forEach((s, idx) => emitBuilding(ctx, rng, s, idx));
 
-  // sidewalk slabs, park, lamps, trees
+  // weapon shops (street-level facade spots), then sidewalks, park, lamps, trees
+  const shops = planShops(ctx, specs, spawn);
+  ctx.shops = shops;
+  ctx.shopMats = buildShops(ctx, shops, ctx.group, ctx.quality);
   for (let i = 0; i < L.COLS; i++) for (let j = 0; j < L.ROWS; j++) buildBlockBase(ctx, rng, i, j);
   buildPromenade(ctx);
   buildMarkings(ctx);
+  buildRoadDetail(ctx);
+  // street-level detail (own rng stream so the base layout never shifts)
+  buildLamps(ctx, ctx.group, ctx.quality);
+  ctx.trafficLights = new TrafficLights(ctx, ctx.group, ctx.quality);
+  buildStreetProps(ctx, shops, ctx.quality);
+  ctx.signs = buildSigns(ctx, specs, ctx.group, ctx.quality);
 
   const buildings = specs.map((s) => ({
     x: +s.x.toFixed(1), z: +s.z.toFixed(1), w: +s.w.toFixed(1), d: +s.d.toFixed(1), h: Math.round(s.h),
@@ -331,6 +344,12 @@ function buildBlockBase(ctx, rng, i, j) {
     }
   } else {
     sw.boxAll(x0, 0, z0, x1, 0.15, z1, 6, WHITE);
+  }
+  // lighter curb lip along the road edge
+  if (ctx.detail) {
+    const lip = [1.25, 1.24, 1.2], t = 0.32;
+    sw.top(x0, z0, x1, z0 + t, 0.165, 6, lip); sw.top(x0, z1 - t, x1, z1, 0.165, 6, lip);
+    sw.top(x0, z0 + t, x0 + t, z1 - t, 0.165, 6, lip); sw.top(x1 - t, z0 + t, x1, z1 - t, 0.165, 6, lip);
   }
   // street trees along avenue-facing sidewalks
   const step = ctx.quality === 'high' ? 14 : ctx.quality === 'medium' ? 24 : 0;
@@ -394,6 +413,36 @@ function buildMarkings(ctx) {
         for (let z = zs - 7; z <= zs + 7; z += 2.2) b.top(xc - 1.5, z - 0.45, xc + 1.5, z + 0.45, Y, 4, WHT);
       }
     }
+  }
+}
+
+function buildRoadDetail(ctx) {
+  const rng = ctx.rng2, Y = 0.036;
+  const mk = (x, z) => ctx.chunks.bucket(x, z, 'markings');
+  const HOLE = [0.07, 0.07, 0.08], RING = [0.2, 0.2, 0.21], WHT2 = [0.88, 0.88, 0.84];
+  // stop lines before every crosswalk
+  for (let s = 0; s < 18; s++) {
+    const zs = streetZ(s);
+    for (let a = 0; a < 11; a++) {
+      const ax = avenueX(a), b = mk(ax, zs);
+      b.top(ax - 10.6, zs - 12.5, ax - 0.7, zs - 11.9, Y, 4, WHT2);   // +z traffic (west half)
+      b.top(ax + 0.7, zs + 11.9, ax + 10.6, zs + 12.5, Y, 4, WHT2);  // -z traffic (east half)
+      if (a > 0) b.top(ax - 15.5, zs + 0.7, ax - 14.9, zs + 7.4, Y, 4, WHT2);   // +x traffic
+      if (a < 10) b.top(ax + 14.9, zs - 7.4, ax + 15.5, zs - 0.7, Y, 4, WHT2);  // -x traffic
+    }
+  }
+  // manhole covers and utility plates
+  const nMan = ctx.quality === 'low' ? 60 : 260;
+  for (let i = 0; i < nMan; i++) {
+    let x, z;
+    if (rng() < 0.6) { x = avenueX((rng() * 11) | 0) + (rng() < 0.5 ? -1 : 1) * (2.75 + (rng() < 0.5 ? 0 : 5.5)) + (rng() - 0.5) * 1.5; z = L.MINZ + 20 + rng() * (L.MAXZ - L.MINZ - 40); }
+    else { z = streetZ((rng() * 18) | 0) + (rng() < 0.5 ? -4 : 4) + (rng() - 0.5); x = L.RIVER_X + 40 + rng() * (L.MAXX - L.RIVER_X - 80); }
+    // keep them out of the intersections
+    const inA = Math.abs(((x + 400) % 100 + 100) % 100 - 50) > 39, inS = Math.abs(((z + 595) % 70 + 70) % 70 - 35) > 27;
+    if (inA && inS) continue;
+    const b = mk(x, z);
+    b.disc(x, z, 0.62, Y + 0.002, 10, RING); b.disc(x, z, 0.5, Y + 0.004, 10, HOLE);
+    b.top(x - 0.4, z - 0.04, x + 0.4, z + 0.04, Y + 0.006, 4, RING); b.top(x - 0.04, z - 0.4, x + 0.04, z + 0.4, Y + 0.006, 4, RING);
   }
 }
 

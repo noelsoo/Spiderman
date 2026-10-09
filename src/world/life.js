@@ -6,7 +6,7 @@ import { avenueX, streetZ } from './city.js';
 const _o = new THREE.Object3D();
 const _c = new THREE.Color();
 
-export function makeTreesAndLamps(ctx, group) {
+export function makeTrees(ctx, group) {
   const all = ctx.trees;
   const makeSet = (trees, detail) => {
     if (!trees.length) return;
@@ -27,20 +27,6 @@ export function makeTreesAndLamps(ctx, group) {
   };
   makeSet(all.filter((t) => t[4]), 1);
   makeSet(all.filter((t) => !t[4]), 0);
-  if (ctx.lamps.length) {
-    const poleG = new THREE.CylinderGeometry(0.09, 0.14, 8.6, 5); poleG.translate(0, 4.3, 0);
-    const poles = new THREE.InstancedMesh(poleG, new THREE.MeshLambertMaterial({ color: 0x25282a }), ctx.lamps.length);
-    const headG = new THREE.BoxGeometry(0.5, 0.18, 1.1);
-    const heads = new THREE.InstancedMesh(headG, new THREE.MeshBasicMaterial({ color: new THREE.Color(3.4, 2.4, 1.2) }), ctx.lamps.length);
-    ctx.lamps.forEach(([x, z, dx, dz], i) => {
-      _o.position.set(x, 0, z); _o.rotation.set(0, 0, 0); _o.scale.setScalar(1); _o.updateMatrix();
-      poles.setMatrixAt(i, _o.matrix);
-      _o.position.set(x + dx * 0.9, 8.5, z + dz * 0.9); _o.rotation.set(0, Math.atan2(dx, dz), 0); _o.updateMatrix();
-      heads.setMatrixAt(i, _o.matrix);
-    });
-    poles.castShadow = false;
-    group.add(poles, heads);
-  }
 }
 
 export class Clouds {

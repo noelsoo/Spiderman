@@ -84,6 +84,7 @@ export class CaptainAmerica extends Hero {
     if (this.proj) { this.proj.remove?.(); this._dropProj(); }
     this.shieldOut = false; this.proj = null; this.fl = null;
     this.blocking = false; this.holding = false; this.mode = 'normal'; this.gravityScale = 1;
+    this._xhair(g, null);
     if (this.blockMesh) { this.blockMesh.visible = false; this.blockMesh.parent?.remove(this.blockMesh); }
     if (this.thrownMesh) this.thrownMesh.parent?.remove(this.thrownMesh);
     this.heldVisible = false; this._setHeld(true);
@@ -212,12 +213,14 @@ export class CaptainAmerica extends Hero {
           this.chargeFx -= dt;
           if (this.chargeFx <= 0) { this.chargeFx = 0.12; g.fx?.burst?.(this._handPos(_c).clone(), f >= 1 ? GOLD : 0x9fc8ff, 3, 3, 0.3, 0.15); g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.1), 2.5 - f * 1.5, 0x9fc8ff, 0.2); if (f >= 1) rumble(g, 0.1, 0.4, 60); }
           g.cam.shake(0.01 + f * 0.03);
-          g.cam.requestAim?.({ fov: 50, distance: 2.4, shoulder: 0.85, height: 1.6 });
+          g.cam.requestAim?.({ fov: 50 - f * 8, distance: 2.4, shoulder: 0.85, height: 1.6 });
+          this._xhair(g, 'shield');
         }
         if (!input.down('special')) { const c = this.throwHold; this.holding = false; this.throwHold = 0; this._throw(c); }
       }
     } else if (this.holding && !free) { this.holding = false; this.throwHold = 0; }
 
+    if (!this.holding || this.throwHold <= CHARGE_MIN) this._xhair(g, null);
     if (input.pressed('attack') && !this.blocking) {
       if (free && !this.holding) this._combo();
       else if (normal) this.bufferT = 0.3;
@@ -238,6 +241,7 @@ export class CaptainAmerica extends Hero {
   }
 
   defaultMovement() {}
+  _xhair(g, k) { if (this._xh !== k) { this._xh = k; g.hud?.setCrosshair?.(k); } }
 
   _blockVisual() {
     if (!this.blockMesh) return;

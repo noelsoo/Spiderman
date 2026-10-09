@@ -5,17 +5,21 @@
 //   buildCharacter(id, opts) -> CharacterModel
 //     { id, group, height, handR, handL, chest, head, footL, footR, update(dt, anim, entity), setVariant(name),
 //       customRotation, setTint(color, amount), dispose(),
-//       + thrusters[] (ironman), hammer/detachHammer()/attachHammer() (thor), muzzle (hunter) }
+//       + thrusters[] (ironman), hammer/detachHammer()/attachHammer() (thor), muzzle (hunter/cop),
+//       setClaws(bool) (wolverine), shield/detachShield()/attachShield()/shieldAttached (captain), bow/arrow/handR (hawkeye), setHexGlow(0..1) (scarlet) }
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { buildSpiderMan, buildIronMan, buildHulk, buildThor, buildVenom, buildGoon, buildHunter } from './characters.js';
+import { buildWolverine, buildCaptain, buildHawkeye, buildScarlet } from './heroes2.js';
+import { buildCivilian, buildCop } from './people.js';
 
-export const MODEL_IDS = ['spiderman', 'ironman', 'hulk', 'thor', 'venom', 'goon', 'hunter'];
-const TARGET_HEIGHT = { spiderman: 1.78, ironman: 1.88, hulk: 2.7, thor: 1.95, venom: 2.6, goon: 1.8, hunter: 1.85 };
+export const MODEL_IDS = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'goon', 'hunter', 'civilian', 'cop'];
+const TARGET_HEIGHT = { spiderman: 1.78, ironman: 1.88, hulk: 2.7, thor: 1.95, venom: 2.6, goon: 1.8, hunter: 1.85, wolverine: 1.65, captain: 1.88, hawkeye: 1.85, scarlet: 1.75, civilian: 1.75, cop: 1.82 };
 
 const glbs = new Map(); // id -> gltf
-const BUILDERS = { spiderman: buildSpiderMan, ironman: buildIronMan, hulk: buildHulk, thor: buildThor, venom: buildVenom, goon: buildGoon, hunter: buildHunter };
+const BUILDERS = { spiderman: buildSpiderMan, ironman: buildIronMan, hulk: buildHulk, thor: buildThor, venom: buildVenom, goon: buildGoon, hunter: buildHunter,
+  wolverine: buildWolverine, captain: buildCaptain, hawkeye: buildHawkeye, scarlet: buildScarlet, civilian: buildCivilian, cop: buildCop };
 
 // ------------------------------------------------------------------ preload (optional GLB overrides)
 /**
@@ -71,7 +75,7 @@ const CLIP_HINTS = {
   punch1: ['punch1', 'punch', 'jab', 'attack', 'hit'], punch2: ['punch2', 'hook', 'punch', 'attack'], punch3: ['punch3', 'cross', 'punch', 'attack'],
   kick: ['kick', 'attack'], uppercut: ['uppercut', 'punch', 'attack'], throw: ['throw', 'toss', 'attack'], shoot: ['shoot', 'fire', 'aim', 'attack'],
   smash: ['smash', 'slam', 'attack'], charge: ['charge', 'run', 'sprint'], cast: ['cast', 'spell', 'power', 'attack'], stunned: ['stun', 'hurt', 'dizzy', 'hit'],
-  dead: ['death', 'dead', 'die'],
+  dead: ['death', 'dead', 'die'], aim: ['aim', 'shoot', 'fire', 'idle'], block: ['block', 'guard', 'idle'],
 };
 const ONE_SHOT = new Set(['land', 'dodge', 'punch1', 'punch2', 'punch3', 'kick', 'uppercut', 'throw', 'shoot', 'smash', 'cast', 'dead']);
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');

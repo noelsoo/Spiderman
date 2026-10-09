@@ -32,11 +32,11 @@ export function laneFixed(A, S, dir, lane) {
 }
 
 // ------------------------------------------------------------------ traffic signals (global clock, per-intersection offset)
-const CYCLE = 24;
+const CYCLE = 26.4;
 export function signal(A, S, dir, t) {
   const u = (t + ((A * 7 + S * 13) % 11) * 2.1) % CYCLE;
   const zAxis = axisZ(dir);
-  const ph = u < 11 ? 0 : u < 12 ? 1 : u < 13.4 ? 2 : u < 19.4 ? 3 : u < 21 ? 4 : 5; // 0 avenue green,1 avenue yellow,2 all red,3 street green,4 street yellow,5 all red
+  const ph = u < 10 ? 0 : u < 11.8 ? 1 : u < 15.2 ? 2 : u < 21.2 ? 3 : u < 23 ? 4 : 5; // 0 avenue green,1 avenue yellow,2 all red,3 street green,4 street yellow,5 all red
   if (zAxis) return ph === 0 ? 'g' : ph === 1 ? 'y' : 'r';
   return ph === 3 ? 'g' : ph === 4 ? 'y' : 'r';
 }
@@ -140,7 +140,7 @@ export function initAI(v, p, cruise) {
     A: p.A, S: p.S, dir: p.dir, lane: p.lane, cruise: cruise ?? (axisZ(p.dir) ? rnd(11, 17) : rnd(8, 12.5)),
     wp: [], wpi: 0, planned: false, newDir: p.dir, newLane: p.lane, turning: false,
     vDes: 8, thinkT: Math.random() * 0.2, stuckT: 0, rev: 0, revSteer: 0, swerve: 0, swerveT: 0, blockedT: 0,
-    direct: false, tx: 0, tz: 0, fleeing: false, lastSteer: 0, honkCd: 0, pedBlock: 0,
+    direct: false, tx: 0, tz: 0, fleeing: false, ghostT: 0, lastSteer: 0, honkCd: 0, pedBlock: 0,
   };
 }
 
@@ -193,7 +193,7 @@ function plan(v, mgr) {
   if (turning) {
     const dot = r2[0] * d[0] + r2[1] * d[1];
     const Q = [Cx + r[0] * offOld + d[0] * dot * offNew, Cz + r[1] * offOld + d[1] * dot * offNew];
-    for (const u of [0.2, 0.4, 0.6, 0.8]) {
+    for (const u of [0.15, 0.3, 0.45, 0.6, 0.75, 0.9]) {
       const a = (1 - u) * (1 - u), b = 2 * (1 - u) * u, c = u * u;
       wp.push([a * P0[0] + b * Q[0] + c * P3[0], a * P0[1] + b * Q[1] + c * P3[1]]);
     }
@@ -202,7 +202,7 @@ function plan(v, mgr) {
   ai.wp = wp; ai.wpi = 0; ai.planned = true; ai.newDir = d2; ai.newLane = newLane; ai.turning = turning;
 }
 
-const _o = [];
+const _o = [], _o2 = [];
 function think(v, mgr, dt) {
   const ai = v.ai, sp = v.speed;
   const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw), rx = -fz, rz = fx;
@@ -222,18 +222,34 @@ function think(v, mgr, dt) {
       if (sig === 'r' || (sig === 'y' && dStop > stopDist + 2)) vDes = Math.min(vDes, Math.sqrt(2 * 4.5 * Math.max(0, dStop - 0.6)));
     }
   }
+  // left turns yield to oncoming traffic
+  if (ai.planned && ai.turning && ai.wpi === 0 && ai.newDir === ((ai.dir + 1) & 3) && dAl - E < 6) {
+    const Cx = nodeX(ai.A), Cz = nodeZ(ai.S);
+    const oc = mgr.queryCars(Cx, Cz, 42, _o2);
+    for (let i = 0; i < oc.length; i++) {
+      const c = oc[i];
+      if (c === v || !c.active || Math.abs(c.speed) < 1.5) continue;
+      if (Math.sin(c.yaw) * fx + Math.cos(c.yaw) * fz > -0.7) continue;
+      const along = (c.pos.x - Cx) * fx + (c.pos.z - Cz) * fz;
+      const cross = Math.abs((c.pos.x - Cx) * rx + (c.pos.z - Cz) * rz);
+      if (along > -4 && along < 14 + Math.abs(c.speed) * 1.8 && cross < 12) { vDes = Math.min(vDes, Math.max(0, (dAl - E - 0.5)) * 1.2); break; }
+    }
+  }
   if (ai.planned && ai.turning) {
-    if (ai.wpi === 0) vDes = Math.min(vDes, 5.5 + Math.max(0, dAl - E) * 0.45);
-    else vDes = Math.min(vDes, 6.5);
+    if (ai.wpi === 0) vDes = Math.min(vDes, 6.5 + Math.max(0, dAl - E) * 0.45);
+    else vDes = Math.min(vDes, 7.5);
   }
 
   // leader / cross traffic
   const look = 7 + Math.abs(sp) * 1.5;
-  let gap = 1e9, vL = 0;
+  let gap = 1e9, vL = 0, gapLon = 0;
   const cars = mgr.queryCars(v.pos.x + fx * look * 0.5, v.pos.z + fz * look * 0.5, look * 0.65 + 4, _o);
   for (let i = 0; i < cars.length; i++) {
     const c = cars[i];
-    if (c === v || !c.active || c.thrown || c.held) continue;
+    if (c === v || !c.active || c.thrown || c.held || ai.ghostT > 0) continue;
+    // only cars that travel my way (or obstacles that don't move on their own) count; cross traffic is the signals' job
+    const same = Math.sin(c.yaw) * fx + Math.cos(c.yaw) * fz;
+    if (same < 0.45 && c.driver !== 'player' && !c.wrecked && !(c.driver === null && !c.asleep) && !(Math.abs(c.speed) < 0.5 && c.driver !== 'ai' && !c.parked)) continue;
     const dx = c.pos.x - v.pos.x, dz = c.pos.z - v.pos.z;
     const lon = dx * fx + dz * fz;
     if (lon < 0.5 || lon > look + c.spec.L) continue;
@@ -244,13 +260,17 @@ function think(v, mgr, dt) {
     const ext = Math.abs(cfx * rx + cfz * rz) * c.spec.L * 0.5 + Math.abs(cfx * fx + cfz * fz) * c.spec.W * 0.5;
     if (Math.abs(lat) > w - c.spec.W * 0.5 + Math.max(ext, 0.5) - 0.1 + 0.15) continue;
     const g = lon - v.spec.L * 0.5 - Math.abs(cfx * fx + cfz * fz) * c.spec.L * 0.5 - Math.abs(cfx * rx + cfz * rz) * c.spec.W * 0.5;
-    if (g < gap) { gap = g; vL = c.vel.x * fx + c.vel.z * fz; }
+    if (g < gap) { gap = g; vL = c.vel.x * fx + c.vel.z * fz; gapLon = lon; }
   }
   if (gap < 1e8) {
     if (gap < 2.2) vDes = Math.min(vDes, Math.max(0, vL - 1));
     else vDes = Math.min(vDes, Math.max(0, vL + (gap - 3.6) * 0.9));
+    // don't block the box: hold at the stop line while the queue ahead sits in / right behind the intersection
+    if (ai.planned && ai.wpi === 0 && vL < 2 && gapLon < dAl + 22 && gapLon > dAl - E - 2) vDes = Math.min(vDes, Math.sqrt(2 * 4.5 * Math.max(0, dAl - E - 0.8)));
     if (gap < 5 && vL < 1) ai.blockedT += dt; else ai.blockedT = Math.max(0, ai.blockedT - dt);
   } else ai.blockedT = Math.max(0, ai.blockedT - dt);
+  if (ai.ghostT > 0) ai.ghostT -= dt;
+  else if (ai.blockedT > 9) { ai.ghostT = 4; ai.blockedT = 0; }
 
   // pedestrians (and the on-foot player)
   const peds = mgr.game.peds?.list;
@@ -322,7 +342,7 @@ export function driveAI(v, mgr, dt) {
     const w = ai.wp[ai.wpi];
     tx = w[0]; tz = w[1];
     const dx = tx - v.pos.x, dz = tz - v.pos.z, d = Math.hypot(dx, dz);
-    const reach = 2.4 + Math.max(0, sp) * 0.22;
+    const reach = 1.7 + Math.max(0, sp) * 0.1;
     if (d < reach || (dx * fx + dz * fz < 0 && d < 9)) {
       ai.wpi++;
       if (ai.wpi >= ai.wp.length) { // intersection crossed: now on the new road

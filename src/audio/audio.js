@@ -89,6 +89,16 @@ export class AudioEngine {
       const d = buf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.noiseBuf = buf;
+      // city reverb (generated impulse response) + urban-canyon slapback echo, both fed by per-sound sends
+      this.verbIn = ctx.createGain();
+      const verb = ctx.createConvolver(); verb.buffer = makeIR(ctx, 2.8, 3.2);
+      const verbOut = ctx.createGain(); verbOut.gain.value = 0.8;
+      this.verbIn.connect(verb); verb.connect(verbOut); verbOut.connect(this.sfxBus);
+      this.slapIn = ctx.createGain();
+      const dl = ctx.createDelay(1); dl.delayTime.value = 0.13;
+      const fb = ctx.createGain(); fb.gain.value = 0.3;
+      const slp = ctx.createBiquadFilter(); slp.type = 'lowpass'; slp.frequency.value = 2600;
+      this.slapIn.connect(dl); dl.connect(slp); slp.connect(fb); fb.connect(dl); slp.connect(this.sfxBus);
       this.ok = true;
       this._applyVolumes(true);
     } catch { this.ok = false; }
@@ -150,12 +160,21 @@ export class AudioEngine {
       const out = ctx.createGain();
       out.gain.value = vol;
       let tail = out;
-      if (ctx.createStereoPanner && pan !== 0) { const sp = ctx.createStereoPanner(); sp.pan.value = pan; out.connect(sp); tail = sp; }
+      const nodes = [out];
+      if (opts.pos && this.game.camera) { // far sounds are duller
+        const dist = this.game.camera.position.distanceTo(opts.pos);
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(700, 16000 / (1 + dist / 22));
+        out.connect(lp); tail = lp; nodes.push(lp);
+      }
+      if (ctx.createStereoPanner && pan !== 0) { const sp = ctx.createStereoPanner(); sp.pan.value = pan; tail.connect(sp); tail = sp; nodes.push(sp); }
       tail.connect(this.sfxBus);
+      const rv = REVERB[name], sl = SLAP[name];
+      if (rv && this.verbIn) { const sg = ctx.createGain(); sg.gain.value = rv; tail.connect(sg); sg.connect(this.verbIn); nodes.push(sg); }
+      if (sl && this.slapIn) { const sg = ctx.createGain(); sg.gain.value = sl; tail.connect(sg); sg.connect(this.slapIn); nodes.push(sg); }
       const v = { ctx, out, t: now + 0.001, pitch: opts.pitch ?? 1, noise: this.noiseBuf, dest: out };
       rec(v);
-      // free the gain node after the longest sound (3 s) has surely ended
-      setTimeout(() => { try { out.disconnect(); tail.disconnect?.(); } catch { /* ignore */ } }, 3500);
+      // free the nodes after the longest sound has surely ended
+      setTimeout(() => { for (const n of nodes) { try { n.disconnect(); } catch { /* ignore */ } } }, 4500);
     } catch { /* never throw from audio */ }
   }
 
@@ -191,6 +210,7 @@ export class AudioEngine {
       const o1 = ctx.createOscillator(); o1.type = 'sawtooth';
       const o2 = ctx.createOscillator(); o2.type = 'square';
       const o3 = ctx.createOscillator(); o3.type = 'triangle';
+      const o4 = ctx.createOscillator(); o4.type = 'sawtooth'; const g4 = ctx.createGain(); g4.gain.value = 0.12; o4.connect(g4); g4.connect(shaper);
       const g1 = ctx.createGain(), g2 = ctx.createGain(), g3 = ctx.createGain();
       g1.gain.value = 0.5; g2.gain.value = 0.22; g3.gain.value = 0.5;
       // cylinder-firing wobble
@@ -204,14 +224,19 @@ export class AudioEngine {
       const nf = ctx.createBiquadFilter(); nf.type = 'lowpass'; nf.frequency.value = 500;
       const ng = ctx.createGain(); ng.gain.value = 0.0;
       n.connect(nf); nf.connect(ng); ng.connect(out);
-      [o1, o2, o3, lfo, n].forEach((x) => x.start(t));
-      e = this._eng = { out, lp, o1, o2, o3, lfo, n, nf, ng, last: 0 };
+      [o1, o2, o3, o4, lfo, n].forEach((x) => x.start(t));
+      e = this._eng = { out, lp, o1, o2, o3, o4, lfo, n, nf, ng, last: 0, rpm };
       this.play('engine_start');
     }
     const f = 34 + rpm * 96;                       // fundamental, Hz
     e.o1.frequency.setTargetAtTime(f, t, 0.05);
     e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.05);
     e.o3.frequency.setTargetAtTime(f * 2.01, t, 0.05);
+    e.o4.frequency.setTargetAtTime(f * 3.02, t, 0.05);
+    if (e.rpm - rpm > 0.18) { // upshift: brief lift-off dip and a burble
+      e.out.gain.cancelScheduledValues(t); e.out.gain.setValueAtTime(0.03, t); this.play('shift', { volume: 0.6 });
+    }
+    e.rpm = rpm;
     e.lfo.frequency.setTargetAtTime(f * 0.5, t, 0.08);
     e.lp.frequency.setTargetAtTime(260 + rpm * 700 + load * 900, t, 0.06);
     e.nf.frequency.setTargetAtTime(400 + rpm * 1800, t, 0.08);
@@ -226,7 +251,7 @@ export class AudioEngine {
     const t = this.ctx.currentTime;
     try {
       e.out.gain.cancelScheduledValues(t); e.out.gain.setTargetAtTime(0.0001, t, 0.08);
-      setTimeout(() => { try { [e.o1, e.o2, e.o3, e.lfo, e.n].forEach((x) => x.stop()); e.out.disconnect(); } catch { /* ignore */ } }, 500);
+      setTimeout(() => { try { [e.o1, e.o2, e.o3, e.o4, e.lfo, e.n].forEach((x) => x.stop()); e.out.disconnect(); } catch { /* ignore */ } }, 500);
     } catch { /* ignore */ }
   }
 
@@ -238,7 +263,7 @@ export class AudioEngine {
         const s = this._sir; if (!s) return;
         this._sir = null; const t = this.ctx.currentTime;
         s.g.gain.setTargetAtTime(0.0001, t, 0.1);
-        setTimeout(() => { try { s.o.stop(); s.lfo.stop(); s.g.disconnect(); } catch { /* ignore */ } }, 600);
+        setTimeout(() => { try { s.o.stop(); s.lfo.stop(); s.drift?.stop(); s.g.disconnect(); } catch { /* ignore */ } }, 600);
         return;
       }
       if (this._sir || !this.running) return;
@@ -246,11 +271,12 @@ export class AudioEngine {
       const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 900;
       const lfo = ctx.createOscillator(); lfo.type = 'triangle'; lfo.frequency.value = 0.55;
       const lg = ctx.createGain(); lg.gain.value = 330; lfo.connect(lg); lg.connect(o.frequency);
+      const drift = ctx.createOscillator(); drift.frequency.value = 0.13; const dg = ctx.createGain(); dg.gain.value = 60; drift.connect(dg); dg.connect(o.detune); drift.start(t); // slow pitch drift ~ Doppler
       const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
       const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.045, t, 0.15);
       o.connect(lp); lp.connect(g); g.connect(this.sfxBus);
       o.start(t); lfo.start(t);
-      this._sir = { o, lfo, g };
+      this._sir = { o, lfo, g, drift };
     } catch { /* ignore */ }
   }
 
@@ -394,6 +420,19 @@ export class AudioEngine {
   }
 }
 
+function makeIR(ctx, secs, decay) {
+  const len = Math.floor(ctx.sampleRate * secs), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c); let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const t = i / len, a = Math.pow(1 - t, decay);
+      lp += (((Math.random() * 2 - 1) * a) - lp) * (0.25 + 0.6 * (1 - t)); // darker as it decays
+      d[i] = lp * 2.2 * (i < 400 ? i / 400 : 1);
+    }
+  }
+  return buf;
+}
+
 // ---- synth primitives -----------------------------------------------------------------------
 function env(g, t, a, d, peak) {
   g.gain.setValueAtTime(0.0001, t);
@@ -516,6 +555,7 @@ const SFX = {
   empty: (v) => { noise(v, { f0: 4500, f1: 4500, q: 8, d: 0.025, v: 0.5 }); osc(v, { f0: 1500, f1: 1200, d: 0.03, v: 0.1, type: 'square' }); },
   // ---- v2: vehicles -------------------------------------------------------------------------
   engine_start: (v) => { osc(v, { f0: 55, f1: 34, d: 0.5, a: 0.02, v: 0.22, type: 'sawtooth', lp: 300 }); osc(v, { f0: 38, f1: 70, d: 0.45, a: 0.15, v: 0.2, type: 'square', lp: 260 }); noise(v, { type: 'lowpass', f0: 400, f1: 900, d: 0.5, a: 0.1, v: 0.15 }); },
+  shift: (v) => { noise(v, { type: 'lowpass', f0: 1200, f1: 300, d: 0.16, v: 0.3 }); thump(v, 90, 50, 0.08, 0.25); },
   horn: (v) => { osc(v, { f0: 392, f1: 392, d: 0.42, a: 0.01, v: 0.16, type: 'sawtooth', lp: 1800 }); osc(v, { f0: 494, f1: 494, d: 0.42, a: 0.01, v: 0.14, type: 'sawtooth', lp: 1800 }); },
   siren_blip: (v) => { osc(v, { f0: 700, f1: 1300, d: 0.4, a: 0.05, v: 0.12, type: 'square', lp: 2200 }); osc(v, { f0: 1300, f1: 700, d: 0.4, a: 0.05, v: 0.12, type: 'square', lp: 2200, at: 0.4 }); },
   siren: (v) => { SFX.siren_blip(v); },
@@ -544,6 +584,33 @@ Object.assign(SFX, {
   glass_break: SFX.glass, tyre: SFX.screech, tire: SFX.screech, steal: SFX.carjack, engine: SFX.engine_start, shield_hit: SFX.shield, shield_throw: SFX.throw,
 });
 const MIN_GAP = { horn: 0.4, screech: 0.35, siren: 0.8, siren_blip: 0.8, engine_start: 0.5, smg: 0.045, cash: 0.06, crash: 0.12, glass: 0.1, wanted: 0.5, reload: 0.3 };
+
+// ---- v2.1 realism pass: layered guns (crack + body + tail; reverb/slapback sends below), beefier impacts -------------
+const crack = (v, f = 4500, d = 0.02, vol = 0.9, at = 0) => noise(v, { type: 'highpass', f0: f, f1: f * 0.6, q: 0.7, d, a: 0.0015, v: vol, at });
+Object.assign(SFX, {
+  pistol: (v) => { crack(v, 3800, 0.022, 0.9); noise(v, { f0: 2400, f1: 700, q: 0.8, d: 0.07, v: 0.55 }); thump(v, 240, 62, 0.11, 0.7); thump(v, 120, 50, 0.16, 0.35, 0.005); noise(v, { type: 'lowpass', f0: 900, f1: 160, d: 0.28, v: 0.18, at: 0.03 }); },
+  smg: (v) => { crack(v, 4200, 0.016, 0.8); noise(v, { f0: 2800, f1: 900, q: 0.8, d: 0.045, v: 0.45 }); thump(v, 300, 90, 0.06, 0.5); },
+  shotgun: (v) => { crack(v, 3000, 0.035, 1.0); noise(v, { type: 'lowpass', f0: 4500, f1: 200, q: 0.6, d: 0.32, v: 1.0 }); thump(v, 140, 34, 0.32, 1.0); thump(v, 80, 28, 0.4, 0.6, 0.01); noise(v, { type: 'lowpass', f0: 500, f1: 80, d: 0.6, a: 0.04, v: 0.28, at: 0.05 }); },
+  rifle: (v) => { crack(v, 5200, 0.03, 1.0); noise(v, { f0: 3000, f1: 600, q: 0.7, d: 0.09, v: 0.7 }); thump(v, 190, 46, 0.18, 0.85); noise(v, { type: 'lowpass', f0: 800, f1: 110, d: 0.45, v: 0.25, at: 0.03 }); },
+  sniper: (v) => { crack(v, 6500, 0.05, 1.0); noise(v, { type: 'lowpass', f0: 6500, f1: 140, q: 0.6, d: 0.55, v: 1.0 }); thump(v, 120, 26, 0.5, 1.0); thump(v, 60, 24, 0.7, 0.6, 0.02); osc(v, { f0: 2000, f1: 380, d: 0.12, v: 0.18, type: 'sawtooth', lp: 3200 }); noise(v, { type: 'lowpass', f0: 450, f1: 60, d: 1.6, a: 0.1, v: 0.3, at: 0.12 }); },
+  rpg: (v) => { noise(v, { f0: 2400, f1: 250, q: 1, d: 0.55, a: 0.01, v: 0.7 }); thump(v, 105, 34, 0.4, 0.8); noise(v, { type: 'highpass', f0: 1500, f1: 500, d: 1.1, a: 0.12, v: 0.28, at: 0.08 }); osc(v, { f0: 90, f1: 60, d: 1.0, a: 0.1, v: 0.14, type: 'sawtooth', lp: 400, at: 0.1 }); },
+  casing: (v) => { [0, 0.07, 0.12].forEach((a, i) => osc(v, { f0: 5200 - i * 700, f1: 5000 - i * 700, d: 0.07, a: 0.001, v: 0.07 / (i + 1), type: 'triangle', at: a })); noise(v, { f0: 7000, f1: 7000, q: 8, d: 0.02, v: 0.12 }); },
+  punch: (v) => { thump(v, 170, 48, 0.15, 0.85); noise(v, { f0: 2400, f1: 700, q: 1.2, d: 0.05, v: 0.6 }); noise(v, { type: 'highpass', f0: 4000, f1: 2500, d: 0.02, v: 0.35 }); thump(v, 70, 32, 0.2, 0.5, 0.005); },
+  hit: (v) => { thump(v, 200, 55, 0.14, 0.75); noise(v, { f0: 2200, f1: 800, q: 1.5, d: 0.06, v: 0.6 }); noise(v, { type: 'highpass', f0: 4500, f1: 3000, d: 0.018, v: 0.3 }); thump(v, 80, 34, 0.18, 0.4, 0.004); },
+  heavyhit: (v) => { thump(v, 105, 28, 0.42, 1.0); thump(v, 55, 24, 0.5, 0.7, 0.01); noise(v, { type: 'lowpass', f0: 2200, f1: 100, d: 0.32, v: 0.8 }); noise(v, { type: 'highpass', f0: 3500, f1: 1800, d: 0.04, v: 0.5 }); osc(v, { f0: 700, f1: 160, d: 0.06, v: 0.2, type: 'square' }); },
+  explosion: (v) => { noise(v, { type: 'highpass', f0: 3500, f1: 900, d: 0.06, v: 0.7 }); noise(v, { type: 'lowpass', f0: 4500, f1: 55, q: 0.7, d: 1.6, v: 1.0 }); thump(v, 90, 22, 1.0, 1.0); osc(v, { f0: 48, f1: 26, d: 1.6, a: 0.01, v: 0.7, type: 'sine' }); noise(v, { f0: 700, f1: 160, d: 0.7, v: 0.35, at: 0.06 }); },
+  thwip: (v) => { noise(v, { type: 'highpass', f0: 1500, f1: 6000, q: 0.8, d: 0.02, v: 0.5 }); noise(v, { f0: 900, f1: 6500, q: 6, d: 0.11, v: 0.55 }); osc(v, { f0: 2400, f1: 480, d: 0.07, v: 0.1, type: 'square', lp: 3000 }); thump(v, 320, 120, 0.05, 0.25); },
+  repulsor: (v) => { osc(v, { f0: 300, f1: 1500, d: 0.26, v: 0.2, type: 'sawtooth', lp: 3000 }); osc(v, { f0: 700, f1: 2800, d: 0.24, v: 0.12 }); osc(v, { f0: 2400, f1: 4800, d: 0.3, v: 0.05, type: 'triangle', at: 0.02 }); noise(v, { type: 'highpass', f0: 2500, f1: 6500, d: 0.18, v: 0.15 }); thump(v, 150, 60, 0.12, 0.35); },
+  unibeam: (v) => { osc(v, { f0: 180, f1: 460, d: 1.5, a: 0.12, v: 0.22, type: 'sawtooth', lp: 1800 }); osc(v, { f0: 900, f1: 1500, d: 1.5, a: 0.1, v: 0.1 }); osc(v, { f0: 2600, f1: 3400, d: 1.5, a: 0.2, v: 0.05, type: 'triangle' }); osc(v, { f0: 60, f1: 90, d: 1.5, a: 0.15, v: 0.3, type: 'sine' }); noise(v, { type: 'highpass', f0: 3000, f1: 5500, d: 1.5, a: 0.1, v: 0.12 }); },
+  thunder: (v) => { noise(v, { type: 'highpass', f0: 3000, f1: 800, d: 0.09, v: 0.8 }); noise(v, { type: 'lowpass', f0: 420, f1: 55, q: 0.6, d: 3.2, a: 0.05, v: 1.0, at: 0.03 }); noise(v, { type: 'lowpass', f0: 260, f1: 45, d: 2.6, a: 0.4, v: 0.6, at: 0.5, rate: 0.6 }); thump(v, 70, 20, 1.6, 0.8, 0.05); osc(v, { f0: 38, f1: 24, d: 2.5, a: 0.2, v: 0.5, at: 0.2 }); },
+});
+const REVERB = { pistol: 0.35, smg: 0.22, shotgun: 0.5, rifle: 0.45, sniper: 0.8, rpg: 0.5, explosion: 0.55, thunder: 0.6, crash: 0.25, heavyhit: 0.18, smash: 0.3, hunter_shot: 0.3, unibeam: 0.2, clap: 0.35, roar: 0.2, boss_roar: 0.35, siren_blip: 0.2, glass: 0.2 };
+const SLAP = { pistol: 0.3, smg: 0.18, shotgun: 0.4, rifle: 0.4, sniper: 0.55, rpg: 0.3, explosion: 0.25, hunter_shot: 0.2 };
+Object.assign(SFX, { gunshot: SFX.pistol, gun: SFX.pistol, assault: SFX.rifle, ar: SFX.rifle, assault_rifle: SFX.rifle, grenade: SFX.rpg, grenade_launcher: SFX.rpg });
+REVERB.gunshot = REVERB.gun = REVERB.pistol; SLAP.gunshot = SLAP.gun = SLAP.pistol;
+REVERB.assault = REVERB.ar = REVERB.assault_rifle = REVERB.rifle; SLAP.assault = SLAP.ar = SLAP.assault_rifle = SLAP.rifle;
+REVERB.grenade = REVERB.grenade_launcher = REVERB.rpg; SLAP.grenade = SLAP.grenade_launcher = SLAP.rpg;
+MIN_GAP.casing = 0.05;
 
 // ---- music voices ---------------------------------------------------------------------------
 function kick(ctx, dst, t, vol) {

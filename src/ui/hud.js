@@ -172,7 +172,9 @@ export class HUD {
     r.innerHTML = `
       <div class="hud-game" data-r="game">
         <div class="vignette" data-r="vig"></div>
-        <div class="scope" data-r="scope"></div>
+        <div class="scope" data-r="scope">${SCOPE_SVG}<div class="zm" data-r="scopez">8x</div></div>
+        <div class="hitm" data-r="hitm"><i></i><i></i><i></i><i></i></div>
+        <div class="zoomi" data-r="zoomi"></div>
         <div class="xhair" data-r="xhair"></div>
         <div class="wp hidden" data-r="wp"><div class="dm"></div><div class="ds" data-r="wpd"></div></div>
         <div class="obj hidden" data-r="obj"><div class="k">OBJECTIVE</div><div class="tx" data-r="objtx"></div><div class="ds" data-r="objds"></div><div class="pg hidden" data-r="objpg"><b></b></div></div>
@@ -348,7 +350,12 @@ export class HUD {
     const xh = this.$.xhair;
     xh.className = `xhair${kind ? ` k-${kind}` : ''}`;
     xh.innerHTML = kind ? (XH[kind] || XH.pistol) : '';
-    this.$.scope.classList.toggle('on', kind === 'sniper');
+  }
+
+  /** Hit confirmation flash; red/gold and bigger on headshots. */
+  hitMarker(headshot = false) {
+    const h = this.$.hitm; h.classList.remove('on', 'hs'); void h.offsetWidth;
+    h.classList.add('on'); if (headshot) h.classList.add('hs');
   }
 
   // ------------------------------------------------------------------ glyphs
@@ -1073,12 +1080,21 @@ export class HUD {
     }
 
     // crosshair: weapon-specific via setCrosshair(), otherwise the small default ring
-    const xk = this._xk;
-    const showX = g.state === 'playing' && !driving && p.id !== 'hulk' && !this._wheelOn;
-    this.$.xhair.classList.toggle('on', showX);
-    this.$.xhair.classList.toggle('aim', !!g.weapons?.aiming);
-    this.$.scope.classList.toggle('on', xk === 'sniper' && showX);
-    this.$.game.classList.toggle('scoped', xk === 'sniper' && showX && !!g.weapons?.aiming);
+    const cam = g.cam, aimT = cam?.aimT ?? (g.weapons?.aiming ? 1 : 0);
+    const scoped = !!cam?.scoped && aimT > 0.35;
+    const showX = g.state === 'playing' && !driving && p.id !== 'hulk' && !this._wheelOn && !scoped;
+    const xh = this.$.xhair;
+    xh.classList.toggle('on', showX);
+    xh.style.transform = `scale(${(1 - 0.32 * aimT).toFixed(3)})`;
+    this.$.scope.classList.toggle('on', scoped);
+    this.$.scope.style.opacity = scoped ? Math.min(1, (aimT - 0.35) / 0.4).toFixed(2) : '';
+    this.$.game.classList.toggle('scoped', scoped);
+    if (scoped) {
+      const z = `${(70 / Math.max(1, cam.aimParams?.fov || 70)).toFixed(1).replace(/\.0$/, '')}x`;
+      if (z !== this._sig.zoom) { this._sig.zoom = z; this.$.scopez.textContent = z; }
+    }
+    const adsZoom = !scoped && aimT > 0.5 ? `${(70 / Math.max(1, cam.aimParams?.fov || 70)).toFixed(1)}x` : '';
+    if (adsZoom !== this._sig.ads) { this._sig.ads = adsZoom; this.$.zoomi.textContent = adsZoom; this.$.zoomi.classList.toggle('on', !!adsZoom && adsZoom !== '1.0x'); }
 
     // context prompt (enter / steal / exit car, shop)
     this._ctxT -= dt;
@@ -1242,6 +1258,13 @@ export class HUD {
   }
 }
 
+const SCOPE_SVG = `<svg viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet" fill="none" stroke="#000" stroke-width="0.5">
+  <circle r="62" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/><circle r="61" stroke="rgba(0,0,0,0.9)" stroke-width="2"/>
+  <path d="M-62 0H-6M6 0H62M0 -62V-6M0 6V62" stroke="#000" stroke-width="0.6"/>
+  <path d="M-62 0H-20M20 0H62M0 -62V-20M0 20V62" stroke="#000" stroke-width="1.6"/>
+  ${[-40, -30, -20, -10, 10, 20, 30, 40].map((x) => `<circle cx="${x}" cy="0" r="0.9" fill="#000" stroke="none"/><circle cx="0" cy="${x}" r="0.9" fill="#000" stroke="none"/>`).join('')}
+  <circle r="0.7" fill="#d22" stroke="none"/></svg>`;
+
 // ---- crosshairs ------------------------------------------------------------------------------
 const XS = (inner) => `<svg viewBox="-24 -24 48 48" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">${inner}</svg>`;
 const XH = {
@@ -1249,6 +1272,9 @@ const XH = {
   rifle: XS('<circle r="1.2" fill="#fff" stroke="none"/><path d="M-8 0h-12M8 0h12M0 8v12"/>'),
   shotgun: XS('<circle r="15"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M0 -15v-4M0 15v4M-15 0h-4M15 0h4"/>'),
   sniper: XS('<circle r="1.2" fill="#f33" stroke="none"/>'),
+  web: XS('<circle r="11"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M0 -11v-8M0 11v8M-11 0h-8M11 0h8M8 -8l4 -4M-8 -8l-4 -4M8 8l4 4M-8 8l-4 4" stroke-width="1.2"/>'),
+  repulsor: XS('<circle r="10"/><circle r="5"/><circle r="1.2" fill="#fff" stroke="none"/>'),
+  hex: XS('<path d="M0 -12 10.4 -6V6L0 12-10.4 6V-6z"/><circle r="1.4" fill="#fff" stroke="none"/>'),
   bow: XS('<circle r="12" stroke-dasharray="3 5"/><circle r="1.4" fill="#fff" stroke="none"/><path d="M0 -12v-7M0 12v7M-12 0h-7M12 0h7"/>'),
 };
 

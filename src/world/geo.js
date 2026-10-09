@@ -106,9 +106,9 @@ export class Bucket {
   disc(x, z, r, y, segs = 10, col = WHITE) {
     for (let i = 0; i < segs; i++) {
       const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
-      this.p.push(x, y, z, x + Math.sin(a1) * r, y, z + Math.cos(a1) * r, x + Math.sin(a0) * r, y, z + Math.cos(a0) * r);
+      this.p.push(x, y, z, x + Math.sin(a0) * r, y, z + Math.cos(a0) * r, x + Math.sin(a1) * r, y, z + Math.cos(a1) * r);
       for (let k = 0; k < 3; k++) { this.n.push(0, 1, 0); this.c.push(col[0], col[1], col[2]); }
-      this.u.push(0.5, 0.5, 0.5 + Math.sin(a1) * 0.5, 0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a0) * 0.5, 0.5 + Math.cos(a0) * 0.5);
+      this.u.push(0.5, 0.5, 0.5 + Math.sin(a0) * 0.5, 0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a1) * 0.5, 0.5 + Math.cos(a1) * 0.5);
     }
   }
 

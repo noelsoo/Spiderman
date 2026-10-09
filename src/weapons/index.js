@@ -17,6 +17,7 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 const _u = new THREE.Vector3(), _v = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
+const _e = new THREE.Euler();
 const damp = THREE.MathUtils.damp;
 const lerp = THREE.MathUtils.lerp;
 
@@ -49,6 +50,8 @@ export class Weapons {
     this._t = 0; this._promptT = 0; this._crimeT = 0; this._hitT = 0;
     this._hidModel = null;
     this._ui = null;
+    this._zoomI = 0; this._rp = 0; this._ry = 0; this._shotN = 0; this._breath = 3; this._breathHold = false;
+    this._casings = [];
   }
 
   // ===================================================================== lifecycle
@@ -61,9 +64,7 @@ export class Weapons {
     // Always-called hook (menu + playing): camera zoom, ambient animation, pickups, shop prompts.
     const cam = g.cam, orig = cam.update.bind(cam);
     cam.update = (dt, targetPos, look, o) => {
-      this._camPre(dt, look);
       orig(dt, targetPos, look, o);
-      this._camPost();
       this._ambient(dt);
     };
     g.events.on('vehicle:enter', () => { this.aiming = false; this._fireWas = false; });
@@ -77,6 +78,7 @@ export class Weapons {
     this.game.combat?.reset?.();
     this._showModelAgain();
     this._ui = null;
+    this._zoomI = 0; this._rp = this._ry = 0; this._breath = 3;
   }
 
   onHeroSwitch(from, to) {
@@ -272,6 +274,12 @@ export class Weapons {
     _m.lookAt(_b, _c.set(0, 0, 0), UP);
     _q2.setFromRotationMatrix(_m);
     gun.quaternion.copy(_q.invert()).multiply(_q2);
+    if (this._reload > 0 && this.equipped) {
+      // reload animation: gun drops and tilts, mag swap shake, snaps back up at the end
+      const t = 1 - this._reload / this._reloadT, e = Math.sin(Math.min(1, t * 1.15) * Math.PI);
+      _q.setFromEuler(_e.set(e * 0.9 + (t > 0.45 && t < 0.6 ? Math.sin(t * 90) * 0.05 : 0), 0, e * 0.5));
+      gun.quaternion.multiply(_q);
+    }
   }
 
   _showModelAgain() {
@@ -285,34 +293,7 @@ export class Weapons {
     return out.copy(this.game.player.center);
   }
 
-  // ===================================================================== camera + ambient hook
-  _camPre(dt, look) {
-    const g = this.game, c = g.cam, def = this.equipped;
-    const driving = !!g.vehicles?.driving;
-    const on = this.aiming && !!def && g.state === 'playing' && !driving;
-    this._aimBlend = damp(this._aimBlend, on ? 1 : 0, on ? 12 : 9, dt);
-    const b = this._aimBlend;
-    this._ao = null;
-    if (b < 0.004 || !def) return;
-    const scope = !!def.scope;
-    const aimD = scope ? 0.35 : Math.max(2.6, c.targetDistance * 0.43);
-    const dD = (aimD - c.targetDistance) * b;
-    const dS = ((scope ? 0.1 : 0.9) - c.shoulder) * b;
-    const dF = (def.aimFov ?? -10) * b;
-    c.targetDistance += dD; c.shoulder += dS; c.baseFov += dF;
-    this._ao = { dD, dS, dF };
-    const k = 1 - b * (scope ? 0.72 : 0.4);
-    if (look) { look.x *= k; look.y *= k; }
-  }
-
-  _camPost() {
-    const o = this._ao;
-    if (!o) return;
-    const c = this.game.cam;
-    c.targetDistance -= o.dD; c.shoulder -= o.dS; c.baseFov -= o.dF;
-    this._ao = null;
-  }
-
+  // ===================================================================== ambient hook (called every frame via cam.update)
   _ambient(dt) {
     const g = this.game;
     this._t += dt;
@@ -332,7 +313,9 @@ export class Weapons {
 
     // scope hides the hero's body
     const def = this.equipped;
-    const scoped = !!def?.scope && this._aimBlend > 0.5 && g.cam.distance < 1.4 && !driving;
+    const scoped = !!def?.scope && g.cam.scoped && !driving;
+    this._aimBlend = g.cam.aimT;
+    this._updateCasings(dt);
     if (scoped !== this.scoped) {
       this.scoped = scoped;
       if (scoped) { this._hidModel = p.model; if (p.model?.group) p.model.group.visible = false; }
@@ -385,7 +368,7 @@ export class Weapons {
     const spreadPx = this._spreadPx(def);
     if (hasHudXh) {
       const key = showX ? def.id + '|' + Math.round(spreadPx / 2) : '';
-      if (u.sig.hx !== key) { u.sig.hx = key; hud.setCrosshair(showX ? (def.scope ? 'scope' : def.kind === 'hitscan' ? 'gun' : 'launcher') : null, spreadPx); }
+      if (u.sig.hx !== key) { u.sig.hx = key; hud.setCrosshair(showX ? (def.scope ? 'sniper' : def.kind === 'hitscan' ? 'gun' : 'launcher') : null, spreadPx); }
       u.xh.classList.remove('on');
     } else {
       u.xh.classList.toggle('on', showX);
@@ -393,7 +376,7 @@ export class Weapons {
     }
     u.root.classList.toggle('wpn-armed', armed && !hasHudXh);
     if (this._hitT > 0) { this._hitT -= dt; u.xh.classList.toggle('hit', this._hitT > 0); }
-    u.scope.classList.toggle('on', this.scoped);
+    u.scope.classList.toggle('on', this.scoped && !hasHudXh);
 
     // ammo panel
     u.ammo.classList.toggle('on', armed && own);
@@ -421,9 +404,15 @@ export class Weapons {
   _spread(def) {
     const p = this.game.player;
     const moving = p ? Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 10) : 0;
-    const b = this._aimBlend;
-    return lerp(def.spread, def.aimSpread, b) + moving * def.spread * 0.5 * (1 - 0.6 * b) + this._bloom + 0.002;
+    const b = this.game.cam.aimT;
+    let sp = lerp(def.spread, def.aimSpread, b) + moving * def.spread * 0.5 * (1 - 0.6 * b) + this._bloom + 0.0015;
+    if (def.scope && b > 0.8) sp += this._swayAmt() * 0.0015 * (1 + moving * 6);
+    // first-shot accuracy: a settled trigger finger is much tighter
+    if (this._shotAge > 0.45 && this._bloom < 0.002) sp *= 0.45;
+    return sp;
   }
+
+  _swayAmt() { return this._breathHold ? 0.08 : 1; }
 
   // ===================================================================== main update (on foot)
   update(dt) {
@@ -433,13 +422,24 @@ export class Weapons {
     if (this._gun && !this._gun.parent) this._attach(p);
 
     this._cd -= dt; this._shotAge += dt; this._throwT -= dt; this._emptyT -= dt;
-    this._bloom = Math.max(0, this._bloom - dt * 0.06);
+    this._bloom = Math.max(0, this._bloom - dt * (this.aiming ? 0.09 : 0.06));
+    if (this._shotAge > 0.3) this._shotN = 0;
 
-    if (!p.dead) {
-      if (inp.pressed('weaponNext')) this.cycle(1);
-      if (inp.pressed('weaponPrev')) this.cycle(-1);
-    }
     const def = this.equipped;
+    const scopedNow = !!def?.scope && inp.down('aim') && !p.dead;
+    if (!p.dead) {
+      if (scopedNow) {
+        // variable zoom 4x / 8x / 12x with the same inputs that cycle weapons
+        const z = def.zoom;
+        if (inp.pressed('weaponNext')) { this._zoomI = Math.min(z.length - 1, this._zoomI + 1); g.audio?.play?.('ui_move', { volume: 0.4 }); }
+        if (inp.pressed('weaponPrev')) { this._zoomI = Math.max(0, this._zoomI - 1); g.audio?.play?.('ui_move', { volume: 0.4 }); }
+        inp.consume('weaponNext', 'weaponPrev');
+      } else {
+        if (inp.pressed('weaponNext')) this.cycle(1);
+        if (inp.pressed('weaponPrev')) this.cycle(-1);
+      }
+    }
+    this._recoilRecover(dt);
     if (!def || p.dead) { this.aiming = false; this._fireWas = false; this._reloadWas = false; this.reloadProgress = -1; return; }
     const st = this.owned.get(def.id);
     if (!st) { this.equip(null); return; }
@@ -455,6 +455,8 @@ export class Weapons {
     const fireEdge = wantFire && !this._fireWas; this._fireWas = wantFire;
     const reloadEdge = reloadHeld && !this._reloadWas; this._reloadWas = reloadHeld;
     this.aiming = aimHeld;
+    if (aimHeld) this._requestAim(def, dt, inp);
+    else { this._breathHold = false; this._breath = Math.min(3, this._breath + dt * 0.6); }
 
     // aim point for the gun pose / crosshair
     if (this._poseHold()) this._aimInfo(def.range, this._aimPt);
@@ -489,6 +491,32 @@ export class Weapons {
       const list = this._cycleList();
       this.equip(list[list.length > 1 ? 1 : 0]);
     }
+  }
+
+  _requestAim(def, dt, inp) {
+    const g = this.game;
+    if (def.scope) {
+      g.cam.requestAim({ fov: def.zoom[this._zoomI], distance: 0.15, shoulder: 0.2, height: 1.68, scope: true, blend: 14 });
+      // hold breath (sprint / L3) steadies the sway for up to 3 s
+      this._breathHold = inp.down('sprint') && this._breath > 0;
+      if (this._breathHold) this._breath -= dt; else this._breath = Math.min(3, this._breath + dt * 0.5);
+      if (this._breath <= 0) this._breathHold = false;
+      // scope sway grows with movement, nearly gone when holding breath
+      const mv = Math.min(1, Math.hypot(g.player.vel.x, g.player.vel.z) / 6);
+      const amt = (0.0006 + mv * 0.0025) * this._swayAmt() * (def.zoom[this._zoomI] < 10 ? 0.6 : 1);
+      const t = this._t;
+      g.cam.yaw += Math.sin(t * 1.7) * amt * dt * 60 * 0.5;
+      g.cam.pitch += Math.cos(t * 2.3) * amt * dt * 60 * 0.5;
+    } else {
+      g.cam.requestAim({ fov: def.adsFov ?? 52, distance: 2.4, shoulder: 0.85, height: 1.6 });
+    }
+  }
+
+  _recoilRecover(dt) {
+    const c = this.game.cam, k = 1 - Math.exp(-6 * dt);
+    const dp = this._rp * k, dy = this._ry * k;
+    this._rp -= dp; this._ry -= dy;
+    c.pitch -= dp * 0.55; c.yaw -= dy * 0.7;       // part of the kick is recovered, the rest is yours to correct
   }
 
   _startReload(def, st) {
@@ -557,14 +585,19 @@ export class Weapons {
     // feedback
     const aimK = this.aiming ? 0.6 : 1;
     const cam = g.cam;
-    cam.pitch += def.recoil * aimK * (0.8 + Math.random() * 0.4);
-    cam.yaw += (Math.random() - 0.5) * def.recoil * 0.5;
+    // recoil pattern: vertical kick that climbs over a burst, horizontal drift that wanders, both partly recover
+    this._shotN++;
+    const climb = def.auto ? Math.min(1.6, 0.8 + this._shotN * 0.05) : 1;
+    const kp = def.recoil * aimK * climb * (0.85 + Math.random() * 0.3);
+    const ky = def.recoil * aimK * 0.45 * (Math.sin(this._shotN * 0.9) * 0.6 + (Math.random() - 0.5));
+    cam.pitch += kp; cam.yaw += ky; this._rp += kp; this._ry += ky;
+    this._ejectCasing(def, p);
     if (def.kind !== 'throw') {
       g.fx?.flash?.(muzzle, 0xffc060, def.heavy ? 6 : 3, 0.07);
       g.fx?.glow?.(muzzle, 0xffd890, def.kind === 'launcher' ? 1.8 : 0.7 + def.recoil * 4, 0.06);
       g.fx?.burst?.(muzzle, 0xffb050, 3, 4, 0.12, 0.12);
       if (def.kind === 'launcher') g.fx?.smoke?.(muzzle, 0.7, 0.9, null, 0.5);
-      g.cam.shake(def.heavy ? 0.22 : 0.04 + def.recoil);
+      g.cam.shake(def.heavy ? 0.3 : 0.05 + def.recoil * 1.5);
     }
     g.input.rumble(Math.min(1, 0.15 + def.recoil * 8), Math.min(1, 0.2 + def.recoil * 4), def.heavy ? 160 : 55);
     g.audio?.play?.(def.sound, { pos: muzzle });
@@ -582,21 +615,90 @@ export class Weapons {
     const base = _a.normalize().clone();
     const spread = this._spread(def);
     const dir = new THREE.Vector3();
-    const falloff = def.id === 'shotgun' ? Math.max(0.35, 1.1 - dist / def.range) : 1;
+    const multi = def.pellets > 1;
     for (let i = 0; i < (def.pellets || 1); i++) {
-      this._spreadDir(base, i === 0 && def.pellets === 1 ? spread : spread, dir);
-      const hit = combat.hitscan({
-        origin: muzzle, dir, range: def.range, damage: def.damage * falloff, team: 'player', source: p,
-        tracer: (def.pellets > 1 && i > 3) ? 0 : def.tracer, width: def.pellets > 1 ? 0.7 : 0.45, knockback: def.knock, stun: 0.15, heavy: !!def.heavy,
-      });
-      if (hit) { this._hitT = 0.14; continue; }
+      this._spreadDir(base, spread, dir);
       const wall = g.physics.raycast(muzzle, dir, def.range);
       const maxT = wall ? wall.distance : def.range;
-      if (this._hitPed(muzzle, dir, maxT, def.damage * falloff, p)) { this._hitT = 0.14; continue; }
-      if (wall) {
-        g.fx?.sparks?.(wall.point, wall.normal, 0xffd080, 6, 8, 0.25, 0.08);
-        if (i < 3) g.fx?.smoke?.(wall.point, 0.28, 0.5, null, 0.3);
+      // damage falloff with distance (sniper barely drops)
+      const fo = def.scope ? 1 : multi ? Math.max(0.3, 1.1 - dist / def.range) : lerp(1, 0.55, THREE.MathUtils.clamp((dist - def.range * 0.35) / (def.range * 0.65), 0, 1));
+      let dmg = def.damage * fo;
+      const head = this._headTest(muzzle, dir, maxT);
+      if (head) dmg *= 2;
+      const hit = combat.hitscan({
+        origin: muzzle, dir, range: def.range, damage: dmg, team: 'player', source: p,
+        tracer: (multi && i > 3) ? 0 : def.tracer, width: multi ? 0.7 : 0.45, knockback: def.knock, stun: 0.15, heavy: !!def.heavy || !!head,
+      });
+      if (hit) {
+        this._hitT = 0.14;
+        const hs = !!head && hit.target === head;
+        if (hs) g.fx?.text?.(_c.set(hit.target.pos.x, hit.target.pos.y + hit.target.height + 0.9, hit.target.pos.z), 'HEADSHOT', 0xff6a30, { size: 1.2 });
+        g.hud?.hitMarker?.(hs);
+        continue;
       }
+      if (this._hitPed(muzzle, dir, maxT, dmg, p)) { this._hitT = 0.14; g.hud?.hitMarker?.(false); continue; }
+      if (wall) this._impact(wall, i);
+    }
+  }
+
+  _headTest(origin, dir, maxT) {
+    const list = this.game.enemies?.list ?? [];
+    let best = null, bt = maxT;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e.alive || e.untargetable) continue;
+      _v.set(e.pos.x - origin.x, e.pos.y + e.height * 0.92 - origin.y, e.pos.z - origin.z);
+      const proj = _v.dot(dir);
+      if (proj < 0 || proj > bt) continue;
+      const r = Math.max(0.17, e.radius * 0.45);
+      if (_v.lengthSq() - proj * proj <= r * r) { bt = proj; best = e; }
+    }
+    return best;
+  }
+
+  _impact(wall, i) {
+    const fx = this.game.fx, n = wall.normal;
+    if (n.y > 0.7) { fx?.dust?.(wall.point, 4, 0.8); fx?.sparks?.(wall.point, n, 0xc8b898, 3, 4, 0.2, 0.06); }
+    else { fx?.sparks?.(wall.point, n, 0xffd080, 7, 9, 0.28, 0.08); if (i < 3) fx?.smoke?.(wall.point, 0.28, 0.5, null, 0.3); }
+  }
+
+  // ---- shell casings
+  _ejectCasing(def) {
+    if (def.kind !== 'hitscan') return;
+    const gun = this._gun; if (!gun) return;
+    gun.updateWorldMatrix(true, false);
+    gun.getWorldPosition(_a);
+    const fw = _b.set(0, 0, 1).transformDirection(gun.matrixWorld);
+    const right = _u.crossVectors(UP, fw).normalize().negate();
+    const big = def.id === 'shotgun' || def.id === 'sniper';
+    const c = this._casings;
+    _casing ??= { geo: new THREE.CylinderGeometry(0.012, 0.012, 0.045, 6), mat: new THREE.MeshStandardMaterial({ color: 0xc9a24a, metalness: 0.9, roughness: 0.3 }), red: new THREE.MeshStandardMaterial({ color: 0xc03030, roughness: 0.6 }) };
+    let o = c.find((x) => !x.live);
+    if (!o) {
+      if (c.length >= 24) return;
+      const mesh = new THREE.Mesh(_casing.geo, _casing.mat); this.game.scene.add(mesh);
+      o = { mesh, vel: new THREE.Vector3(), live: false, t: 0 }; c.push(o);
+    }
+    o.mesh.material = def.id === 'shotgun' ? _casing.red : _casing.mat;
+    o.mesh.scale.setScalar(big ? 1.7 : 1);
+    o.mesh.position.copy(_a).addScaledVector(fw, 0.08).y += 0.05;
+    o.vel.copy(right).multiplyScalar(2 + Math.random() * 1.5).addScaledVector(fw, -0.3 + Math.random() * 0.6).setY(2 + Math.random() * 1.5);
+    o.mesh.visible = true; o.live = true; o.t = 0; o.sound = true;
+  }
+
+  _updateCasings(dt) {
+    for (const o of this._casings) {
+      if (!o.live) continue;
+      o.t += dt;
+      o.vel.y -= 16 * dt;
+      o.mesh.position.addScaledVector(o.vel, dt);
+      o.mesh.rotation.x += dt * 14; o.mesh.rotation.z += dt * 9;
+      const gy = this.game.physics.heightAt?.(o.mesh.position.x, o.mesh.position.z, o.mesh.position.y + 0.5) ?? 0;
+      if (o.mesh.position.y < gy + 0.02) {
+        o.mesh.position.y = gy + 0.02; o.vel.y *= -0.3; o.vel.x *= 0.5; o.vel.z *= 0.5;
+        if (o.sound) { o.sound = false; if (o.mesh.position.distanceToSquared(this.game.camera.position) < 400) this.game.audio?.play?.('casing', { pos: o.mesh.position, volume: 0.5 }); }
+      }
+      if (o.t > 4) { o.live = false; o.mesh.visible = false; }
     }
   }
 
@@ -709,7 +811,7 @@ export class Weapons {
 }
 
 // shared small meshes for projectiles
-let _shell = null, _gren = null;
+let _shell = null, _gren = null, _casing = null;
 function shellMesh() {
   _shell ??= {
     body: new THREE.CylinderGeometry(0.05, 0.05, 0.22, 8).rotateX(Math.PI / 2),

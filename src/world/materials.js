@@ -48,6 +48,9 @@ export function makeMaterials(T, quality = 'high') {
     // street furniture: neutral PBR with vertex colours (no texture)
     street: Mat({ vertexColors: true, roughness: 0.6, metalness: 0.25, envMapIntensity: 0.8 }),
     glow: new THREE.MeshBasicMaterial({ vertexColors: true }),
+    lamp: new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(0.2, 0.2, 0.2) }),
+    neon: new THREE.MeshBasicMaterial({ map: T.neon, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, color: new THREE.Color(1, 1, 1) }),
+    ad: new THREE.MeshBasicMaterial({ map: T.screens, vertexColors: true, color: new THREE.Color(1.2, 1.2, 1.2) }),
   };
   M.sidewalk.userData.keep = true;
   // the asphalt ground plane is huge: sharpen its tiling response

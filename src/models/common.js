@@ -645,3 +645,13 @@ export function mergeColored(key, parts) {
     return mergeGeometries(gs);
   });
 }
+
+/** generic cached canvas colour texture: fn(ctx, W, H). o: { offsetX, repeat:[x,y], clamp } */
+export function drawTex(key, W, H, fn, o = {}) {
+  const k = 'dt' + key + (o.repeat || '') + (o.offsetX || '');
+  if (texCache.has(k)) return texCache.get(k);
+  const [c, ctx] = canvas(W, H); fn(ctx, W, H);
+  const t = tex(c, o.repeat); if (o.offsetX) t.offset.x = o.offsetX;
+  if (o.clamp) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  texCache.set(k, t); return t;
+}

@@ -1,8 +1,7 @@
 // Hawkeye: precision archer. Bow aiming (hold ability2), trick arrows (ability cycles), grapple arrow (swing),
 // quick shot (special), bow-staff combo (attack), backflip-shot dodge, Arrow Storm ultimate.
 //
-//   R / L2        hold = draw + aim (over-the-shoulder), release or RMB/R1 = loose.  Charge raises speed + damage.
-//   RMB / R1      quick shot (aim-assisted standard arrow) when not aiming
+//   RMB / L2 hold draw+aim (zoom deepens with draw); LMB / R2 (or releasing a full draw) looses; quick tap RMB / L2 = quick shot
 //   E / L1        cycle trick arrow (Explosive / Shock / Net / Cluster); used by the next AIMED shot (4 s recharge)
 //   Shift / R2    grapple arrow to a ledge / wall in the aim direction and zip up
 //   LMB / J       bow-staff combo (3 hits)      C / Ctrl  backflip + arrow at the nearest enemy
@@ -40,12 +39,12 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 
 export class Hawkeye extends Hero {
   constructor(game) {
-    super(game, { id: 'hawkeye', name: 'Hawkeye', color: '#8a4fd1', maxHp: 150, walkSpeed: 6.5, runSpeed: 12.5, jumpSpeed: 10, gravity: 25, radius: 0.42, height: 1.85, airControl: 0.5, mass: 1 });
+    super(game, { id: 'hawkeye', name: 'Hawkeye', color: '#8a4fd1', maxHp: 150, walkSpeed: 6.5, runSpeed: 12.5, jumpSpeed: 10, gravity: 25, radius: 0.42, height: 1.85, airControl: 0.5, mass: 1, usesAim: true, aimPreset: { fov: 50, distance: TUNE.aimDist, shoulder: TUNE.aimShoulder, height: 1.6 } });
     this.timers = new Timers();
     this.cable = new Cable(game.scene);
     this.stuck = [];
     this.trick = 0;
-    this.aiming = false; this.charge = 0; this._cam = null;
+    this.charge = 0; this._wasAiming = false;
     this.chain = 0; this.chainT = 0; this.actionT = 0; this.actionAnim = 'idle';
     this.state = 'free';           // free | zip | flip | ult
     this.zipTarget = new THREE.Vector3(); this.zipHit = new THREE.Vector3(); this.zipN = new THREE.Vector3();
@@ -69,9 +68,8 @@ export class Hawkeye extends Hero {
   get abilityHints() {
     const t = TRICKS[this.trick];
     return [
-      { action: 'special', label: 'Quick Shot', cooldown: this.cooldownFrac('quick') },
       { action: 'ability', label: 'Arrow: ' + t.label, cooldown: this.cooldownFrac('trick') },
-      { action: 'ability2', label: 'Draw Bow', cooldown: 0, active: this.aiming },
+      { action: 'special', label: 'Draw Bow (hold aim)', cooldown: 0, active: this.aiming },
       { action: 'swing', label: 'Grapple Arrow', cooldown: this.cooldownFrac('grapple'), active: this.state === 'zip' },
       { action: 'ultimate', label: 'Arrow Storm', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
@@ -97,14 +95,18 @@ export class Hawkeye extends Hero {
     if (input.pressed('swing') && this._tryGrapple()) return;
     if (input.pressed('dodge') && this._tryDodge()) return;
 
-    // bow aiming
-    if (!armed && input.down('ability2') && this.actionT <= 0.05) {
-      if (!this.aiming) this._beginAim();
-      this._aimUpdate(dt, input);
-      if (input.pressed('special') || input.released('ability2')) this._releaseAimed();
-    } else if (this.aiming) {
-      if (!input.down('ability2') && !armed) this._releaseAimed(); else this._endAim();
-    } else if (!armed && input.pressed('special')) this._quickShot();
+    // bow: hold aim (RMB / L2) to draw, fire (LMB / R2) or release a full draw to loose; tap aim = quick shot
+    if (!armed) {
+      if (this.aiming) {
+        if (!this._wasAiming) this._beginAim();
+        this._aimUpdate(dt, input);
+        if (this.firePressed()) this._releaseAimed();
+      } else {
+        if (this._wasAiming) { if (this.charge > 0.6) this._releaseAimed(); this._endAim(); }
+        if (this.pressedSpecial() || this.pressedAbility2()) this._quickShot();
+      }
+    } else if (this._wasAiming) this._endAim();
+    this._wasAiming = this.aiming;
 
     if (!this.aiming && input.pressed('attack') && this.actionT <= 0.12) this._melee();
   }
@@ -132,18 +134,16 @@ export class Hawkeye extends Hero {
 
   // ---- aiming ----------------------------------------------------------------
   _beginAim() {
-    this.aiming = true; this.charge = 0; this.drawFx = 0;
+    this.charge = 0; this.drawFx = 0;
     this.game.hud?.setCrosshair?.('bow');
     this.game.audio?.play('whoosh', { volume: 0.25, pitch: 1.4 });
   }
   _endAim() {
-    if (!this.aiming) return;
-    this.aiming = false; this.charge = 0;
+    this.charge = 0;
     this.game.hud?.setCrosshair?.(null);
   }
   _aimUpdate(dt, input) {
     this.game.cam.requestAim?.({ fov: 50 - 16 * this.charge, distance: TUNE.aimDist, shoulder: TUNE.aimShoulder, height: 1.6 });
-    this.game.hud?.setCrosshair?.('bow');
     this.charge = Math.min(1, this.charge + dt / TUNE.drawTime);
     this.setAnim('shoot', 0);
     if (this.charge > 0.2) {
@@ -155,7 +155,7 @@ export class Hawkeye extends Hero {
   }
   _releaseAimed() {
     const charge = this.charge;
-    this._endAim();
+    this.charge = 0; this._full = false;
     if (!this.useCooldown('shoot', TUNE.shootCd)) return;
     this._muzzle(_m);
     aimInfo(this, 140, _aim);
@@ -361,7 +361,7 @@ export class Hawkeye extends Hero {
     this.zipHit.copy(hit.point);
     if (Math.abs(nrm.y) < 0.5 && hit.box) {
       const top = hit.box.max.y;
-      if (top - hit.point.y < 12 && hit.box.data?.type !== 'prop') {
+      if (top - hit.point.y < 45 && hit.box.data?.type !== 'prop') {
         this.zipKind = 'ledge';
         this.zipTarget.set(hit.point.x - nrm.x * 1.1, top + 0.1, hit.point.z - nrm.z * 1.1);
         this.zipN.copy(nrm).setY(0).normalize();
@@ -373,7 +373,6 @@ export class Hawkeye extends Hero {
       }
     } else if (nrm.y >= 0.5) { this.zipKind = 'ground'; this.zipTarget.copy(hit.point).y += 0.05; }
     else return false;
-    this._endAim();
     this.useCooldown('grapple', TUNE.grappleCd);
     this.state = 'zip'; this.zipT = 0; this.zipSpeed = Math.max(18, this.vel.length() * 0.7); this.zipStuck = 0; this._zipLast.copy(this.pos);
     this.setAnim('zip', 20);
@@ -393,7 +392,7 @@ export class Hawkeye extends Hero {
     this.cable.set(_m, this.zipHit);
     if (input.pressed('jump')) { this.vel.y = Math.max(this.vel.y, 0) + 8; this._zipEnd(false); return; }
     const to = _a.copy(this.zipTarget).sub(this.pos); const dist = to.length();
-    if (dist < 1.1 || this.zipT > 1.7) { this._zipEnd(true); return; }
+    if (dist < 1.1 || this.zipT > 2.4) { this._zipEnd(true); return; }
     this.zipSpeed = approach(this.zipSpeed, TUNE.zipSpeed, 160 * dt);
     const sp = Math.min(this.zipSpeed, Math.max(6, dist / Math.max(dt, 1e-3) * 0.9));
     to.multiplyScalar(1 / dist);
@@ -420,7 +419,7 @@ export class Hawkeye extends Hero {
   // ---- ultimate: Arrow Storm ----------------------------------------------------------------
   _startUlt() {
     const g = this.game;
-    this._endAim();
+    this._endAim(); this.charge = 0;
     this.focus = 0;
     this.ult = { phase: 'leap', t: 0, n: 0, next: 0, targets: [] };
     this.invuln = Math.max(this.invuln, 4);

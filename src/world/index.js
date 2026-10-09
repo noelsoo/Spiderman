@@ -7,7 +7,10 @@ import { buildCity, buildBackdrop, addBox, L, colX, rowZ, avenueX, streetZ } fro
 import { buildAvengersTower, buildEmpireSpire, buildBridge } from './landmarks.js';
 import { Atmosphere } from './atmosphere.js';
 import { makeWater } from './water.js';
-import { makeTreesAndLamps, Clouds, Steam } from './life.js';
+import { makeTrees, Clouds, Steam } from './life.js';
+import { makePools, updateScreens } from './props.js';
+import { buildRoads } from './roads.js';
+import { makeSkylineBand } from './backdrop.js';
 import { resolveQuality } from '../render/quality.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -44,7 +47,7 @@ export class World {
     const rng = mulberry32(20231020);
     scene.add(this.group);
 
-    const T = makeTextures(renderer, rng);
+    const T = makeTextures(renderer, rng, quality);
     const { M, wallMats } = makeMaterials(T, quality);
     this.mats = M;
     onProgress(0.1); await tick();
@@ -55,7 +58,7 @@ export class World {
     onProgress(0.2); await tick();
 
     const ctx = {
-      rng, physics, quality, T, group: this.group, landmarks: this.landmarks,
+      rng, rng2: mulberry32(777), physics, quality, T, M, group: this.group, landmarks: this.landmarks, pools: [],
       chunks: new ChunkSet(450), glow: new Bucket(), signBucket: new Bucket(),
       trees: [], lamps: [], detail: quality !== 'low',
       avengersPos: new THREE.Vector3(colX(3), 0, rowZ(4)),
@@ -80,7 +83,7 @@ export class World {
     onProgress(0.7); await tick();
 
     // meshes
-    const skipCast = ['markings', 'sidewalk', 'grass', 'pond', 'storefront', 'asphalt'];
+    const skipCast = ['markings', 'sidewalk', 'grass', 'pond', 'storefront', 'asphalt', 'street', 'glow', 'lamp', 'neon', 'ad'];
     ctx.chunks.build(this.group, M, { skipCast });
     bctx.chunks.build(this.group, M, { cast: false, receive: true });
     const glow = new THREE.Mesh(ctx.glow.toGeometry(), M.glow);
@@ -90,9 +93,9 @@ export class World {
     this.group.add(new THREE.Mesh(ctx.signBucket.toGeometry(), signMat));
 
     // ground + far shore, bank wall on the far side
-    const ground = new THREE.Mesh(groundPlane(L.RIVER_X, 3000, -3000, 3000, 8), M.asphalt);
+    const ground = new THREE.Mesh(groundPlane(L.RIVER_X, 3000, -3000, 3000, quality === 'low' ? 8 : 16), M.asphalt);
     ground.receiveShadow = true;
-    const farShore = new THREE.Mesh(groundPlane(-3000, -1000, -3000, 3000, 8), M.asphalt);
+    const farShore = new THREE.Mesh(groundPlane(-3000, -1000, -3000, 3000, quality === 'low' ? 8 : 16), M.asphalt);
     farShore.receiveShadow = true;
     this.group.add(ground, farShore);
     const bank = new Bucket();
@@ -105,14 +108,22 @@ export class World {
     this.atmo.attachWater(water.uniforms);
     onProgress(0.8); await tick();
 
-    makeTreesAndLamps(ctx, this.group);
-    this.clouds = new Clouds(rng, this.group, T.cloud, quality);
+    makeTrees(ctx, this.group);
+    this.pools = makePools(ctx, this.group, T.pool);
+    this.trafficLights = ctx.trafficLights;
+    this.signs = ctx.signs;
+    this.skyline = makeSkylineBand(this.group, T, this.atmo);
+    this.clouds = quality === 'low' ? new Clouds(rng, this.group, T.cloud, quality) : { step() {} };
     this.steam = new Steam(rng, this.group, T.dot, quality);
     onProgress(0.9); await tick();
 
     // landmarks reported to other modules
     this.landmarks['Central Park'] = new THREE.Vector3(colX(4.5), 0, rowZ(8));
     this.minimap.park = { x: colX(4.5), z: rowZ(8), w: 178, d: 5 * L.PZ - 16 };
+    this.shops = ctx.shops.map((s) => ({ pos: s.pos, yaw: s.yaw, name: s.name }));
+    this.roads = buildRoads(this.shops);
+    this.minimap.shops = this.shops.map((s) => [s.pos.x, s.pos.z, s.name]);
+    this._hookDayNight(M, ctx.shopMats);
     this.minimap.landmarks = Object.fromEntries(Object.entries(this.landmarks).map(([k, v]) => [k, [v.x, v.z]]));
     this.menuFocus.set(avenueX(3), 105, streetZ(7));
     this.ctx = ctx;
@@ -120,6 +131,27 @@ export class World {
     // pre-compile every shader now (loading screen) instead of hitching on the first frame
     try { renderer.compile(scene, this.game.camera); } catch (e) { console.warn('shader precompile failed', e); }
     onProgress(1);
+  }
+
+  /** Traffic light phase of the intersection nearest (x, z): { ns, ew, x, z } with 'red' | 'yellow' | 'green'.
+   *  ns = cars moving along the avenue (z axis), ew = cars moving along a street (x axis). Pass `out` to avoid allocation. */
+  trafficLightState(x, z, out = {}) { return this.trafficLights ? this.trafficLights.state(x, z, out) : Object.assign(out, { ns: 'green', ew: 'red', x, z }); }
+
+  /** Day / night response of lamps, neon, shop windows, billboards and light pools. */
+  _hookDayNight(M, shopMats) {
+    const lampCol = M.lamp.color, neonCol = M.neon.color, adCol = M.ad.color;
+    const pools = this.pools, sign = shopMats?.sign, win = shopMats?.win;
+    const fn = (pal, night) => {
+      lampCol.setScalar(0.18 + night * 3.3);
+      neonCol.setScalar(0.55 + night * 1.9);
+      adCol.setScalar(1.15 + night * 0.9);
+      if (sign) sign.color.setScalar(1.2 + night * 1.6);
+      if (win && win.emissiveIntensity !== undefined) win.emissiveIntensity = 0.55 + night * 1.3;
+      if (pools) { pools.visible = night > 0.04; pools.material.color.setScalar(night * 0.9); }
+      for (const s of this.signs?.meshes ?? []) s.mesh.material.color.setScalar(1.15 + night * 0.8);
+    };
+    this.atmo.onChange.push(fn);
+    fn(this.atmo.pal, this.atmo.night);
   }
 
   setTimeOfDay(t) { this.atmo?.setTime(t); }
@@ -131,11 +163,14 @@ export class World {
     this.waterU.uTime.value = this.time;
     this.clouds.step(dt);
     this.steam.step(dt);
+    this.trafficLights?.update(dt);
+    updateScreens(this.signs, this.time);
     const g = this.game;
     const f = this._focus || (this._focus = new THREE.Vector3());
     if (g.player && g.state !== 'menu') f.copy(g.player.pos);
     else { g.camera.getWorldDirection(f); f.multiplyScalar(40).add(g.camera.position); f.y = 0; }
     this.atmo.update(dt, g.camera, f);
+    this.skyline?.update(g.camera);
   }
 
   /** Keep an entity ({pos, vel}) inside the map and out of the river. */

@@ -150,7 +150,7 @@ function facade(opt, rng, aniso, S, extras) {
   const winM = orm(0.08, opt.kind === 'glass' ? 0.9 : 0.55);
   const win = (x, y, w, h, kind = opt.kind) => {
     const lit = rng() < opt.lit;
-    if (lit) drawLit(L, x, y, w, h, rng); else { drawDark(L, x, y, w, h, rng, opt.pane, kind === 'glass' ? 1.35 : 1.0); if (extras) { L.gm.fillStyle = winM; L.gm.fillRect(x, y, w, h); } }
+    if (lit) drawLit(L, x, y, w, h, rng); else { drawDark(L, x, y, w, h, rng, opt.pane || [64, 88, 112], kind === 'glass' ? 1.35 : 1.0); if (extras) { L.gm.fillStyle = winM; L.gm.fillRect(x, y, w, h); } }
   };
 
   if (opt.kind === 'glass') {
