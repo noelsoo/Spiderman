@@ -316,6 +316,7 @@ export class EnemyManager {
   // ===================================================================== events
   onKill(e) {
     this.stats.kills++;
+    this.game.events?.emit('enemy:killed', { enemy: e, pos: e.pos.clone(), kind: e.kind, isBoss: !!e.isBoss });
     if (e.isWave) { this.waveKilled++; if (this.phase === 'fight') this._refreshObjective(); }
     if (!e.isBoss) {
       const pl = this.game.player;

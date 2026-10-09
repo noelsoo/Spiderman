@@ -2,29 +2,37 @@
 // that every subsystem receives. Subsystems never import each other's instances; they go through `game`.
 //
 //   game.scene / game.camera / game.renderer   three.js objects
-//   game.physics   Physics       static city collision + raycasts         (src/core/physics.js)
-//   game.input     Input         keyboard/mouse/PS4 pad actions             (src/core/input.js)
+//   game.post      post-processing pipeline   (src/render/post.js)
+//   game.events    Events        pub/sub bus                                (src/core/events.js)
+//   game.physics   Physics       static city collision + raycasts           (src/core/physics.js)
+//   game.input     Input         keyboard/mouse/gamepad actions             (src/core/input.js)
 //   game.cam       ThirdPersonCamera                                         (src/core/camera.js)
-//   game.world     World         city, sky, lighting, water, traffic        (src/world/)
+//   game.world     World         city, sky, lighting, water                 (src/world/)
 //   game.fx        FX            particles, beams, shockwaves, damage text  (src/combat/fx.js)
 //   game.combat    Combat        melee, AoE, projectiles, hitscan           (src/combat/combat.js)
 //   game.enemies   EnemyManager  goons, hunters, Venom boss, waves          (src/enemies/)
+//   game.vehicles  Vehicles      traffic, drivable/stealable cars, police   (src/vehicles/)
+//   game.peds      Peds          pedestrians                                (src/peds/)
+//   game.economy   Economy       cash                                       (src/weapons/economy.js)
+//   game.weapons   Weapons       guns, ammo, aiming, shops                  (src/weapons/)
 //   game.audio     AudioEngine   synthesised SFX + music                    (src/audio/audio.js)
-//   game.hud       HUD           health, focus, menus, prompts              (src/ui/hud.js)
+//   game.hud       HUD           health, focus, menus, wheel, prompts       (src/ui/hud.js)
 //   game.player    Hero          the active hero                            (src/heroes/)
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
+import { Events } from './core/events.js';
 import { Physics } from './core/physics.js';
 import { Input } from './core/input.js';
 import { ThirdPersonCamera } from './core/camera.js';
+import { createPost } from './render/post.js';
 import { World } from './world/index.js';
 import { FX } from './combat/fx.js';
 import { Combat } from './combat/combat.js';
 import { EnemyManager } from './enemies/index.js';
+import { Vehicles } from './vehicles/index.js';
+import { Peds } from './peds/index.js';
+import { Economy } from './weapons/economy.js';
+import { Weapons } from './weapons/index.js';
 import { AudioEngine } from './audio/audio.js';
 import { HUD } from './ui/hud.js';
 import { preloadModels } from './models/index.js';
@@ -32,17 +40,24 @@ import { SpiderMan } from './heroes/SpiderMan.js';
 import { IronMan } from './heroes/IronMan.js';
 import { Hulk } from './heroes/Hulk.js';
 import { Thor } from './heroes/Thor.js';
+import { Wolverine } from './heroes/Wolverine.js';
+import { CaptainAmerica } from './heroes/CaptainAmerica.js';
+import { Hawkeye } from './heroes/Hawkeye.js';
+import { ScarletWitch } from './heroes/ScarletWitch.js';
 
-export const HERO_ORDER = ['spiderman', 'ironman', 'hulk', 'thor'];
-const HERO_CLASSES = { spiderman: SpiderMan, ironman: IronMan, hulk: Hulk, thor: Thor };
+export const HERO_ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet'];
+const HERO_CLASSES = {
+  spiderman: SpiderMan, ironman: IronMan, hulk: Hulk, thor: Thor,
+  wolverine: Wolverine, captain: CaptainAmerica, hawkeye: Hawkeye, scarlet: ScarletWitch,
+};
 
 class Game {
   constructor() {
     const app = document.getElementById('app');
     this.settings = loadSettings();
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.settings.quality === 'high' ? 2 : 1.25));
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.settings.quality === 'ultra' ? 2 : this.settings.quality === 'high' ? 1.5 : 1));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = this.settings.quality !== 'low';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -53,29 +68,30 @@ class Game {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 4000);
+    this.post = createPost(this);
 
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.45, 0.6, 0.85);
-    this.bloom.enabled = this.settings.quality !== 'low';
-    this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
-
+    this.events = new Events();
     this.physics = new Physics(40);
     this.input = new Input(this.renderer.domElement);
     this.input.invertY = this.settings.invertY;
+    if (this.settings.padRemap) this.input.padRemap = { ...this.settings.padRemap };
     this.cam = new ThirdPersonCamera(this.camera, this.physics);
 
     this.world = new World(this);
     this.fx = new FX(this);
     this.combat = new Combat(this);
     this.enemies = new EnemyManager(this);
+    this.economy = new Economy(this);
+    this.weapons = new Weapons(this);
+    this.vehicles = new Vehicles(this);
+    this.peds = new Peds(this);
     this.audio = new AudioEngine(this);
     this.hud = new HUD(this);
 
     this.heroes = {};
     this.player = null;
-    this.state = 'loading'; // loading | menu | playing | paused | gameover
+    this.state = 'loading'; // loading | menu | playing | paused | overlay | gameover
+    this.overlay = null;    // { update(rawDt) → false to close, onClose?() } while state === 'overlay'
     this.time = 0;
     this.timeScale = 1;
     this._slowmo = 0;
@@ -85,15 +101,20 @@ class Game {
     addEventListener('resize', () => this.onResize());
     this.input.on('gamepadconnected', (p) => this.hud.toast(`Controller connected: ${prettyPad(p.id)}`));
     this.input.on('gamepaddisconnected', () => this.hud.toast('Controller disconnected'));
-    this.input.on('pointerlock', (locked) => { if (!locked && this.state === 'playing' && this.input.lastDevice === 'keyboard') this.pause(); });
+    this.input.on('pointerlock', (locked) => { if (!locked && this.state === 'playing' && this.input.lastDevice === 'keyboard' && !this.input.lockFailed) this.pause(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
   }
 
   async init() {
     this.hud.setLoading(0.05, 'Loading assets');
-    await preloadModels((p) => this.hud.setLoading(0.05 + p * 0.35, 'Loading models'));
-    this.hud.setLoading(0.45, 'Building New York');
-    await this.world.build((p) => this.hud.setLoading(0.45 + p * 0.5, 'Building New York'));
+    await preloadModels((p) => this.hud.setLoading(0.05 + p * 0.3, 'Loading models'));
+    this.hud.setLoading(0.4, 'Building New York');
+    await this.world.build((p) => this.hud.setLoading(0.4 + p * 0.4, 'Building New York'));
+    this.hud.setLoading(0.82, 'Filling the streets');
+    await this.vehicles.build?.();
+    await this.peds.build?.();
+    await this.weapons.build?.();
+    this.hud.setLoading(0.9, 'Suiting up');
     for (const id of HERO_ORDER) this.heroes[id] = new HERO_CLASSES[id](this);
     this.hud.setLoading(1, 'Ready');
     this.state = 'menu';
@@ -104,8 +125,12 @@ class Game {
   /** Called by the title menu. */
   begin(heroId = 'spiderman') {
     const sp = this.world.spawnPoint ?? { pos: new THREE.Vector3(0, 0, 0), yaw: 0 };
+    this.vehicles.reset?.();
+    this.peds.reset?.();
+    this.weapons.reset?.();
+    this.economy.reset?.();
     for (const h of Object.values(this.heroes)) { h.hp = h.maxHp; h.focus = 0; h.deactivate(); }
-    this.player = this.heroes[heroId];
+    this.player = this.heroes[heroId] ?? this.heroes.spiderman;
     this.player.activate(sp.pos, null, sp.yaw);
     this.cam.recenter(sp.yaw);
     this.enemies.reset?.();
@@ -113,25 +138,32 @@ class Game {
     this.hud.setHero(this.player);
     this.audio.unlock?.();
     this.audio.music?.('roam');
+    this.overlay = null;
     this.state = 'playing';
     this.input.requestPointerLock();
   }
 
   switchHero(id) {
-    if (!this.player || id === this.player.id || this._switchCd > 0) return;
+    if (!this.player || id === this.player.id || this._switchCd > 0) return false;
     const old = this.player, next = this.heroes[id];
-    if (!next) return;
-    this._switchCd = 0.8;
+    if (!next || next.hp <= 0) return false;
+    this._switchCd = 0.6;
     const pos = old.pos.clone(), vel = old.vel.clone(), yaw = old.yaw;
     old.deactivate();
     next.activate(pos, vel, yaw);
     next.focus = Math.max(next.focus, old.focus * 0.5);
     this.player = next;
-    this.fx.burst?.(next.center, next.color, 40, 8);
-    this.fx.ring?.(pos.clone().setY(pos.y + 0.1), 4, next.color);
+    this.vehicles.onHeroSwitch?.(old, next);
+    this.weapons.onHeroSwitch?.(old, next);
+    this.events.emit('hero:switch', { from: old, to: next });
+    if (!this.vehicles.driving) {
+      this.fx.burst?.(next.center, next.color, 40, 8);
+      this.fx.ring?.(pos.clone().setY(pos.y + 0.1), 4, next.color);
+    }
     this.audio.play('switch');
     this.hud.setHero(next);
     this.hud.toast(next.name);
+    return true;
   }
 
   pause() {
@@ -142,9 +174,27 @@ class Game {
     this.audio.duck?.(true);
   }
   resume() {
-    if (this.state !== 'paused') return;
+    if (this.state !== 'paused' && this.state !== 'overlay') return;
     this.state = 'playing';
+    this.overlay = null;
     this.hud.hideMenus();
+    this.input.requestPointerLock();
+    this.audio.duck?.(false);
+  }
+
+  /** Modal in-game UI (weapon shop etc.). The handler gets update(rawDt) each frame and returns false to close. */
+  openOverlay(handler) {
+    if (this.state !== 'playing') return false;
+    this.overlay = handler; this.state = 'overlay';
+    this.input.exitPointerLock();
+    this.audio.duck?.(true);
+    return true;
+  }
+  closeOverlay() {
+    if (this.state !== 'overlay') return;
+    const h = this.overlay; this.overlay = null;
+    h?.onClose?.();
+    this.state = 'playing';
     this.input.requestPointerLock();
     this.audio.duck?.(false);
   }
@@ -171,34 +221,56 @@ class Game {
   frame() {
     const rawDt = Math.min(this.clock.getDelta(), 1 / 20);
     if (this._slowmo > 0) { this._slowmo -= rawDt; if (this._slowmo <= 0) this.timeScale = 1; }
-    const dt = rawDt * this.timeScale;
     this.input.update(rawDt);
+    let dt = rawDt * this.timeScale;
 
     if (this.state === 'playing') {
-      this.time += dt;
       this._switchCd -= rawDt;
+      // Character wheel (hold Tab / D-pad up): HUD reads the sticks, then we freeze the hero's controls.
+      const wheelOpen = this.hud.updateWheel?.(rawDt) ?? false;
+      if (wheelOpen) { dt = rawDt * 0.12; this.input.consumeSticks(); }
+      this.time += dt;
+
       if (this.input.pressed('pause')) { this.pause(); }
       else {
-        if (this.input.pressed('heroNext')) this.cycleHero(1);
-        if (this.input.pressed('heroPrev')) this.cycleHero(-1);
-        for (let i = 0; i < 4; i++) if (this.input.pressed('hero' + (i + 1))) this.switchHero(HERO_ORDER[i]);
-        if (this.input.pressed('recenter')) this.cam.recenter(this.player.yaw);
+        if (!wheelOpen) {
+          if (this.input.pressed('heroNext')) this.cycleHero(1);
+          if (this.input.pressed('heroPrev')) this.cycleHero(-1);
+          for (let i = 0; i < HERO_ORDER.length; i++) if (this.input.pressed('hero' + (i + 1))) this.switchHero(HERO_ORDER[i]);
+          if (this.input.pressed('recenter')) this.cam.recenter(this.vehicles.driving?.yaw ?? this.player.yaw);
+          if (this.input.pressed('interact')) {
+            if (this.vehicles.tryInteract?.()) this.input.consume('interact');
+            else if (this.weapons.tryInteract?.()) this.input.consume('interact');
+          }
+        }
 
-        this.player.update(dt);
-        const speed = this.player.vel.length();
-        this.cam.update(rawDt, this.player.pos, this.input.look, { speed });
+        const driving = this.vehicles.driving;
+        if (!driving) {
+          if (!wheelOpen) this.weapons.update(dt);      // consumes aim/fire inputs while a gun is out
+          if (!wheelOpen) this.player.update(dt);
+          else { this.player.syncModel?.(dt); }
+        }
+        this.vehicles.update(dt);                        // traffic + the car being driven (reads input itself)
+        this.peds.update(dt);
+        const focus = this.vehicles.driving ?? this.player;
+        this.cam.update(rawDt, focus.pos, this.input.look, { speed: focus.vel?.length?.() ?? 0 });
         this.enemies.update(dt);
         this.combat.update(dt);
       }
+    } else if (this.state === 'overlay') {
+      if (this.overlay && this.overlay.update?.(rawDt) === false) this.closeOverlay();
+      dt = 0;
     } else if (this.state === 'menu') {
       // slow orbit over the city behind the title screen
       this.cam.update(rawDt, this.world.menuFocus ?? new THREE.Vector3(0, 60, 0), { x: rawDt * 0.05, y: 0 });
+      this.vehicles.update?.(rawDt);
+      this.peds.update?.(rawDt);
     }
     this.fx.update(dt);
     this.world.update(dt);
-    this.audio.update?.(dt);
+    this.audio.update?.(rawDt);
     this.hud.update(rawDt);
-    this.composer.render();
+    this.post.render(rawDt);
   }
 
   cycleHero(dir) {
@@ -213,21 +285,21 @@ class Game {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(innerWidth, innerHeight);
-    this.composer.setSize(innerWidth, innerHeight);
+    this.post.setSize(innerWidth, innerHeight);
   }
 
   saveSettings() { try { localStorage.setItem('sm-settings', JSON.stringify(this.settings)); } catch { /* private mode */ } }
 }
 
 function loadSettings() {
-  const def = { quality: 'high', invertY: false, autoSprint: true, volume: 0.8, music: 0.5, sensitivity: 1 };
+  const def = { quality: 'high', invertY: false, autoSprint: true, volume: 0.8, music: 0.5, sensitivity: 1, padRemap: null };
   try { return { ...def, ...JSON.parse(localStorage.getItem('sm-settings') || '{}') }; } catch { return def; }
 }
 
 function prettyPad(id) {
-  if (/054c|dualshock|wireless controller/i.test(id)) return 'DUALSHOCK 4';
-  if (/dualsense|0ce6/i.test(id)) return 'DualSense';
-  if (/xbox|045e/i.test(id)) return 'Xbox controller';
+  if (/054c.*(05c4|09cc)|dualshock|wireless controller/i.test(id)) return 'DUALSHOCK 4';
+  if (/dualsense|0ce6|0df2/i.test(id)) return 'DualSense';
+  if (/xbox|045e|xinput/i.test(id)) return 'Xbox controller';
   return id.split('(')[0].trim() || 'Gamepad';
 }
 

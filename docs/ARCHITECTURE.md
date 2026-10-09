@@ -69,7 +69,7 @@ input.move  Vector2 (x right, y forward), input.look Vector2 (radians this frame
 input.down(a) / pressed(a) / released(a) / value(a) (0..1 analog, e.g. R2)
 input.rumble(strong, weak, ms)   input.lastDevice 'keyboard'|'gamepad'   input.isPlayStation
 ```
-Actions and bindings:
+Actions and bindings (v1 — SUPERSEDED by "Controls v2" at the end of this file):
 
 | Action | Keyboard / mouse | PS4 / PS5 pad | Spider-Man | Iron Man | Hulk | Thor |
 |---|---|---|---|---|---|---|
@@ -189,3 +189,106 @@ Target 60 fps on a mid-range laptop iGPU at 1080p with `quality: 'high'`. Use `I
 ## Testing
 
 `npm run build && npm run smoke` boots headless Chromium, plays each hero for a few seconds with scripted input, fails on any console/page error and writes screenshots to `tools/shots/`. Options: `--hero=thor --seconds=6`.
+
+
+# v2 additions (October 2026): driving, weapons, 8 heroes, graphics
+
+## Controls v2 (authoritative; bindings live in `BINDINGS` in src/core/input.js)
+
+Every raw pad is translated to the W3C standard layout first (DS4 raw layouts for Firefox Linux/Windows/macOS are handled, phantom motion-sensor devices are ignored, the pad that last pressed a button becomes active, user remaps in `input.padRemap` / `game.settings.padRemap`).
+
+| Action | Keyboard / mouse | PS4 pad | Notes |
+|---|---|---|---|
+| move / look | WASD / mouse | L stick / R stick | |
+| jump | Space | ✕ | |
+| dodge | C, Left Ctrl | ○ | |
+| attack | LMB, J | □ | when a gun is out, LMB fires instead (J still melees) |
+| special | RMB, K | R1 | when a gun is out, RMB aims instead (K still works) |
+| ability | E | L1 | |
+| ability2 | R | L2 | when a gun is out, L2 aims and R reloads |
+| swing / fly | Shift | R2 | when aiming a gun, R2 fires |
+| **ultimate** | **Q** | **R3** | moved from F/△ |
+| **interact** | **F** | **△** | enter / steal / exit car, open shop, pick up |
+| **wheel** (hold) | **Tab** | **D-pad ↑** | character wheel, game slows to 12% |
+| heroNext / heroPrev | ] / [ | D-pad → / ← | quick switch |
+| hero1..hero8 | 1..8 | | |
+| weaponNext / weaponPrev | X, wheel down / Z, wheel up | D-pad ↓ (next) | cycles Unarmed → owned guns |
+| aim (gun) | RMB | L2 | |
+| fire (gun) | LMB | R2 | |
+| reload | R | (auto) | |
+| sprint | Left Alt | L3 | |
+| map | M | Touchpad / Share | |
+| pause | Esc, P | Options | |
+| recenter | V, MMB | | |
+| **Driving** | | | |
+| throttle | W, ↑ | R2 (analog) | |
+| brake / reverse | S, ↓ | L2 (analog) | |
+| steer | A / D | L stick | |
+| handbrake | Space | ✕ | |
+| horn | H | L3 | |
+| exit car | F | △ | |
+| drive-by (if gun) | LMB | R1? (vehicles agent decides; document it) | |
+
+`input.consume(...actions)` releases every action fed by the same physical inputs for the rest of the frame. `input.consumeSticks()` zeroes move/look. `input.padInfo()` lists all pads (id, mapping, profile, live buttons/axes) for the diagnostics screen; `input.lastRawButton` is the raw index of the last pressed button (for remapping); `input.padButton(stdIndex)` reads the virtual standard pad.
+
+## Frame order v2 (`game.state === 'playing'`)
+```
+input.update → hud.updateWheel(rawDt) [if open: dt *= 0.12, sticks consumed]
+→ pause / quick switch / hero1-8 / interact (vehicles.tryInteract() || weapons.tryInteract())
+→ if not driving: weapons.update(dt) then player.update(dt)
+→ vehicles.update(dt) (traffic + the driven car, reads input itself while driving)
+→ peds.update(dt) → cam.update(target = driven car or player) → enemies → combat → fx → world → audio → hud → post.render
+```
+`game.state === 'overlay'`: a modal UI (weapon shop) owns input: `game.openOverlay({ update(rawDt) → false to close, onClose() })`, `game.closeOverlay()`. Gameplay is frozen. In 'menu' state vehicles/peds still update (ambient life behind the title screen).
+
+## Events — `game.events` (src/core/events.js)
+`on(name, fn) → unsubscribe`, `off`, `emit`. Names and payloads are listed at the top of events.js:
+`enemy:killed {enemy,pos,kind,isBoss}`, `hero:switch {from,to}`, `vehicle:enter {vehicle,stolen}`, `vehicle:exit {vehicle}`, `crime {severity,pos,kind}`, `cash {amount,total,pos}`, `weapon:fired {weapon,pos}`.
+
+## Heroes v2
+`HERO_ORDER = ['spiderman','ironman','hulk','thor','wolverine','captain','hawkeye','scarlet']`. Model ids equal hero ids.
+`game.switchHero(id) → bool` works at any time, including while driving (the new hero takes the driver's seat).
+
+## Vehicles — `game.vehicles` (src/vehicles/*), and pedestrians — `game.peds` (src/peds/*)
+```
+await build()        create traffic + parked cars (called during loading)
+reset()              on new run
+update(dt)           traffic AI, physics for all cars, the driven car (reads input), police / wanted level
+tryInteract() → bool enter nearest car within ~4 m (carjack if occupied: driver is pulled out → ped), or exit if driving
+onHeroSwitch(from, to)
+driving: Vehicle | null      list: Vehicle[]      wanted: 0..5 stars
+nearestEnterable(pos, r) → Vehicle | null      (HUD shows "△ Steal car" prompt)
+```
+`Vehicle`: `pos` (Vector3, ground centre), `vel`, `yaw`, `speed` (m/s, signed), `kind` ('sedan'|'taxi'|'suv'|'sports'|'police'|'van'), `hp`, `driver` ('ai'|'player'|null), `group` (Object3D), `explode()`.
+While driving, the vehicle system keeps `game.player.pos` at the seat, hides the hero model, sets `game.cam.targetDistance/heightOffset` and restores them on exit. Cars collide with city boxes via game.physics, with each other, run over enemies (call `enemy.takeDamage`) and peds. Roads: import the pure constants from `src/world/city.js` (`avenueX(k)` k=0..10 north-south avenues, `streetZ(k)` k=0..17 east-west streets, `L.AVE_W`, `L.ST_W`, `L.RIVER_X`). The old ambient `Traffic` in src/world/life.js is removed; vehicles owns all cars now.
+`game.peds`: `list` of pedestrians (`pos, alive, takeDamage(n, {knockback})`), walking on sidewalks, flee from gunfire/explosions, drivers ejected by carjacks.
+
+## Economy — `game.economy` (src/weapons/economy.js)
+`cash`, `add(amount, pos)` (floating "+$50" text), `spend(amount) → bool`, `reset()`. Sources: enemy kills (goon $25, hunter $60, Venom $1000), cash pickups, delivering a stolen car? (weapons agent decides), starts at $200.
+
+## Weapons — `game.weapons` (src/weapons/*)
+```
+await build()      shop locations (from game.world.shops if present, else picks street corners), pickups
+reset()            update(dt)            tryInteract() → bool (open shop when near a shop entrance)
+onHeroSwitch(from, to)                  equipped: WeaponDef | null      owned: Map<id, {ammo, clip}>   aiming: bool
+```
+Guns any hero can use: pistol, SMG, shotgun, assault rifle, sniper, grenade launcher/RPG, grenades. Aiming = over-the-shoulder zoom (cam.fovKick / cam.shoulder / cam.targetDistance), crosshair via `game.hud.setCrosshair?.(kind)`. Damage through game.combat.hitscan / projectile. Muzzle position from `player.model.handR`. While armed: consume `aim`, `fire`, `reload` each frame so heroes don't also punch/web.
+
+## Render — `game.post` (src/render/post.js)
+`createPost(game) → { render(dt), setSize(w,h) }`. Graphics agent owns it (MSAA target, bloom, colour grading, SSAO/ vignette etc. by quality tier). Quality tiers: 'low'|'medium'|'high'|'ultra'.
+
+## HUD v2 additions
+`updateWheel(rawDt) → bool` (character wheel open; select with R stick / L stick / mouse, release to `game.switchHero`), cash counter, wanted stars (`game.vehicles.wanted`), speedometer while driving, weapon + ammo panel (`game.weapons.equipped`, `owned`), interaction prompts (`prompt('interact', 'Steal car')`), minimap icons for shops (`game.weapons.shops`) and cars, controller diagnostics + remap screen in Settings (uses `input.padInfo()`, `input.lastRawButton`, writes `input.padRemap` and `game.settings.padRemap`), 8-hero select and strip.
+
+## File ownership v2
+| Area | Files |
+|---|---|
+| Architect | src/main.js, src/core/*, src/heroes/Hero.js, docs/ARCHITECTURE.md, tools/* , index.html |
+| Graphics & world | src/world/*, src/render/* |
+| Models | src/models/* |
+| Vehicles & peds | src/vehicles/*, src/peds/* |
+| Weapons & economy & shop UI | src/weapons/* (shop UI may append its own DOM to #hud with its own CSS file in src/weapons/) |
+| Wolverine + Captain America | src/heroes/Wolverine.js, src/heroes/CaptainAmerica.js, src/heroes/squad/* |
+| Hawkeye + Scarlet Witch | src/heroes/Hawkeye.js, src/heroes/ScarletWitch.js, src/heroes/mystic/* |
+| HUD/UI/audio | src/ui/*, src/audio/* |
+| Existing heroes, combat, enemies | frozen this round (request changes via report) — except ultimate rebinding is automatic via input |

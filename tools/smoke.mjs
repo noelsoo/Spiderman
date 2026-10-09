@@ -14,7 +14,7 @@ try { ({ chromium } = require('playwright')); } catch {
 }
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=')));
-const heroes = (args.hero || 'spiderman,ironman,hulk,thor').split(',');
+const heroes = (args.hero || 'spiderman,ironman,hulk,thor,wolverine,captain,hawkeye,scarlet').split(',');
 const seconds = Number(args.seconds || 4);
 const out = resolve(args.out || 'tools/shots');
 mkdirSync(out, { recursive: true });
@@ -37,7 +37,7 @@ page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status
 page.setDefaultTimeout(180000);
 // Software GL (swiftshader) renders slowly; pause the loop, draw one frame, then capture.
 const shot = async (name) => {
-  await page.evaluate(() => { const g = window.game; g.renderer.setAnimationLoop(null); g.composer.render(); });
+  await page.evaluate(() => { const g = window.game; g.renderer.setAnimationLoop(null); g.post.render(0); });
   await page.screenshot({ path: join(out, name), timeout: 180000 });
   await page.evaluate(() => { const g = window.game; g.clock.getDelta(); g.renderer.setAnimationLoop(() => g.frame()); });
 };
@@ -61,7 +61,7 @@ for (const hero of heroes) {
   }
   await page.keyboard.up('KeyW');
   await page.evaluate(() => { window.game.player.focus = 100; });
-  await page.keyboard.press('KeyF');
+  await page.keyboard.press('KeyQ');
   await page.waitForTimeout(600);
   const f1 = await page.evaluate(() => window.game.renderer.info.render.frame);
   fps[hero] = ((f1 - f0) / ((Date.now() - t0) / 1000)).toFixed(1);
