@@ -51,8 +51,12 @@ export function buildRig(d, headScaleY = 1.05) {
 
 // ------------------------------------------------------------------ pose container
 class Pose {
-  constructor() { this.r = new Float32Array(NJ * 3); this.hp = new Float32Array(3); this.reset(); }
-  reset() { this.r.fill(0); this.hp.fill(0); this.flat = 1; this.ground = true; this.rate = 14; this.rifle = 0; this.aim = 0; }
+  constructor() { this.r = new Float32Array(NJ * 3); this.hp = new Float32Array(3); this.ikT = new Float32Array(6); this.ikP = new Float32Array(6); this.ikOn = [0, 0]; this.reset(); }
+  reset() { this.r.fill(0); this.hp.fill(0); this.flat = 1; this.ground = true; this.rate = 14; this.rifle = 0; this.aim = 0; this.ikOn[0] = this.ikOn[1] = 0; }
+  /** arm IK target in chest space. side 0 = right, 1 = left. pole = elbow direction hint (optional) */
+  ik(side, x, y, z, px = side ? 0.55 : -0.55, py = -1, pz = -0.35) {
+    const i = side * 3; this.ikT[i] = x; this.ikT[i + 1] = y; this.ikT[i + 2] = z; this.ikP[i] = px; this.ikP[i + 1] = py; this.ikP[i + 2] = pz; this.ikOn[side] = 1;
+  }
   set(j, x, y = 0, z = 0) { const i = j * 3; this.r[i] = x; this.r[i + 1] = y; this.r[i + 2] = z; }
   add(j, x, y = 0, z = 0) { const i = j * 3; this.r[i] += x; this.r[i + 1] += y; this.r[i + 2] += z; }
   pos(x, y, z) { this.hp[0] = x; this.hp[1] = y; this.hp[2] = z; }
@@ -116,6 +120,11 @@ function stance(p, f, legs = true) {
       p.set(CH, 0.18); p.set(HD, -0.12); p.set(H, 0.06);
       if (legs) { p.set(TL, 0, 0, 0.22); p.set(TR, 0, 0, -0.22); p.set(KL, 0.22); p.set(KR, 0.22); }
       break;
+    case 'feral':
+      p.set(AL, -0.25, 0, 0.42); p.set(AR, -0.25, 0, -0.42); p.set(EL, -1.25); p.set(ER, -1.25);
+      p.set(CH, 0.2, -0.08); p.set(SP, 0.08, -0.1); p.set(HD, -0.14, -0.08); p.set(H, 0.1, 0.12);
+      if (legs) { p.set(TL, -0.3, 0, 0.26); p.set(TR, 0.14, 0, -0.26); p.set(KL, 0.62); p.set(KR, 0.5); }
+      break;
     case 'thug':
       p.set(AL, -0.12, 0, 0.14); p.set(AR, -0.12, 0, -0.14); p.set(EL, -0.55); p.set(ER, -0.55);
       p.set(CH, 0.12); p.set(HD, 0.1); p.set(NK, 0.1);
@@ -148,16 +157,18 @@ function runCycle(m, p, c, sprint, k = 1) {
   const ph = m.phase;
   const amp = clamp(0.32 + sp * 0.06, 0.4, 1.05) * f.stride * (sprint ? 1.12 : 1);
   stance(p, f, false);
+  const g = f.gait ? clamp((sp - 1.0) / 5.0, 0, 1) : 1; // pedestrians: relaxed walk -> jog
   const fl = Math.sin(ph), fr = Math.sin(ph + Math.PI);
   p.set(TL, -fl * amp, 0, 0.04 + f.wide * 0.1); p.set(TR, -fr * amp, 0, -0.04 - f.wide * 0.1);
   p.set(KL, (0.18 + 0.95 * Math.max(0, Math.cos(ph))) * amp * 1.35);
   p.set(KR, (0.18 + 0.95 * Math.max(0, Math.cos(ph + Math.PI))) * amp * 1.35);
-  const aa = (0.55 + (sprint ? 0.25 : 0)) * amp * f.armSwing;
+  const aa = (0.55 + (sprint ? 0.25 : 0)) * amp * f.armSwing * (f.gait ? 0.5 + 0.5 * g : 1);
   const spreadL = p.r[AL * 3 + 2], spreadR = p.r[AR * 3 + 2];
   p.set(AL, fl * aa, 0, spreadL * 0.5 + 0.1); p.set(AR, fr * aa, 0, spreadR * 0.5 - 0.1);
-  p.set(EL, -(f.stance === 'hulk' ? 0.8 : 1.0) - 0.35 * Math.max(0, -fl) - (sprint ? 0.3 : 0));
-  p.set(ER, -(f.stance === 'hulk' ? 0.8 : 1.0) - 0.35 * Math.max(0, -fr) - (sprint ? 0.3 : 0));
-  p.set(H, (0.1 + sp * 0.014) * f.lean * (sprint ? 1.25 : 1), fl * 0.14, 0);
+  const eb = f.gait ? lerp(0.22, 1.0, g) : (f.stance === 'hulk' ? 0.8 : 1.0);
+  p.set(EL, -eb - 0.35 * Math.max(0, -fl) - (sprint ? 0.3 : 0));
+  p.set(ER, -eb - 0.35 * Math.max(0, -fr) - (sprint ? 0.3 : 0));
+  p.set(H, (0.1 + sp * 0.014) * f.lean * (sprint ? 1.25 : 1) * (f.gait ? 0.35 + 0.65 * g : 1), fl * 0.14 * (f.gait ? 0.5 + 0.5 * g : 1), 0);
   p.set(SP, 0.03, -fl * 0.2, 0); p.set(CH, 0.05, 0, fl * 0.035);
   p.set(HD, -0.1 * f.lean, fl * 0.05, 0);
   p.hp[1] = Math.abs(Math.cos(ph)) * 0.03 * f.bob * clamp(sp / 6, 0.4, 1.6);
@@ -166,6 +177,7 @@ function runCycle(m, p, c, sprint, k = 1) {
 S.run = (m, p, c) => runCycle(m, p, c, false);
 S.sprint = (m, p, c) => runCycle(m, p, c, true);
 S.charge = (m, p, c) => {
+  if (c.f.charge === 'shield') { S.block(m, p, c, true); return; }
   runCycle(m, p, c, true, 1.15);
   p.set(H, 0.75 * c.f.lean, 0.25, 0); p.set(HD, -0.6, -0.2, 0); p.set(CH, 0.2, -0.2);
   p.set(AL, -1.25, 0, 0.35); p.set(AR, -1.25, 0, -0.35); p.set(EL, -1.8); p.set(ER, -1.8);
@@ -262,10 +274,16 @@ function flyPitch(c, base = 1.25) {
 S.fly = (m, p, c) => {
   const f = c.f, hov = Math.sin(c.tm * 3) * 0.03;
   p.ground = false; p.flat = 0; p.rate = 8;
-  const pitch = m.customRotation ? 0 : flyPitch(c, f.flyStyle === 'iron' ? 1.35 : 1.25);
+  const pitch = m.customRotation ? 0 : flyPitch(c, f.flyStyle === 'iron' ? 1.35 : f.flyStyle === 'witch' ? 0.85 : 1.25);
   const bank = clamp(c.yawRate * 0.1, -0.8, 0.8), kk = Math.sin(clamp(pitch, 0, 1.6));
   p.set(H, pitch, m.customRotation ? 0 : -bank * kk * 0.9, m.customRotation ? 0 : -bank * (1 - kk));
-  if (f.flyStyle === 'iron') {
+  if (f.flyStyle === 'witch') {
+    const w2 = Math.sin(c.tm * 2.2) * 0.06;
+    p.set(AL, -0.2 + w2, 0, 1.15); p.set(AR, -0.2 - w2, 0, -1.15); p.set(EL, -0.25); p.set(ER, -0.25);
+    p.set(WL, -0.35); p.set(WR, -0.35);
+    p.set(TL, 0.42, 0, 0.1); p.set(TR, 0.5, 0, -0.06); p.set(KL, 0.5 + w2); p.set(KR, 0.62 - w2); p.set(FL, 1.0); p.set(FR, 1.0);
+    p.set(HD, -0.5 * (m.customRotation ? 1 : kk)); p.set(NK, -0.1); p.set(CH, -0.12, 0, 0);
+  } else if (f.flyStyle === 'iron') {
     p.set(AL, 0.45, 0, 0.18); p.set(AR, 0.45, 0, -0.18); p.set(EL, -0.1); p.set(ER, -0.1);
     p.set(TL, 0.12, 0, 0.05); p.set(TR, 0.12, 0, -0.05); p.set(KL, 0.08); p.set(KR, 0.08); p.set(FL, 1.0); p.set(FR, 1.0);
     p.set(HD, -0.9 * (m.customRotation ? 1 : kk)); p.set(NK, -0.2);
@@ -280,6 +298,14 @@ S.hover = (m, p, c) => {
   const f = c.f, b = Math.sin(c.tm * 2.4);
   p.ground = false; p.flat = 0; p.rate = 8;
   p.set(H, 0.06 + b * 0.015, 0, 0);
+  if (f.hover === 'witch') {
+    p.set(AL, -0.1, 0, 1.2 + b * 0.05); p.set(AR, -0.1, 0, -1.2 - b * 0.05); p.set(EL, -0.3); p.set(ER, -0.3);
+    p.set(WL, -0.4); p.set(WR, -0.4);
+    p.set(TL, 0.28, 0, 0.06); p.set(TR, 0.34, 0, -0.04); p.set(KL, 0.75 + b * 0.05); p.set(KR, 0.9 - b * 0.05); p.set(FL, 1.1); p.set(FR, 1.1);
+    p.set(CH, -0.1); p.set(HD, 0.05, Math.sin(c.tm * 0.5) * 0.15);
+    p.set(H, 0.02 + b * 0.015, 0, 0); p.hp[1] = b * 0.05;
+    return;
+  }
   if (f.hover === 'iron') {
     p.set(AL, -0.15, 0, 0.55); p.set(AR, -0.15, 0, -0.55); p.set(EL, -0.55); p.set(ER, -0.55);
     p.set(WL, -0.5); p.set(WR, -0.5);
@@ -320,7 +346,40 @@ S.throw = (m, p, c) => {
   p.mix(two ? K.thr2W : K.thrW, Math.max(0, -a)); p.mix(two ? K.thr2S : K.thrS, Math.max(0, a));
 };
 S.smash = (m, p, c) => { stance(p, c.f); const a = atk(c.t, 0.3, 0.09, 0.2, 0.4); p.mix(K.smashW, Math.max(0, -a)); p.mix(K.smashS, Math.max(0, a)); p.rate = 26; };
+/** two-handed ranged hold. Chest-space IK targets keep the grip hand pointing straight along +Z. */
+S.aim = (m, p, c) => {
+  const f = c.f, k = m.dims.k;
+  stance(p, f);
+  p.rate = 16;
+  if (m.rifleCfg) { p.aim = 1; p.set(CH, 0.05, 0.25); p.set(HD, 0, -0.2); p.set(H, 0.04, 0.2, 0); return; }
+  const br = Math.sin(c.tm * 1.9) * 0.01;
+  if (f.aimStyle === 'bow') {
+    const dr = m.draw;
+    p.set(CH, 0.03, 0.55, 0); p.set(SP, 0, 0.1); p.set(H, 0.02, -0.25, 0); p.set(HD, 0, -0.62 - dr * 0.12, 0.0);
+    p.set(TL, -0.24, 0, 0.2); p.set(TR, 0.2, 0, -0.2); p.set(KL, 0.3); p.set(KR, 0.25);
+    p.ik(1, 0.1 * k, 0.32 * k + br, 0.64 * k);                                    // bow hand, arm straight
+    p.ik(0, lerp(-0.04, -0.15, dr) * k, lerp(0.3, 0.485, dr) * k, lerp(0.44, 0.12, dr) * k, -1, 0.1, -0.85); // string hand to the cheek, elbow back/out
+    return;
+  }
+  p.set(CH, 0.05, 0, 0); p.set(HD, -0.06, 0, 0); p.set(H, 0.04, 0.0, 0);
+  p.set(TL, -0.26, 0, 0.14); p.set(TR, 0.2, 0, -0.14); p.set(KL, 0.32); p.set(KR, 0.28);
+  const rec = m._rec || 0;
+  p.ik(0, -0.075 * k, (0.27 + br) * k, (0.5 - 0.05 * rec) * k);
+  p.ik(1, -0.02 * k, (0.265 + br) * k, 0.63 * k, 0.6, -1, -0.2);
+};
+S.block = (m, p, c, charging) => {
+  const f = c.f;
+  if (charging) runCycle(m, p, c, true, 1.1); else stance(p, f);
+  p.rate = 16;
+  const b = Math.sin(c.tm * 3) * 0.02;
+  p.set(AL, -1.05, 0, 0.12); p.set(EL, -1.75 + b);
+  p.set(AR, charging ? p.r[AR * 3] : -0.8, 0, -0.3); if (!charging) p.set(ER, -1.7); 
+  p.set(CH, 0.14, 0.3, 0); p.set(HD, -0.08, -0.25, 0); p.set(H, charging ? 0.35 : 0.1, charging ? 0.0 : 0.12, 0);
+  if (!charging) { p.set(TL, -0.3, 0, 0.16); p.set(KL, 0.55); p.set(TR, 0.32, 0, -0.16); p.set(KR, 0.5); }
+};
 S.shoot = (m, p, c) => {
+  if (c.f.shoot === 'gun') { m._rec = Math.exp(-c.t * 16); S.aim(m, p, c); p.add(CH, -0.05 * m._rec); p.rate = 24; return; }
+  if (c.f.shoot === 'bow') { S.aim(m, p, c); p.rate = 24; return; }
   stance(p, c.f);
   const rec = Math.exp(-c.t * 14);
   p.rate = 22;
@@ -334,12 +393,18 @@ S.cast = (m, p, c) => {
   stance(p, c.f);
   const tr = Math.sin(c.tm * 40) * 0.02, e = sm(c.t / 0.2);
   p.rate = 12;
+  if (c.f.castStyle === 'hex') { // arms thrust forward and out, fingers splayed
+    p.mix([[AL, -1.75, 0, 0.55], [AR, -1.75, 0, -0.55], [EL, -0.25, 0, 0], [ER, -0.25, 0, 0], [CH, 0.1, 0, 0], [HD, -0.15, 0, 0], [H, 0.02, 0, 0],
+      [TL, -0.28, 0, 0.18], [TR, 0.22, 0, -0.18], [KL, 0.35, 0, 0], [KR, 0.3, 0, 0], [WL, -0.5, 0, 0], [WR, -0.5, 0, 0]], e);
+    p.add(AL, tr, 0, tr); p.add(AR, -tr, 0, tr);
+    return;
+  }
   p.mix([[AL, -2.7, 0, 0.75], [AR, -2.7, 0, -0.75], [EL, -0.3, 0, 0], [ER, -0.3, 0, 0], [CH, -0.22, 0, 0], [HD, -0.45, 0, 0], [H, -0.04, 0, 0],
     [TL, -0.1, 0, 0.22], [TR, 0.1, 0, -0.22], [KL, 0.2, 0, 0], [KR, 0.2, 0, 0], [WL, -0.3, 0, 0], [WR, -0.3, 0, 0]], e);
   p.add(AL, tr, 0, tr); p.add(AR, -tr, 0, tr);
 };
 S.stunned = (m, p, c) => {
-  stance(p, { ...c.f, stance: 'thug' });
+  stance(p, m._stunProf || (m._stunProf = { ...c.f, stance: 'thug' }));
   const w = Math.sin(c.tm * 5);
   p.rate = 10;
   p.set(CH, 0.4, w * 0.12, w * 0.1); p.set(NK, 0.3, 0, w * 0.15); p.set(HD, 0.35, 0, -w * 0.25);
@@ -360,11 +425,11 @@ S.dead = (m, p, c) => {
 };
 
 // states where the hunter holds the rifle with both hands (IK)
-const RIFLE_STATES = new Set(['idle', 'run', 'sprint', 'shoot', 'jump', 'fall', 'land', 'swing', 'hover', 'fly', 'glide', 'zip', 'wallrun', 'wallidle']);
+const RIFLE_STATES = new Set(['idle', 'run', 'sprint', 'shoot', 'aim', 'jump', 'fall', 'land', 'swing', 'hover', 'fly', 'glide', 'zip', 'wallrun', 'wallidle']);
 
 // ------------------------------------------------------------------ model
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _mat = new THREE.Matrix4();
-const _a = new V3(), _b = new V3(), _u = new V3(), _f = new V3(), _n = new V3(), _X = new V3(), _Y = new V3(), _Z = new V3(), _E = new V3(), _perp = new V3();
+const _t3 = new V3(), _pole = new V3(), _a = new V3(), _b = new V3(), _u = new V3(), _f = new V3(), _n = new V3(), _X = new V3(), _Y = new V3(), _Z = new V3(), _E = new V3(), _perp = new V3();
 
 export class ProcModel {
   /**
@@ -393,6 +458,7 @@ export class ProcModel {
     this.groundK = 1; this.lastYaw = null; this.yawRate = 0;
     this.vl = new V3(); this.webDir = null; this.tintAmt = 0; this._tint = new THREE.Color(); this._clones = new Map();
     this.thrusters = []; this.extra = {};
+    this.draw = 0; this._rec = 0; this._al = 0; this._ikp = 0; this._ikr = { x: 0, y: 0, z: 0, e: 0 }; this._cq = new THREE.Quaternion(); this._hq = new THREE.Quaternion();
     this.sx = this.sy = 1;
     this._ctx = { t: 0, sp: 0, dt: 0.016, tm: 0, vl: this.vl, st: 'idle', f: this.prof, yawRate: 0, m: this };
   }
@@ -478,6 +544,9 @@ export class ProcModel {
       }
     }
 
+    // bow draw / gun recoil envelopes
+    this.draw += ((st === 'aim' ? 1 : 0) - this.draw) * (1 - Math.exp(-(st === 'shoot' ? 45 : st === 'aim' ? 6 : 8) * dt));
+    this._rec *= Math.exp(-14 * dt);
     const p = this.pose; p.reset();
     const c = this._ctx; c.t = t; c.sp = sp; c.dt = dt; c.tm = this.time; c.st = st; c.yawRate = this.yawRate;
     (S[st] || S.idle)(this, p, c);
@@ -490,6 +559,18 @@ export class ProcModel {
 
     // rifle IK (hunter)
     if (this.rifleCfg) this._rifle(p, st, dt, k);
+    // pose-driven arm IK (aim / bow)
+    this._ikp += ((p.ikOn[0] || p.ikOn[1] ? 1 : 0) - this._ikp) * (1 - Math.exp(-14 * dt));
+    if (this._ikp > 0.01) {
+      for (let sd = 0; sd < 2; sd++) {
+        if (!p.ikOn[sd]) continue;
+        const i = sd * 3, aj = sd ? AL : AR, ej = sd ? EL : ER;
+        _t3.set(p.ikT[i], p.ikT[i + 1], p.ikT[i + 2]); _pole.set(p.ikP[i], p.ikP[i + 1], p.ikP[i + 2]);
+        const r = this._solveArm(this.j[aj].position, _t3, sd ? 1 : -1, _pole), w = this._ikp, ci = aj * 3;
+        cur[ci] = lerp(cur[ci], r.x, w); cur[ci + 1] = lerp(cur[ci + 1], r.y, w); cur[ci + 2] = lerp(cur[ci + 2], r.z, w);
+        cur[ej * 3] = lerp(cur[ej * 3], r.e, w);
+      }
+    }
 
     // ground snapping
     const d = this.dims;
@@ -512,6 +593,17 @@ export class ProcModel {
     const fl = p.flat * this.groundK;
     J_[FL].rotation.x = cur[FL * 3] + -(hx + cur[TL * 3] + cur[KL * 3]) * fl;
     J_[FR].rotation.x = cur[FR * 3] + -(hx + cur[TR * 3] + cur[KR * 3]) * fl;
+
+    // keep the right hand's frame aligned with the character (so +Z of a gun parented to handR points forward)
+    const alWant = (st === 'aim' || st === 'shoot') && this.prof.alignHand !== 'none' ? 1 : 0;
+    this._al += (alWant - this._al) * (1 - Math.exp(-16 * dt));
+    if (this._al > 0.01 || this.handR.quaternion.w < 0.9999) {
+      if (this._al <= 0.01) this.handR.quaternion.identity();
+      else {
+        const q = this._cq.copy(J_[H].quaternion).multiply(J_[SP].quaternion).multiply(J_[CH].quaternion).multiply(J_[AR].quaternion).multiply(J_[ER].quaternion).multiply(J_[WR].quaternion);
+        this.handR.quaternion.identity().slerp(q.invert(), this._al);
+      }
+    }
 
     if (this.hooks && this.hooks.update) this.hooks.update(c, this);
   }
@@ -536,7 +628,7 @@ export class ProcModel {
     const shR = this.j[J.AR].position, shL = this.j[J.AL].position;
     const tR = _b.copy(rc.gripR).applyMatrix4(node.matrix).clone();
     const tL = _a.copy(rc.gripL).applyMatrix4(node.matrix).clone();
-    const ikR = this._solveArm(shR, tR, -1), ikL = this._solveArm(shL, tL, 1);
+    const ikR = { ...this._solveArm(shR, tR, -1) }, ikL = { ...this._solveArm(shL, tL, 1) };
     const w = this._ik;
     for (const [side, r, aj, ej] of [[-1, ikR, AR, ER], [1, ikL, AL, EL]]) {
       if (!r) continue;
@@ -547,13 +639,14 @@ export class ProcModel {
   }
 
   /** two-bone IK in chest space; returns euler for shoulder + elbow flexion */
-  _solveArm(sh, target, side) {
+  _solveArm(sh, target, side, pole) {
     const A = this.dims.upper, B = this.dims.fore + this.dims.hand * 0.35;
     const d = _f.copy(target).sub(sh); let dist = d.length();
     dist = clamp(dist, Math.abs(A - B) + 0.01, A + B - 0.005);
     d.normalize();
     const cosB = clamp((A * A + dist * dist - B * B) / (2 * A * dist), -1, 1), beta = Math.acos(cosB);
-    _perp.set(side * 0.55, -1, -0.35).normalize();
+    if (pole) _perp.copy(pole); else _perp.set(side * 0.55, -1, -0.35);
+    _perp.normalize();
     _perp.addScaledVector(d, -_perp.dot(d)).normalize();
     _E.copy(sh).addScaledVector(d, A * cosB).addScaledVector(_perp, A * Math.sin(beta));
     _u.copy(_E).sub(sh).normalize();
@@ -569,7 +662,8 @@ export class ProcModel {
     _q.setFromRotationMatrix(_mat);
     _e.setFromQuaternion(_q, 'XYZ');
     const e = Math.acos(clamp(_u.dot(fdir), -1, 1));
-    return { x: _e.x, y: _e.y, z: _e.z, e: -e };
+    const o = this._ikr; o.x = _e.x; o.y = _e.y; o.z = _e.z; o.e = -e;
+    return o;
   }
 
   dispose() {

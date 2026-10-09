@@ -5,6 +5,8 @@
 //   play(name, { volume, pitch, pos })   one-shot SFX, optional 3D attenuation/pan relative to game.camera
 //   music('roam'|'combat'|'boss'|'victory'|null)   crossfade to a track
 //   duck(bool)                       lower the music (pause menu)
+//   engine(on, rpm)                  looping car engine; setEngine(rpm 0..1, load 0..1) every frame (auto-stops if not refreshed)
+//   siren(on)                        looping police wail; horn(on) held horn
 //   update(dt)                       music scheduler + automatic roam <-> combat switching
 //
 // Everything is wrapped so that a missing / locked AudioContext never throws.
@@ -128,11 +130,11 @@ export class AudioEngine {
   // ---- SFX ----------------------------------------------------------------------------------
   play(name, opts = {}) {
     if (!this.running) return;
-    const rec = SFX[name];
-    if (!rec) return;
+    const rec = Object.prototype.hasOwnProperty.call(SFX, name) ? SFX[name] : null;
+    if (typeof rec !== 'function') return;
     try {
       const ctx = this.ctx, now = ctx.currentTime;
-      if (now - (this._lastPlay[name] || 0) < 0.03) return; // anti-spam
+      if (now - (this._lastPlay[name] || 0) < (MIN_GAP[name] ?? 0.03)) return; // anti-spam
       this._lastPlay[name] = now;
       let vol = opts.volume ?? 1;
       let pan = 0;
@@ -155,6 +157,127 @@ export class AudioEngine {
       // free the gain node after the longest sound (3 s) has surely ended
       setTimeout(() => { try { out.disconnect(); tail.disconnect?.(); } catch { /* ignore */ } }, 3500);
     } catch { /* never throw from audio */ }
+  }
+
+
+  // ---- looping voices: engine, siren, horn ----------------------------------------------------
+  /** Explicit engine control: engine(true, rpm) starts / updates it, engine(false) stops it. */
+  engine(on, rpm = 0.2, load = 0) {
+    if (!this.ok) return;
+    try {
+      if (!on) { this._stopEngine(); return; }
+      if (!this.running) return;
+      this._engExplicit = true;
+      this._engineSet(rpm, load);
+    } catch { /* ignore */ }
+  }
+
+  /** Per-frame engine update from the vehicle system. Auto-stops ~0.3 s after the last call. */
+  setEngine(rpm = 0.2, load = 0) {
+    if (!this.running) return;
+    try { this._engExplicit = false; this._engineSet(rpm, load); } catch { /* ignore */ }
+  }
+
+  _engineSet(rpm, load) {
+    const ctx = this.ctx, t = ctx.currentTime;
+    rpm = Math.max(0, Math.min(1, +rpm || 0)); load = Math.max(0, Math.min(1, +load || 0));
+    let e = this._eng;
+    if (!e) {
+      const out = ctx.createGain(); out.gain.value = 0.0001;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 2.5; lp.frequency.value = 400;
+      const shaper = ctx.createWaveShaper(); const curve = new Float32Array(256);
+      for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.2); }
+      shaper.curve = curve;
+      const o1 = ctx.createOscillator(); o1.type = 'sawtooth';
+      const o2 = ctx.createOscillator(); o2.type = 'square';
+      const o3 = ctx.createOscillator(); o3.type = 'triangle';
+      const g1 = ctx.createGain(), g2 = ctx.createGain(), g3 = ctx.createGain();
+      g1.gain.value = 0.5; g2.gain.value = 0.22; g3.gain.value = 0.5;
+      // cylinder-firing wobble
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; const lg = ctx.createGain(); lg.gain.value = 0.18;
+      lfo.connect(lg); lg.connect(g1.gain);
+      o1.connect(g1); o2.connect(g2); o3.connect(g3);
+      g1.connect(shaper); g2.connect(shaper); g3.connect(shaper);
+      shaper.connect(lp); lp.connect(out); out.connect(this.sfxBus);
+      // intake / road noise
+      const n = ctx.createBufferSource(); n.buffer = this.noiseBuf; n.loop = true;
+      const nf = ctx.createBiquadFilter(); nf.type = 'lowpass'; nf.frequency.value = 500;
+      const ng = ctx.createGain(); ng.gain.value = 0.0;
+      n.connect(nf); nf.connect(ng); ng.connect(out);
+      [o1, o2, o3, lfo, n].forEach((x) => x.start(t));
+      e = this._eng = { out, lp, o1, o2, o3, lfo, n, nf, ng, last: 0 };
+      this.play('engine_start');
+    }
+    const f = 34 + rpm * 96;                       // fundamental, Hz
+    e.o1.frequency.setTargetAtTime(f, t, 0.05);
+    e.o2.frequency.setTargetAtTime(f * 0.5, t, 0.05);
+    e.o3.frequency.setTargetAtTime(f * 2.01, t, 0.05);
+    e.lfo.frequency.setTargetAtTime(f * 0.5, t, 0.08);
+    e.lp.frequency.setTargetAtTime(260 + rpm * 700 + load * 900, t, 0.06);
+    e.nf.frequency.setTargetAtTime(400 + rpm * 1800, t, 0.08);
+    e.ng.gain.setTargetAtTime(0.04 + load * 0.18 + rpm * 0.05, t, 0.08);
+    e.out.gain.setTargetAtTime(0.1 + load * 0.08 + rpm * 0.05, t, 0.06);
+    e.last = performance.now();
+  }
+
+  _stopEngine() {
+    const e = this._eng; if (!e) return;
+    this._eng = null;
+    const t = this.ctx.currentTime;
+    try {
+      e.out.gain.cancelScheduledValues(t); e.out.gain.setTargetAtTime(0.0001, t, 0.08);
+      setTimeout(() => { try { [e.o1, e.o2, e.o3, e.lfo, e.n].forEach((x) => x.stop()); e.out.disconnect(); } catch { /* ignore */ } }, 500);
+    } catch { /* ignore */ }
+  }
+
+  /** Police siren wail on/off. */
+  siren(on) {
+    if (!this.ok) return;
+    try {
+      if (!on) {
+        const s = this._sir; if (!s) return;
+        this._sir = null; const t = this.ctx.currentTime;
+        s.g.gain.setTargetAtTime(0.0001, t, 0.1);
+        setTimeout(() => { try { s.o.stop(); s.lfo.stop(); s.g.disconnect(); } catch { /* ignore */ } }, 600);
+        return;
+      }
+      if (this._sir || !this.running) return;
+      const ctx = this.ctx, t = ctx.currentTime;
+      const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 900;
+      const lfo = ctx.createOscillator(); lfo.type = 'triangle'; lfo.frequency.value = 0.55;
+      const lg = ctx.createGain(); lg.gain.value = 330; lfo.connect(lg); lg.connect(o.frequency);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+      const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.045, t, 0.15);
+      o.connect(lp); lp.connect(g); g.connect(this.sfxBus);
+      o.start(t); lfo.start(t);
+      this._sir = { o, lfo, g };
+    } catch { /* ignore */ }
+  }
+
+  /** Held horn: horn(true) while the button is down, horn(false) on release. (play('horn') is a single honk.) */
+  horn(on) {
+    if (!this.ok) return;
+    try {
+      if (!on) {
+        const h = this._horn; if (!h) return;
+        this._horn = null; const t = this.ctx.currentTime;
+        h.g.gain.setTargetAtTime(0.0001, t, 0.03);
+        setTimeout(() => { try { h.a.stop(); h.b.stop(); h.g.disconnect(); } catch { /* ignore */ } }, 300);
+        return;
+      }
+      if (this._horn || !this.running) return;
+      const ctx = this.ctx, t = ctx.currentTime;
+      const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.setTargetAtTime(0.16, t, 0.01);
+      const a = ctx.createOscillator(), b = ctx.createOscillator(); a.type = b.type = 'sawtooth'; a.frequency.value = 392; b.frequency.value = 494;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800;
+      a.connect(lp); b.connect(lp); lp.connect(g); g.connect(this.sfxBus); a.start(t); b.start(t);
+      this._horn = { a, b, g };
+    } catch { /* ignore */ }
+  }
+
+  _loopWatchdog() {
+    const e = this._eng;
+    if (e && !this._engExplicit && performance.now() - e.last > 350) this._stopEngine();
   }
 
   // ---- music --------------------------------------------------------------------------------
@@ -194,6 +317,7 @@ export class AudioEngine {
       this._applyVolumeTimer = (this._applyVolumeTimer || 0) + dt;
       if (this._applyVolumeTimer > 0.25) { this._applyVolumeTimer = 0; this._applyVolumes(); }
       if (!this.running) return;
+      this._loopWatchdog();
       const g = this.game;
       // auto switching between roam and combat (and boss when a boss is nearby)
       if (g.state === 'playing' && g.player && !(this._manual && this.track === 'victory')) {
@@ -381,8 +505,45 @@ const SFX = {
   ui_move: (v) => { osc(v, { f0: 760, f1: 700, d: 0.05, v: 0.1, type: 'triangle' }); },
   ui_select: (v) => { osc(v, { f0: 520, f1: 520, d: 0.1, v: 0.14, type: 'triangle' }); osc(v, { f0: 880, f1: 880, d: 0.16, v: 0.14, type: 'triangle', at: 0.06 }); },
   ui_back: (v) => { osc(v, { f0: 520, f1: 330, d: 0.14, v: 0.13, type: 'triangle' }); },
+  // ---- v2: guns -------------------------------------------------------------------------------
+  pistol: (v) => { noise(v, { f0: 3200, f1: 700, q: 0.7, d: 0.09, v: 0.8 }); thump(v, 260, 70, 0.1, 0.65); noise(v, { type: 'lowpass', f0: 900, f1: 180, d: 0.3, v: 0.22, at: 0.03 }); },
+  smg: (v) => { noise(v, { f0: 3600, f1: 900, q: 0.8, d: 0.06, v: 0.65 }); thump(v, 300, 90, 0.07, 0.5); noise(v, { type: 'lowpass', f0: 1000, f1: 250, d: 0.14, v: 0.15, at: 0.02 }); },
+  shotgun: (v) => { noise(v, { type: 'lowpass', f0: 5000, f1: 220, q: 0.6, d: 0.38, v: 1.0 }); thump(v, 150, 38, 0.3, 0.95); noise(v, { f0: 1800, f1: 400, d: 0.12, v: 0.5 }); noise(v, { type: 'lowpass', f0: 600, f1: 90, d: 0.7, a: 0.05, v: 0.3, at: 0.05 }); },
+  rifle: (v) => { noise(v, { f0: 3000, f1: 500, q: 0.7, d: 0.11, v: 0.9 }); thump(v, 200, 48, 0.16, 0.85); noise(v, { type: 'lowpass', f0: 800, f1: 120, d: 0.5, v: 0.28, at: 0.03 }); },
+  sniper: (v) => { noise(v, { type: 'lowpass', f0: 6000, f1: 160, q: 0.6, d: 0.5, v: 1.0 }); thump(v, 130, 30, 0.4, 1.0); osc(v, { f0: 1800, f1: 400, d: 0.1, v: 0.18, type: 'sawtooth', lp: 3000 }); noise(v, { type: 'lowpass', f0: 500, f1: 70, d: 1.4, a: 0.1, v: 0.35, at: 0.12 }); },
+  rpg: (v) => { noise(v, { f0: 2400, f1: 300, q: 1, d: 0.5, a: 0.01, v: 0.7 }); thump(v, 110, 36, 0.35, 0.7); noise(v, { type: 'highpass', f0: 1500, f1: 600, d: 0.9, a: 0.1, v: 0.25, at: 0.1 }); },
+  reload: (v) => { thump(v, 700, 400, 0.04, 0.3); noise(v, { f0: 3500, f1: 3500, q: 6, d: 0.03, v: 0.4 }); osc(v, { f0: 1100, f1: 900, d: 0.04, v: 0.12, type: 'square', at: 0.28 }); noise(v, { f0: 2500, f1: 2500, q: 5, d: 0.04, v: 0.5, at: 0.28 }); thump(v, 500, 250, 0.06, 0.35, 0.36); },
+  empty: (v) => { noise(v, { f0: 4500, f1: 4500, q: 8, d: 0.025, v: 0.5 }); osc(v, { f0: 1500, f1: 1200, d: 0.03, v: 0.1, type: 'square' }); },
+  // ---- v2: vehicles -------------------------------------------------------------------------
+  engine_start: (v) => { osc(v, { f0: 55, f1: 34, d: 0.5, a: 0.02, v: 0.22, type: 'sawtooth', lp: 300 }); osc(v, { f0: 38, f1: 70, d: 0.45, a: 0.15, v: 0.2, type: 'square', lp: 260 }); noise(v, { type: 'lowpass', f0: 400, f1: 900, d: 0.5, a: 0.1, v: 0.15 }); },
+  horn: (v) => { osc(v, { f0: 392, f1: 392, d: 0.42, a: 0.01, v: 0.16, type: 'sawtooth', lp: 1800 }); osc(v, { f0: 494, f1: 494, d: 0.42, a: 0.01, v: 0.14, type: 'sawtooth', lp: 1800 }); },
+  siren_blip: (v) => { osc(v, { f0: 700, f1: 1300, d: 0.4, a: 0.05, v: 0.12, type: 'square', lp: 2200 }); osc(v, { f0: 1300, f1: 700, d: 0.4, a: 0.05, v: 0.12, type: 'square', lp: 2200, at: 0.4 }); },
+  siren: (v) => { SFX.siren_blip(v); },
+  screech: (v) => { noise(v, { type: 'bandpass', f0: 2300, f1: 1700, q: 7, d: 0.5, a: 0.04, v: 0.3 }); noise(v, { type: 'bandpass', f0: 3400, f1: 2600, q: 9, d: 0.45, a: 0.06, v: 0.18 }); osc(v, { f0: 1500, f1: 1100, d: 0.4, a: 0.05, v: 0.04, type: 'sawtooth', lp: 2400 }); },
+  crash: (v) => { thump(v, 120, 30, 0.35, 0.95); noise(v, { type: 'lowpass', f0: 3500, f1: 120, d: 0.5, v: 0.85 }); noise(v, { f0: 1800, f1: 600, q: 2, d: 0.25, v: 0.5, at: 0.02 }); osc(v, { f0: 600, f1: 180, d: 0.12, v: 0.12, type: 'square', at: 0.05 }); },
+  glass: (v) => { for (let i = 0; i < 9; i++) osc(v, { f0: 3000 + Math.random() * 5000, f1: 2500 + Math.random() * 4000, d: 0.12 + Math.random() * 0.2, v: 0.05, at: Math.random() * 0.22, type: 'triangle' }); noise(v, { type: 'highpass', f0: 5000, f1: 3000, d: 0.35, v: 0.3 }); },
+  carjack: (v) => { thump(v, 160, 55, 0.12, 0.7); noise(v, { f0: 1800, f1: 800, q: 2, d: 0.08, v: 0.5 }); noise(v, { type: 'highpass', f0: 3000, f1: 3000, d: 0.03, v: 0.4, at: 0.14 }); thump(v, 200, 80, 0.14, 0.75, 0.2); osc(v, { f0: 250, f1: 120, d: 0.2, v: 0.15, type: 'sawtooth', lp: 900, at: 0.22 }); },
+  // ---- v2: economy / police -----------------------------------------------------------------
+  cash: (v) => { osc(v, { f0: 1319, f1: 1319, d: 0.1, v: 0.14, type: 'square', lp: 4000 }); osc(v, { f0: 1760, f1: 1760, d: 0.35, a: 0.002, v: 0.14, type: 'square', lp: 5000, at: 0.07 }); osc(v, { f0: 3520, f1: 3520, d: 0.25, v: 0.05, at: 0.07 }); },
+  wanted: (v) => { [0, 0.16].forEach((a) => { osc(v, { f0: 880, f1: 880, d: 0.12, v: 0.12, type: 'square', lp: 2500, at: a }); osc(v, { f0: 660, f1: 660, d: 0.12, v: 0.1, type: 'square', lp: 2500, at: a + 0.08 }); }); },
+  // ---- v2: hero powers ---------------------------------------------------------------------
+  claw: (v) => { noise(v, { type: 'highpass', f0: 2500, f1: 7000, q: 0.8, d: 0.12, v: 0.4 }); osc(v, { f0: 3200, f1: 1800, d: 0.18, v: 0.07, type: 'sawtooth', lp: 6000 }); osc(v, { f0: 4200, f1: 2400, d: 0.2, v: 0.05, at: 0.03, type: 'sawtooth', lp: 7000 }); },
+  slash: (v) => { noise(v, { f0: 900, f1: 5200, q: 1.5, d: 0.16, a: 0.015, v: 0.4 }); osc(v, { f0: 2400, f1: 900, d: 0.14, v: 0.06, type: 'triangle' }); },
+  shield: (v) => { osc(v, { f0: 1400, f1: 1380, d: 0.5, a: 0.002, v: 0.18, type: 'sine' }); osc(v, { f0: 2100, f1: 2090, d: 0.4, a: 0.002, v: 0.1, type: 'sine' }); osc(v, { f0: 3000, f1: 2980, d: 0.3, v: 0.05 }); thump(v, 300, 120, 0.06, 0.5); noise(v, { f0: 4000, f1: 4000, q: 6, d: 0.04, v: 0.35 }); },
+  bow: (v) => { noise(v, { f0: 1200, f1: 400, q: 2, d: 0.08, v: 0.2 }); osc(v, { f0: 220, f1: 110, d: 0.14, v: 0.22, type: 'triangle' }); noise(v, { type: 'highpass', f0: 2500, f1: 5000, d: 0.2, v: 0.2, at: 0.02 }); },
+  arrow: (v) => { SFX.bow(v); },
+  magic: (v) => { osc(v, { f0: 300, f1: 900, d: 0.5, a: 0.04, v: 0.14, type: 'sine' }); osc(v, { f0: 450, f1: 1350, d: 0.5, a: 0.04, v: 0.1, type: 'triangle', detune: 14 }); noise(v, { f0: 1000, f1: 5000, q: 4, d: 0.45, a: 0.05, v: 0.14 }); osc(v, { f0: 90, f1: 140, d: 0.4, v: 0.14, type: 'sawtooth', lp: 400 }); },
+  hex: (v) => { SFX.magic(v); osc(v, { f0: 1800, f1: 600, d: 0.25, v: 0.07, type: 'square', lp: 3000, at: 0.05 }); },
   pickup: (v) => { [660, 990, 1320].forEach((f, i) => osc(v, { f0: f, f1: f, d: 0.16, v: 0.12, at: i * 0.055 })); },
 };
+
+// friendly aliases so other systems can pass weapon ids, hero ids or event names directly
+Object.assign(SFX, {
+  gunshot: SFX.pistol, gun: SFX.pistol, assault: SFX.rifle, ar: SFX.rifle, assault_rifle: SFX.rifle, grenade: SFX.rpg, grenade_launcher: SFX.rpg,
+  coin: SFX.cash, money: SFX.cash, claws: SFX.claw, arrow_shot: SFX.bow, scarlet: SFX.hex, reality: SFX.magic, telekinesis: SFX.magic,
+  glass_break: SFX.glass, tyre: SFX.screech, tire: SFX.screech, steal: SFX.carjack, engine: SFX.engine_start, shield_hit: SFX.shield, shield_throw: SFX.throw,
+});
+const MIN_GAP = { horn: 0.4, screech: 0.35, siren: 0.8, siren_blip: 0.8, engine_start: 0.5, smg: 0.045, cash: 0.06, crash: 0.12, glass: 0.1, wanted: 0.5, reload: 0.3 };
 
 // ---- music voices ---------------------------------------------------------------------------
 function kick(ctx, dst, t, vol) {

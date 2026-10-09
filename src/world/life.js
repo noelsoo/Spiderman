@@ -1,4 +1,4 @@
-// Instanced trees, street lamps, traffic, clouds and steam vents. All cheap.
+// Instanced trees, street lamps, clouds and steam vents. All cheap. (Cars live in src/vehicles now.)
 import * as THREE from 'three';
 import { Bucket } from './geo.js';
 import { avenueX, streetZ } from './city.js';
@@ -40,58 +40,6 @@ export function makeTreesAndLamps(ctx, group) {
     });
     poles.castShadow = false;
     group.add(poles, heads);
-  }
-}
-
-export class Traffic {
-  constructor(rng, group, quality) {
-    const N = quality === 'high' ? 520 : quality === 'medium' ? 320 : 140;
-    const body = new Bucket(), lights = new Bucket();
-    // faces +Z
-    body.boxClosed(-0.95, 0.18, -2.15, 0.95, 0.55, 2.15, 2, [0.07, 0.07, 0.08]);
-    body.boxClosed(-0.95, 0.55, -2.15, 0.95, 1.05, 2.15, 2, [1, 1, 1]);
-    body.boxClosed(-0.82, 1.05, -1.2, 0.82, 1.55, 1.25, 2, [0.33, 0.38, 0.45]);
-    for (const x of [-0.7, 0.7]) lights.boxAll(x - 0.22, 0.62, 2.14, x + 0.22, 0.86, 2.2, 1, [5, 4.4, 3.2]);
-    for (const x of [-0.7, 0.7]) lights.boxAll(x - 0.22, 0.66, -2.2, x + 0.22, 0.86, -2.14, 1, [4, 0.15, 0.1]);
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    this.body = new THREE.InstancedMesh(body.toGeometry(), mat, N);
-    this.lights = new THREE.InstancedMesh(lights.toGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true }), N);
-    this.lights.instanceMatrix = this.body.instanceMatrix;
-    this.body.frustumCulled = false; this.lights.frustumCulled = false;
-    this.body.castShadow = false; this.body.receiveShadow = false;
-    group.add(this.body, this.lights);
-
-    const lanes = [];
-    for (let a = 0; a < 11; a++) for (const off of [-8.25, -2.75, 2.75, 8.25]) lanes.push({ axis: 0, fixed: avenueX(a) + off, dir: off < 0 ? 1 : -1, min: -605, max: 605 });
-    for (let s = 0; s < 18; s++) for (const off of [-4, 4]) lanes.push({ axis: 1, fixed: streetZ(s) + off, dir: off > 0 ? 1 : -1, min: -436, max: 605 });
-    for (const l of lanes) { l.speed = 7 + rng() * 6; l.n = 0; }
-    this.cars = [];
-    const palette = [[0.02, 0.02, 0.025], [0.9, 0.9, 0.9], [0.55, 0.57, 0.6], [0.8, 0.12, 0.1], [0.1, 0.18, 0.4], [0.9, 0.62, 0.04], [0.9, 0.62, 0.04], [0.9, 0.62, 0.04], [0.25, 0.3, 0.28]];
-    const assign = [];
-    for (let i = 0; i < N; i++) { const l = lanes[(rng() * lanes.length) | 0]; l.n++; assign.push(l); }
-    const idx = new Map();
-    assign.forEach((l, i) => {
-      const k = idx.get(l) || 0; idx.set(l, k + 1);
-      const len = l.max - l.min, slot = len / l.n;
-      const p = l.min + slot * (k + 0.15 + rng() * 0.7);
-      const col = palette[(rng() * palette.length) | 0];
-      this.cars.push({ l, p });
-      this.body.setColorAt(i, _c.setRGB(col[0], col[1], col[2]));
-    });
-    this.N = N;
-    this.step(0);
-  }
-  step(dt) {
-    for (let i = 0; i < this.N; i++) {
-      const c = this.cars[i], l = c.l;
-      c.p += l.dir * l.speed * dt;
-      if (c.p > l.max) c.p -= l.max - l.min; else if (c.p < l.min) c.p += l.max - l.min;
-      if (l.axis === 0) { _o.position.set(l.fixed, 0, c.p); _o.rotation.y = l.dir > 0 ? 0 : Math.PI; }
-      else { _o.position.set(c.p, 0, l.fixed); _o.rotation.y = l.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
-      _o.rotation.x = 0; _o.rotation.z = 0; _o.scale.set(1, 1, 1); _o.updateMatrix();
-      this.body.setMatrixAt(i, _o.matrix);
-    }
-    this.body.instanceMatrix.needsUpdate = true;
   }
 }
 

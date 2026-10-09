@@ -7,7 +7,8 @@ import { buildCity, buildBackdrop, addBox, L, colX, rowZ, avenueX, streetZ } fro
 import { buildAvengersTower, buildEmpireSpire, buildBridge } from './landmarks.js';
 import { Atmosphere } from './atmosphere.js';
 import { makeWater } from './water.js';
-import { makeTreesAndLamps, Traffic, Clouds, Steam } from './life.js';
+import { makeTreesAndLamps, Clouds, Steam } from './life.js';
+import { resolveQuality } from '../render/quality.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -37,14 +38,8 @@ export class World {
 
   async build(onProgress = () => {}) {
     const { scene, physics, renderer } = this.game;
-    let quality = this.game.settings?.quality ?? 'high';
-    // software rasterisers (SwiftShader / llvmpipe) cannot afford shadows etc.
-    try {
-      const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-      if (/swiftshader|llvmpipe|software/i.test(name)) quality = 'low';
-    } catch { /* ignore */ }
-    if (globalThis.__FORCE_WORLD_QUALITY) quality = globalThis.__FORCE_WORLD_QUALITY;
+    // software rasterisers (SwiftShader / llvmpipe) force 'low'; window.__FORCE_WORLD_QUALITY overrides (tests)
+    const quality = resolveQuality(renderer, this.game.settings?.quality ?? 'high');
     this.quality = quality;
     const rng = mulberry32(20231020);
     scene.add(this.group);
@@ -111,7 +106,6 @@ export class World {
     onProgress(0.8); await tick();
 
     makeTreesAndLamps(ctx, this.group);
-    this.traffic = new Traffic(rng, this.group, quality);
     this.clouds = new Clouds(rng, this.group, T.cloud, quality);
     this.steam = new Steam(rng, this.group, T.dot, quality);
     onProgress(0.9); await tick();
@@ -135,7 +129,6 @@ export class World {
     if (!this.atmo) return;
     this.time += dt;
     this.waterU.uTime.value = this.time;
-    this.traffic.step(dt);
     this.clouds.step(dt);
     this.steam.step(dt);
     const g = this.game;

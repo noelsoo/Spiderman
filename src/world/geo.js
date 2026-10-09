@@ -11,7 +11,8 @@ const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
 const _scl = new THREE.Vector3();
 const _mat = new THREE.Matrix4();
-let _cyl = null;
+let _cyl = null, _box = null;
+const _eul = new THREE.Euler(), _pos = new THREE.Vector3();
 const cylBase = () => (_cyl ||= new THREE.CylinderGeometry(1, 1, 1, 5, 1, false).toNonIndexed());
 
 export function mulberry32(seed) {
@@ -89,6 +90,42 @@ export class Bucket {
     _scl.set(r, len, r);
     _mat.compose(_mid, _q, _scl);
     this.addGeo(cylBase(), _mat, col);
+  }
+
+  /** transformed unit box (centre, size, yaw / pitch / roll) - for rotated props */
+  boxXf(cx, cy, cz, sx, sy, sz, yaw = 0, col = WHITE, pitch = 0, roll = 0) {
+    _box ||= new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+    _eul.set(pitch, yaw, roll, 'YXZ');
+    _q.setFromEuler(_eul);
+    _pos.set(cx, cy, cz); _scl.set(sx, sy, sz);
+    _mat.compose(_pos, _q, _scl);
+    this.addGeo(_box, _mat, col);
+  }
+
+  /** horizontal n-gon fan (facing up) */
+  disc(x, z, r, y, segs = 10, col = WHITE) {
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
+      this.p.push(x, y, z, x + Math.sin(a1) * r, y, z + Math.cos(a1) * r, x + Math.sin(a0) * r, y, z + Math.cos(a0) * r);
+      for (let k = 0; k < 3; k++) { this.n.push(0, 1, 0); this.c.push(col[0], col[1], col[2]); }
+      this.u.push(0.5, 0.5, 0.5 + Math.sin(a1) * 0.5, 0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a0) * 0.5, 0.5 + Math.cos(a0) * 0.5);
+    }
+  }
+
+  /** vertical n-sided cylinder with a cap */
+  cylV(x, y0, z, r, h, segs = 6, col = WHITE, r1 = r) {
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2, a1 = ((i + 1) / segs) * Math.PI * 2;
+      const s0 = Math.sin(a0), c0 = Math.cos(a0), s1 = Math.sin(a1), c1 = Math.cos(a1);
+      const A = [x + s0 * r, y0, z + c0 * r], B = [x + s1 * r, y0, z + c1 * r], C = [x + s1 * r1, y0 + h, z + c1 * r1], D = [x + s0 * r1, y0 + h, z + c0 * r1];
+      this.p.push(...A, ...B, ...C, ...A, ...C, ...D);
+      this.n.push(s0, 0, c0, s1, 0, c1, s1, 0, c1, s0, 0, c0, s1, 0, c1, s0, 0, c0);
+      for (let k = 0; k < 6; k++) this.c.push(col[0], col[1], col[2]);
+      this.u.push(0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1);
+      this.p.push(x, y0 + h, z, ...D, ...C);
+      for (let k = 0; k < 3; k++) { this.n.push(0, 1, 0); this.c.push(col[0], col[1], col[2]); }
+      this.u.push(0.5, 0.5, 0, 0, 1, 0);
+    }
   }
 
   toGeometry() {

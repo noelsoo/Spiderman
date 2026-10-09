@@ -13,6 +13,8 @@ export function G(key, fn) {
   if (!g) { g = fn(); g.userData.shared = true; gcache.set(key, g); }
   return g;
 }
+/** cache key for a material option bag (textures by uuid; never serialises canvases) */
+function okey(o) { return Object.keys(o).map((k) => { const v = o[k]; return k + ':' + (v && v.isTexture ? v.uuid : v && v.isColor ? v.getHex() : v && v.isVector2 ? v.x + ',' + v.y : JSON.stringify(v)); }).join(';'); }
 const mcache = new Map();
 export function M(key, fn) {
   let m = mcache.get(key);
@@ -21,7 +23,7 @@ export function M(key, fn) {
 }
 
 export function std(color, o = {}) {
-  const key = 'std' + color + JSON.stringify(o);
+  const key = 'std' + color + okey(o);
   return M(key, () => {
     const { map, ...rest } = o;
     return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.05, ...rest, map: map ?? null });
@@ -39,12 +41,13 @@ export function glowInstance(color, k = 2, o = {}) {
 
 /** Glossy black symbiote with a bluish fresnel rim. */
 export function symMat(o = {}) {
-  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a' } = o;
-  const key = 'sym' + color + rim + rimK + rough + id;
+  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a', normalMap = null, normalScale = 0.7 } = o;
+  const key = 'sym' + color + rim + rimK + rough + id + (normalMap ? normalMap.uuid : '');
   return M(key, () => {
     const m = new THREE.MeshPhysicalMaterial({
       color, roughness: rough, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1,
       iridescence: 0.5, iridescenceIOR: 1.5, iridescenceThicknessRange: [120, 420], map,
+      normalMap, normalScale: new THREE.Vector2(normalScale, normalScale),
     });
     m.onBeforeCompile = (sh) => {
       sh.uniforms.uRim = { value: new THREE.Color(rim) };
@@ -129,7 +132,7 @@ function tex(c, repeat) {
   return t;
 }
 
-function drawWeb(ctx, W, H, o) {
+export function drawWeb(ctx, W, H, o) {
   const cols = o.cols ?? 16, rows = o.rows ?? 13;
   ctx.strokeStyle = o.line; ctx.lineWidth = o.lw ?? 2.4; ctx.lineCap = 'round';
   ctx.globalAlpha = o.alpha ?? 0.9;
@@ -298,4 +301,347 @@ export class Tendril {
     this.geo.computeVertexNormals();
   }
   dispose() { this.geo.dispose(); }
+}
+
+
+// ================================================================== v2: quality, detail maps, vertex-colour merges
+/** 'low' | 'medium' | 'high' | 'ultra' (game.settings.quality; defaults to 'high'). */
+export function quality() {
+  try { const q = globalThis.game?.settings?.quality; if (q === 'low' || q === 'medium' || q === 'ultra') return q; } catch { /* ignore */ }
+  return 'high';
+}
+/** segment multiplier for round geometry */
+export function qk() { const q = quality(); return q === 'low' ? 0.62 : q === 'medium' ? 0.82 : q === 'ultra' ? 1.3 : 1; }
+export function texRes() { const q = quality(); return q === 'low' ? 256 : q === 'medium' ? 512 : q === 'ultra' ? 1024 : 1024; }
+const seg = (n, min = 6) => Math.max(min, Math.round(n * qk()));
+export { seg };
+
+export function phys(color, o = {}) {
+  const key = 'phys' + color + okey(o);
+  return M(key, () => new THREE.MeshPhysicalMaterial({ color, roughness: 0.5, metalness: 0.05, ...o }));
+}
+
+/** fresnel rim light injected into a (standard/physical) material. */
+export function withRim(mat, color = 0x9fc0ff, k = 0.35, power = 2.6) {
+  if (mat.userData.rimmed) return mat;
+  mat.userData.rimmed = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    sh.uniforms.uRimC = { value: new THREE.Color(color) };
+    sh.uniforms.uRimK = { value: k };
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', 'uniform vec3 uRimC;\nuniform float uRimK;\nvoid main() {')
+      .replace('#include <opaque_fragment>',
+        'float rimF2 = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), ' + power.toFixed(2) + ');\n' +
+        'outgoingLight += uRimC * rimF2 * uRimK;\n#include <opaque_fragment>');
+  };
+  const pk = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => (pk ? pk() : '') + 'rim' + power;
+  return mat;
+}
+
+// ---- canvas helpers
+function ntex(c, repeat) {
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (repeat) t.repeat.set(...repeat);
+  return t;
+}
+function heightToNormal(h, W, H, strength) {
+  const [c, ctx] = canvas(W, H);
+  const img = ctx.createImageData(W, H), d = img.data;
+  for (let y = 0; y < H; y++) {
+    const ym = ((y - 1 + H) % H) * W, y0 = y * W, yp = ((y + 1) % H) * W;
+    for (let x = 0; x < W; x++) {
+      const xm = (x - 1 + W) % W, xp = (x + 1) % W;
+      const nx = (h[y0 + xm] - h[y0 + xp]) * strength, ny = (h[yp + x] - h[ym + x]) * strength;
+      const il = 1 / Math.sqrt(nx * nx + ny * ny + 1);
+      const o = (y0 + x) * 4;
+      d[o] = (nx * il * 0.5 + 0.5) * 255; d[o + 1] = (ny * il * 0.5 + 0.5) * 255; d[o + 2] = (il * 0.5 + 0.5) * 255; d[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+function heightOf(ctx, W, H) {
+  const d = ctx.getImageData(0, 0, W, H).data, h = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) h[i] = d[i * 4] / 255;
+  return h;
+}
+function blurOn(ctx, px) { if ('filter' in ctx) ctx.filter = `blur(${px}px)`; }
+function blurOff(ctx) { if ('filter' in ctx) ctx.filter = 'none'; }
+/** over-under woven fabric height field, period in px */
+function weaveInto(h, W, H, period, amp) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const u = x / period, v = y / period, cell = (Math.floor(u) + Math.floor(v)) & 1;
+    const fu = u - Math.floor(u), fv = v - Math.floor(v);
+    h[y * W + x] += (cell ? Math.sin(Math.PI * fu) : Math.sin(Math.PI * fv)) * amp;
+  }
+}
+function noiseInto(h, W, H, r, amp) { for (let i = 0; i < W * H; i++) h[i] += (r() - 0.5) * amp; }
+
+/** normal map for the Spider-Man suit: raised web lines + fine knit. Same UV layout as webTexture(kind). */
+export function webNormal(kind) {
+  const key = 'wn' + kind + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = texRes(), s = W / 512;
+  const [c, ctx] = canvas(W, W);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W);
+  blurOn(ctx, 0.8 * s);
+  drawWeb(ctx, W, W, { line: '#fff', cols: kind === 'torso' ? 16 : 12, rows: kind === 'torso' ? 14 : 8, lw: 3.0 * s, alpha: 1 });
+  blurOff(ctx);
+  const h = heightOf(ctx, W, W);
+  weaveInto(h, W, W, Math.max(4, 5 * s), 0.16);
+  noiseInto(h, W, W, rng(3), 0.05);
+  const t = ntex(heightToNormal(h, W, W, 2.4)); texCache.set(key, t); return t;
+}
+
+/** suit-fabric normal for generic UV (tile with repeat) */
+export function fabricNormal(period = 6, amp = 0.5, name = 'fab') {
+  const key = name + period + amp + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512);
+  const h = new Float32Array(W * W);
+  weaveInto(h, W, W, Math.max(3, period * W / 256), amp);
+  noiseInto(h, W, W, rng(9), 0.12);
+  const t = ntex(heightToNormal(h, W, W, 1.8)); texCache.set(key, t); return t;
+}
+
+/** leather / rough grain normal */
+export function grainNormal(name = 'grain', cell = 5, strength = 2.2) {
+  const key = name + cell + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), [c, ctx] = canvas(W, W), r = rng(21);
+  ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, W);
+  blurOn(ctx, 1.2);
+  for (let i = 0; i < W * W / (cell * cell * 2); i++) {
+    const x = r() * W, y = r() * W, rr = cell * (0.4 + r() * 0.7), v = 90 + r() * 110;
+    ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.3); ctx.fill();
+  }
+  blurOff(ctx);
+  const t = ntex(heightToNormal(heightOf(ctx, W, W), W, W, strength)); texCache.set(key, t); return t;
+}
+
+/** armour panel lines + rivets + metal flake roughness. UV: u around, v along. */
+export function panelMaps(seed = 1) {
+  const key = 'panel' + seed + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), r = rng(seed * 13), s = W / 512;
+  const [c, ctx] = canvas(W, W); ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, W);
+  blurOn(ctx, 0.9 * s);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 3.2 * s; ctx.lineCap = 'round';
+  const vs = [0.0, 0.25, 0.5, 0.75], hs = [0.18, 0.46, 0.7, 0.9];
+  for (const u of vs) { const x = (u + (r() - 0.5) * 0.02) * W; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, W); ctx.stroke(); }
+  for (const v of hs) { const y = v * W; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.lineWidth = 2 * s;
+  for (let i = 0; i < 7; i++) { // secondary plate seams
+    const x = r() * W, y = r() * W, w = (0.08 + r() * 0.14) * W, hh = (0.05 + r() * 0.1) * W;
+    ctx.strokeRect(x, y, w, hh);
+  }
+  ctx.fillStyle = '#fff';
+  for (const u of vs) for (const v of hs) for (const o of [-9, 9]) { ctx.beginPath(); ctx.arc(u * W + o * s, v * W - 10 * s, 2.0 * s, 0, 6.3); ctx.fill(); }
+  blurOff(ctx);
+  const h = heightOf(ctx, W, W);
+  noiseInto(h, W, W, r, 0.04);
+  const normal = ntex(heightToNormal(h, W, W, 2.2));
+  const [c2, x2] = canvas(W, W); x2.fillStyle = '#b8b8b8'; x2.fillRect(0, 0, W, W);
+  for (let i = 0; i < W * W / 40; i++) { const v = 120 + r() * 135; x2.fillStyle = `rgb(${v},${v},${v})`; x2.fillRect(r() * W, r() * W, 1 + r() * 1.5, 1 + r() * 1.5); }
+  x2.strokeStyle = '#fff'; x2.lineWidth = 3 * s; for (const u of vs) { const x = u * W; x2.beginPath(); x2.moveTo(x, 0); x2.lineTo(x, W); x2.stroke(); }
+  for (const v of hs) { x2.beginPath(); x2.moveTo(0, v * W); x2.lineTo(W, v * W); x2.stroke(); }
+  const rough = ntex(c2);
+  const res = { normal, rough }; texCache.set(key, res); return res;
+}
+
+/** Hulk skin: colour map with mottling + veins, normal map with pores + raised veins */
+export function skinMaps(base = '#4f9d3b', vein = '#2f6e2a', seed = 4) {
+  const key = 'skin' + base + vein + seed + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), s = W / 512;
+  const [c, ctx] = canvas(W, W), r = rng(seed);
+  ctx.fillStyle = base; ctx.fillRect(0, 0, W, W);
+  for (let i = 0; i < 90; i++) {
+    const x = r() * W, y = r() * W, rr = (20 + r() * 60) * s;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
+    const light = r() < 0.5;
+    g.addColorStop(0, light ? 'rgba(160,220,110,0.20)' : 'rgba(20,70,25,0.22)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  }
+  const [hc, hctx] = canvas(W, W); hctx.fillStyle = '#000'; hctx.fillRect(0, 0, W, W);
+  const veins = (cx, col, lw, a) => {
+    const rr = rng(seed + 5);
+    cx.lineCap = 'round'; cx.lineJoin = 'round';
+    for (let i = 0; i < 16; i++) {
+      let x = rr() * W, y = rr() * W, ang = rr() * 6.28;
+      for (let b = 0; b < 3; b++) {
+        cx.strokeStyle = col; cx.globalAlpha = a; cx.lineWidth = lw * s * (1 - b * 0.28);
+        cx.beginPath(); cx.moveTo(x, y);
+        let px = x, py = y, a2 = ang + (b ? (rr() - 0.5) * 1.6 : 0);
+        for (let k = 0; k < 7; k++) { a2 += (rr() - 0.5) * 0.9; px += Math.cos(a2) * 26 * s; py += Math.sin(a2) * 26 * s; cx.lineTo(px, py); if (b === 0 && k === 3) { x = px; y = py; } }
+        cx.stroke();
+      }
+    }
+    cx.globalAlpha = 1;
+  };
+  veins(ctx, vein, 3.2, 0.55);
+  blurOn(hctx, 1.4 * s); veins(hctx, '#fff', 4, 0.9); blurOff(hctx);
+  const rp = rng(seed + 9);
+  ctx.fillStyle = 'rgba(15,50,15,0.35)';
+  const h = heightOf(hctx, W, W);
+  for (let i = 0; i < W * W / 14; i++) { // pores
+    const x = (rp() * W) | 0, y = (rp() * W) | 0; ctx.fillRect(x, y, 1, 1); h[y * W + x] -= 0.22; if (x + 1 < W) h[y * W + x + 1] -= 0.08;
+  }
+  noiseInto(h, W, W, rp, 0.07);
+  const map = tex(c); const normal = ntex(heightToNormal(h, W, W, 2.0));
+  const res = { map, normal }; texCache.set(key, res); return res;
+}
+
+/** overlapping scale-mail. front at canvas centre when offset.x = 0.5. */
+export function scaleMaps(base = '#16275a', hi = '#3a5fb8', cells = 8) {
+  const key = 'scale' + base + hi + cells + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), cs = W / cells;
+  const h = new Float32Array(W * W);
+  const [c, ctx] = canvas(W, W);
+  const img = ctx.createImageData(W, W), d = img.data;
+  const cb = new THREE.Color(base).convertLinearToSRGB(), ch = new THREE.Color(hi).convertLinearToSRGB();
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+    const row = Math.floor(y / cs), off = (row & 1) ? cs / 2 : 0;
+    const fx = (((x + off) % cs) + cs) % cs / cs, fy = (y % cs) / cs;
+    const edge = 0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - (2 * fx - 1) ** 2));
+    const inside = fy < edge;
+    const v = inside ? Math.pow(fy / edge, 0.8) : 0;
+    h[y * W + x] = v;
+    const k = inside ? 0.25 + 0.75 * v * (0.7 + 0.3 * Math.sin(fx * 3.14)) : 0.0;
+    const o = (y * W + x) * 4;
+    d[o] = (cb.r + (ch.r - cb.r) * k * 0.9) * 255; d[o + 1] = (cb.g + (ch.g - cb.g) * k * 0.9) * 255; d[o + 2] = (cb.b + (ch.b - cb.b) * k * 0.9) * 255; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const map = tex(c); const normal = ntex(heightToNormal(h, W, W, 3.0));
+  const res = { map, normal }; texCache.set(key, res); return res;
+}
+
+/** star decal (transparent bg) */
+export function starTexture(color = '#ffffff') {
+  const key = 'star' + color; if (texCache.has(key)) return texCache.get(key);
+  const S = 256, [c, ctx] = canvas(S, S); ctx.fillStyle = color;
+  drawStar(ctx, S / 2, S / 2 + 6, S * 0.46, S * 0.19);
+  ctx.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; texCache.set(key, t); return t;
+}
+function drawStar(ctx, cx, cy, R, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i & 1 ? r : R; ctx[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+  ctx.closePath();
+}
+
+/** Captain America's shield: planar-UV disc texture */
+export function shieldTexture() {
+  if (texCache.has('shield')) return texCache.get('shield');
+  const S = 512, [c, ctx] = canvas(S, S), m = S / 2;
+  const ring = (r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(m, m, r * m, 0, 6.3); ctx.fill(); };
+  ring(1.0, '#b3121e'); ring(0.78, '#f2f2f2'); ring(0.58, '#b3121e'); ring(0.40, '#1d3f9a');
+  ctx.fillStyle = '#f4f4f4'; drawStar(ctx, m, m + 4, 0.37 * m, 0.145 * m); ctx.fill();
+  // brushed scratches
+  const r = rng(77); ctx.globalAlpha = 0.12;
+  for (let i = 0; i < 160; i++) { ctx.strokeStyle = r() < 0.5 ? '#fff' : '#000'; ctx.lineWidth = 1; const a = r() * 6.3, rr = r() * m; ctx.beginPath(); ctx.arc(m, m, rr, a, a + 0.4 + r()); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+  const t = tex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; texCache.set('shield', t); return t;
+}
+
+/** domed disc with planar UV (normal +Z) */
+export function domeGeo(R, depth, seg = 32, rings = 7) {
+  return G(`dome${R}_${depth}_${seg}_${rings}`, () => {
+    const pos = [], uv = [], idx = [];
+    pos.push(0, 0, depth); uv.push(0.5, 0.5);
+    for (let i = 1; i <= rings; i++) {
+      const t = i / rings, r = t * R, z = depth * (1 - t * t * 0.92);
+      for (let j = 0; j < seg; j++) { const a = (j / seg) * Math.PI * 2; pos.push(Math.cos(a) * r, Math.sin(a) * r, z); uv.push(0.5 + 0.5 * t * Math.cos(a), 0.5 + 0.5 * t * Math.sin(a)); }
+    }
+    for (let j = 0; j < seg; j++) idx.push(0, 1 + j, 1 + (j + 1) % seg);
+    for (let i = 1; i < rings; i++) for (let j = 0; j < seg; j++) {
+      const a = 1 + (i - 1) * seg + j, b = 1 + (i - 1) * seg + (j + 1) % seg, c2 = 1 + i * seg + j, d = 1 + i * seg + (j + 1) % seg;
+      idx.push(a, c2, b, b, c2, d);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  });
+}
+
+// ---- face decals (partial sphere patch with painted eyes/brows/mouth). Front = canvas centre.
+export function faceTexture(o = {}) {
+  const { skin = '#e0b090', iris = '#4a78b8', brow = '#3a2a1a', lip = '#b4605a', white = '#f4f1ea', mood = 'calm', stubble = 0, brows = true, eyes = true, glow = false } = o;
+  const key = 'face' + [skin, iris, brow, lip, white, mood, stubble, brows, eyes, glow].join('|');
+  if (texCache.has(key)) return texCache.get(key);
+  const W = 256, H = 256, [c, ctx] = canvas(W, H);
+  ctx.clearRect(0, 0, W, H);
+  const cx = W / 2, ey = H * 0.42, dx = W * 0.17;
+  const angry = mood === 'angry', ang = angry ? 0.35 : mood === 'smirk' ? 0.08 : 0;
+  if (eyes) for (const s of [-1, 1]) {
+    const x = cx + s * dx;
+    ctx.save(); ctx.translate(x, ey); ctx.rotate(s * ang);
+    ctx.fillStyle = white; ctx.beginPath(); ctx.ellipse(0, 0, W * 0.062, H * (angry ? 0.03 : 0.036), 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = iris; ctx.beginPath(); ctx.ellipse(0, 0, W * 0.032, H * 0.032, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = glow ? '#fff' : '#05060a'; ctx.beginPath(); ctx.arc(0, 0, W * 0.016, 0, 6.3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(-W * 0.01, -H * 0.01, W * 0.007, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = 'rgba(30,15,10,0.85)'; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.ellipse(0, 0, W * 0.064, H * (angry ? 0.031 : 0.038), 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+    ctx.restore();
+  }
+  if (brows) {
+    ctx.strokeStyle = brow; ctx.lineCap = 'round'; ctx.lineWidth = angry ? 7 : 5;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      const x = cx + s * dx, y = ey - H * (angry ? 0.065 : 0.085);
+      ctx.moveTo(x - s * W * 0.075, y + (angry ? -H * 0.015 : H * 0.012)); ctx.quadraticCurveTo(x, y - H * 0.02 * (angry ? 0 : 1), x + s * W * 0.075, y + (angry ? H * 0.03 : H * 0.005));
+      ctx.stroke();
+    }
+  }
+  // nose shading + nostrils
+  ctx.fillStyle = 'rgba(70,35,20,0.28)'; ctx.beginPath(); ctx.ellipse(cx, H * 0.62, W * 0.034, H * 0.014, 0, 0, 6.3); ctx.fill();
+  // mouth
+  const my = H * 0.76;
+  if (mood === 'angry') {
+    ctx.fillStyle = '#22090a'; ctx.beginPath(); ctx.ellipse(cx, my, W * 0.11, H * 0.034, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = '#eee'; ctx.fillRect(cx - W * 0.09, my - H * 0.03, W * 0.18, H * 0.016);
+  } else {
+    ctx.strokeStyle = lip; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(cx - W * 0.075, my);
+    ctx.quadraticCurveTo(cx, my + H * (mood === 'smirk' ? 0.025 : 0.012), cx + W * 0.075, my - (mood === 'smirk' ? H * 0.012 : 0)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(70,30,25,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - W * 0.05, my + H * 0.02); ctx.quadraticCurveTo(cx, my + H * 0.035, cx + W * 0.05, my + H * 0.02); ctx.stroke();
+  }
+  if (stubble > 0) {
+    const r = rng(5); ctx.fillStyle = `rgba(30,22,16,${0.5 * stubble})`;
+    for (let i = 0; i < 700 * stubble; i++) { const x = W * (0.2 + r() * 0.6), y = H * (0.62 + r() * 0.34); ctx.fillRect(x, y, 1.4, 1.4); }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; texCache.set(key, t); return t;
+}
+/** partial-sphere shell over the front of an ellipsoid head, to carry faceTexture */
+export function faceShell(R = 1, phiHalf = 0.95, t0 = 0.27, t1 = 0.78) {
+  return G(`faceshell${R}_${phiHalf}_${t0}_${t1}_${qk()}`, () => new THREE.SphereGeometry(R, seg(20, 10), seg(14, 8), Math.PI / 2 - phiHalf, phiHalf * 2, Math.PI * t0, Math.PI * (t1 - t0)));
+}
+
+/**
+ * Merge parts [{geo,color,pos,rot,scale}] into one vertex-coloured geometry (position+normal+color).
+ * Used by the cheap street-people meshes.
+ */
+export function mergeColored(key, parts) {
+  return G(key, () => {
+    const gs = parts.map((p) => {
+      let g = p.geo.clone();
+      const m = new THREE.Matrix4().compose(
+        p.pos ? new V3(...p.pos) : new V3(),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...(p.rot ?? [0, 0, 0]))),
+        p.scale ? (typeof p.scale === 'number' ? new V3(p.scale, p.scale, p.scale) : new V3(...p.scale)) : new V3(1, 1, 1));
+      g.applyMatrix4(m);
+      for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal') g.deleteAttribute(n);
+      const col = new THREE.Color(p.color), n = g.attributes.position.count, arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = col.r; arr[i * 3 + 1] = col.g; arr[i * 3 + 2] = col.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+      return g;
+    });
+    if (!gs.every((g) => g.index)) gs.forEach((g, i) => { if (g.index) gs[i] = g.toNonIndexed(); });
+    return mergeGeometries(gs);
+  });
 }

@@ -4,13 +4,14 @@ import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import {
   G, std, metal, glow, glowInstance, symMat, limbGeo, profileGeo, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo,
   mergeParts, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
+  M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
-const V3 = THREE.Vector3;
+const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
 
 // ------------------------------------------------------------------ helpers
-function P(model, joint, geo, mat, o = {}) {
+export function P(model, joint, geo, mat, o = {}) {
   const m = new THREE.Mesh(geo, mat);
   if (o.pos) m.position.set(...o.pos);
   if (o.rot) m.rotation.set(...o.rot);
@@ -19,21 +20,21 @@ function P(model, joint, geo, mat, o = {}) {
   model.reg(m, o.slot, o);
   return m;
 }
-function addHook(model, fn, dispose) {
+export function addHook(model, fn, dispose) {
   if (!model.hooks) model.hooks = { fns: [], disposers: [], update(c, m) { for (const f of this.fns) f(c, m); }, dispose(m) { for (const d of this.disposers) d(m); } };
   if (fn) model.hooks.fns.push(fn);
   if (dispose) model.hooks.disposers.push(dispose);
 }
 
 /** piecewise-linear lookup in [[y, r], ...] */
-function radiusAt(pts, y) {
+export function radiusAt(pts, y) {
   if (y <= pts[0][0]) return pts[0][1];
   for (let i = 1; i < pts.length; i++) if (y <= pts[i][0]) { const t = (y - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]); return lerp(pts[i - 1][1], pts[i][1], t); }
   return pts[pts.length - 1][1];
 }
 
 /** extruded eye shape wrapped onto an ellipsoid head. side +1 = character's left (+X) */
-function eyeWrap(kind, side, head, o = {}) {
+export function eyeWrap(kind, side, head, o = {}) {
   const { dx = 0, dy = 0, grow = 1, lift = 0.004, depth = 0.006 } = o;
   const { R, sx, sy, sz, y0 } = head;
   const key = `eyew${kind}${side}${R}${sx}${sy}${sz}${y0}${dx}${dy}${grow}${lift}${depth}`;
@@ -61,7 +62,7 @@ function eyeWrap(kind, side, head, o = {}) {
 }
 
 /** curved decal plane hugging the chest ellipse */
-function curvedPlane(w, h, rx, rz, pad = 0.004) {
+export function curvedPlane(w, h, rx, rz, pad = 0.004) {
   return G(`cp${w}_${h}_${rx}_${rz}_${pad}`, () => {
     const g = new THREE.PlaneGeometry(w, h, 10, 1);
     const pos = g.attributes.position;
@@ -80,32 +81,33 @@ const FLAT = [[-0.1, 0.0001]];
  * Generic humanoid body. spec.mats: slotKey -> Material; spec.slots: partName -> slotKey.
  * Returns info used by decals.
  */
-function buildBody(model, s) {
+export function buildBody(model, s) {
   const d = model.dims, k = d.k, j = model.j;
   const mats = s.mats, slots = s.slots || {};
   const mt = (part) => mats[slots[part] ?? part] ?? mats.default;
   const sl = (part) => slots[part] ?? part;
   const T = s.torso || {};
   const sx = T.sx ?? 1.25, sz = T.sz ?? 0.78, cR = T.chestR ?? 1, wR = T.waistR ?? 1;
-  const key = `body${k}_${sx}_${sz}_${cR}_${wR}_${d.spine}_${d.chest}`;
+  const key = `body${k}_${sx}_${sz}_${cR}_${wR}_${d.spine}_${d.chest}_${qk()}`;
+  const SL = seg(16, 8), SS = seg(14, 8); // limb / sphere segments by graphics quality
 
   // pelvis
   const pel = s.pelvis || [0.36, 0.2, 0.26];
-  P(model, j[J.H], sphereGeo(1, 16, 10), mt('pelvis'), { slot: sl('pelvis'), pos: [0, 0.0, 0], scale: [pel[0] * k * 0.5, pel[1] * k * 0.5, pel[2] * k * 0.5] });
+  P(model, j[J.H], sphereGeo(1, seg(18, 10), seg(12, 7)), mt('pelvis'), { slot: sl('pelvis'), pos: [0, 0.0, 0], scale: [pel[0] * k * 0.5, pel[1] * k * 0.5, pel[2] * k * 0.5] });
   // abdomen
   const abPts = [[-0.1, 0.0001], [-0.08, 0.125 * wR], [0.0, 0.14 * wR], [0.1, 0.125 * wR], [0.2, 0.14 * wR], [0.26, 0.1 * wR]].map(([y, r]) => [y * k, r * k]);
-  const abdomen = P(model, j[J.SP], profileGeo(key + 'ab', abPts, 18, 16), mt('abdomen'), { slot: sl('abdomen'), scale: [sx, 1, sz] });
+  const abdomen = P(model, j[J.SP], profileGeo(key + 'ab', abPts, seg(20, 10), 16), mt('abdomen'), { slot: sl('abdomen'), scale: [sx, 1, sz] });
   // chest
   const chPts = [[-0.08, 0.0001], [-0.06, 0.118 * wR], [0.05, 0.138 * wR + 0.0 * cR], [0.15, 0.158 * cR], [0.24, 0.178 * cR], [0.29, 0.178 * cR], [0.325, 0.14 * cR], [0.36, 0.085 * cR], [0.395, 0.05 * cR], [0.415, 0.0001]].map(([y, r]) => [y * k, r * k]);
-  P(model, j[J.CH], profileGeo(key + 'ch', chPts, 22, 22), mt('chest'), { slot: sl('chest'), scale: [sx, 1, sz] });
+  P(model, j[J.CH], profileGeo(key + 'ch', chPts, seg(26, 12), 22), mt('chest'), { slot: sl('chest'), scale: [sx, 1, sz] });
   const chestRad = (y) => ({ rx: radiusAt(chPts, y) * sx, rz: radiusAt(chPts, y) * sz });
 
   // neck + head
   const H = s.head || {};
   const hR = H.R ?? d.headR, hsx = H.sx ?? 0.92, hsy = H.sy ?? 1.05, hsz = H.sz ?? 1.0;
-  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k, (s.neckR ?? 0.05) * 1.15 * k, d.neck * 2.2, 10), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.3, 0] });
+  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k, (s.neckR ?? 0.05) * 1.15 * k, d.neck * 2.2, seg(12, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.3, 0] });
   const y0 = hR * hsy * 0.95;
-  const head = P(model, j[J.HD], sphereGeo(1, 28, 20), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
+  const head = P(model, j[J.HD], sphereGeo(1, seg(32, 14), seg(24, 10)), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
   const headInfo = { R: hR, sx: hsx, sy: hsy, sz: hsz, y0 };
 
   // arms
@@ -115,11 +117,11 @@ function buildBody(model, s) {
   const hand = s.hand || [0.045, 0.055, 0.05];
   for (const side of [1, -1]) {
     const sh = j[side > 0 ? J.AL : J.AR], el = j[side > 0 ? J.EL : J.ER], wr = j[side > 0 ? J.WL : J.WR];
-    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, 14, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.15, 0.015 * k, 0], scale: [u0 * sb * 1.15, u0 * sb * 1.1, u0 * sb * 1.1] });
-    P(model, sh, limbGeo(d.upper, u0, u1, A.ub ?? 0.14, 0.3), mt('upperArm'), { slot: sl('upperArm') });
+    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.15, 0.015 * k, 0], scale: [u0 * sb * 1.15, u0 * sb * 1.1, u0 * sb * 1.1] });
+    P(model, sh, limbGeo(d.upper, u0, u1, A.ub ?? 0.14, 0.3, SL), mt('upperArm'), { slot: sl('upperArm') });
     P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 1.02, u1 * 1.02, u1 * 1.02] });
-    P(model, el, limbGeo(d.fore, f0, f1, A.fb ?? 0.18, 0.28), mt('foreArm'), { slot: sl('foreArm') });
-    P(model, wr, sphereGeo(1, 12, 10), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.5, 0.0], scale: [hand[0] * k, hand[1] * k, hand[2] * k] });
+    P(model, el, limbGeo(d.fore, f0, f1, A.fb ?? 0.18, 0.28, SL), mt('foreArm'), { slot: sl('foreArm') });
+    P(model, wr, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.5, 0.0], scale: [hand[0] * k, hand[1] * k, hand[2] * k] });
   }
   // legs
   const L = s.leg || {};
@@ -127,15 +129,15 @@ function buildBody(model, s) {
   const foot = s.foot || [0.055, 0.045, 0.14];
   for (const side of [1, -1]) {
     const th = j[side > 0 ? J.TL : J.TR], kn = j[side > 0 ? J.KL : J.KR], ft = j[side > 0 ? J.FL : J.FR];
-    P(model, th, limbGeo(d.thigh, t0, t1, L.tb ?? 0.1, 0.3), mt('thigh'), { slot: sl('thigh') });
+    P(model, th, limbGeo(d.thigh, t0, t1, L.tb ?? 0.1, 0.3, SL), mt('thigh'), { slot: sl('thigh') });
     P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 1.02, t1 * 1.02, t1 * 1.02] });
-    P(model, kn, limbGeo(d.shin, s0, s1, L.sb ?? 0.14, 0.25), mt('shin'), { slot: sl('shin') });
-    P(model, ft, sphereGeo(1, 12, 8), mt('foot'), { slot: sl('foot'), pos: [0, -d.footH * 0.5 + foot[1] * k * 0.4, foot[2] * k * 0.32], scale: [foot[0] * k, foot[1] * k + 0.01, foot[2] * k] });
+    P(model, kn, limbGeo(d.shin, s0, s1, L.sb ?? 0.14, 0.25, SL), mt('shin'), { slot: sl('shin') });
+    P(model, ft, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('foot'), { slot: sl('foot'), pos: [0, -d.footH * 0.5 + foot[1] * k * 0.4, foot[2] * k * 0.32], scale: [foot[0] * k, foot[1] * k + 0.01, foot[2] * k] });
   }
   return { headInfo, chestRad, head, abdomen, hr: hR };
 }
 
-function addEyes(model, headInfo, kind, mat, rimMat, o = {}) {
+export function addEyes(model, headInfo, kind, mat, rimMat, o = {}) {
   const hj = model.j[J.HD];
   for (const side of [1, -1]) {
     P(model, hj, eyeWrap(kind, side, headInfo, { lift: 0.006, depth: 0.004, ...o }), mat, { slot: o.slot ?? 'eyes', cast: false });
@@ -143,7 +145,18 @@ function addEyes(model, headInfo, kind, mat, rimMat, o = {}) {
   }
 }
 
-function finish(model, variant) {
+/** painted face (eyes/brows/mouth) on a thin shell over the front of the head + nose + ears. */
+export function addFace(model, H, o = {}) {
+  const hj = model.j[J.HD], R = H.R;
+  const tex = faceTexture(o.tex || {});
+  const mat = M2('faceMat' + tex.uuid, () => new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.62, metalness: 0, depthWrite: false, polygonOffsetFactor: -2, polygonOffset: true }));
+  P(model, hj, faceShell(1, o.phi ?? 0.95, o.t0 ?? 0.27, o.t1 ?? 0.8), mat, { pos: [0, H.y0, 0], scale: [R * H.sx * 1.004, R * H.sy * 1.004, R * H.sz * 1.004], cast: false });
+  const skin = o.skin;
+  if (skin && o.nose !== false) P(model, hj, sphereGeo(1, 10, 8), skin, { pos: [0, H.y0 - R * 0.12, R * H.sz * 0.97], scale: [R * 0.14, R * 0.2, R * 0.2] });
+  if (skin && o.ears !== false) for (const sd of [1, -1]) P(model, hj, sphereGeo(1, 8, 6), skin, { pos: [sd * R * H.sx * 0.97, H.y0 - R * 0.02, -R * 0.05], scale: [R * 0.1, R * 0.22, R * 0.15] });
+  return mat;
+}
+export function finish(model, variant) {
   if (variant && model.variants) model.setVariant(variant);
   model.snap();
   return model;
@@ -151,19 +164,23 @@ function finish(model, variant) {
 
 // ================================================================== SPIDER-MAN
 const SPIDER_VARIANTS = () => {
-  const sym = (id) => symMat({ id, map: webTexture('black'), color: 0xffffff });
-  const symPlain = symMat({ id: 'p' });
+  const nS = new V2(0.85, 0.85);
+  const suit = (kind, o = {}) => withRim(phys(0xffffff, {
+    map: webTexture(kind), normalMap: webNormal(kind), normalScale: nS, roughness: 0.5, metalness: 0.06,
+    sheen: 1, sheenRoughness: 0.45, sheenColor: new THREE.Color(0x8fa2ff), clearcoat: 0.18, clearcoatRoughness: 0.45, ...o,
+  }), 0xa8c0ff, 0.16);
+  const sym = (id, kind = 'black') => symMat({ id, map: webTexture(kind), normalMap: webNormal(kind), normalScale: 1.1, color: 0xffffff });
+  const symPlain = symMat({ id: 'p', normalMap: fabricNormal(5, 0.5, 'symfab'), normalScale: 0.5 });
   const eyeW = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.2 });
   const emb = std(0xffffff, { map: emblemTexture('#ffffff'), transparent: true, alphaTest: 0.4, roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.15, side: THREE.DoubleSide });
   const rim = std(0x050505, { roughness: 0.4 });
+  const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.55, normalMap: fabricNormal(6, 0.55, 'spfab'), normalScale: nS, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xff9aa0), ...o }), 0xa8c0ff, 0.12);
   return {
     classic: {
-      torso: std(0xffffff, { map: webTexture('torso'), roughness: 0.48, metalness: 0.08 }),
-      arms: std(0xffffff, { map: webTexture('red'), roughness: 0.48, metalness: 0.08 }),
-      legs: std(0xffffff, { map: webTexture('blue'), roughness: 0.48, metalness: 0.08 }),
-      boots: std(0xa00c1a, { roughness: 0.5 }), gloves: std(0xb40f1e, { roughness: 0.5 }),
-      head: std(0xffffff, { map: webTexture('red'), roughness: 0.45 }),
-      eyes: eyeW, rim, emblem: emb, belt: std(0x12204f, { roughness: 0.5 }),
+      torso: suit('torso'), arms: suit('red'), legs: suit('blue'),
+      boots: cloth(0xa00c1a), gloves: cloth(0xb40f1e),
+      head: suit('red', { roughness: 0.42 }),
+      eyes: eyeW, rim, emblem: emb, belt: cloth(0x12204f),
     },
     symbiote: {
       torso: sym('t'), arms: sym('a'), legs: sym('l'), boots: symPlain, gloves: symPlain, head: sym('h'),
