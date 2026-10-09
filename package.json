@@ -1,0 +1,28 @@
+{
+  "name": "spiderman-symbiote-city",
+  "version": "0.1.0",
+  "description": "Fan-made third-person superhero game: Spider-Man, Venom, Iron Man, Hulk and Thor. Runs in the browser and on desktop.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noelsoo/Spiderman.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/noelsoo/Spiderman/issues"
+  },
+  "homepage": "https://github.com/noelsoo/Spiderman#readme",
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  },
+  "private": true,
+  "type": "module"
+}

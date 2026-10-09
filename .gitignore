@@ -1,0 +1,6 @@
+node_modules
+dist
+desktop/node_modules
+desktop/out
+*.log
+tools/shots
