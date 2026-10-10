@@ -170,10 +170,50 @@ export class Combat {
     return hits;
   }
 
+  /** Nearest vehicle hit along a ray (oriented-box test against each car). */
+  _rayVehicle(origin, dir, maxT) {
+    const list = this.game.vehicles?.list;
+    if (!list) return null;
+    let best = null, bestT = maxT;
+    for (const v of list) {
+      if (!v.active || v.wrecked || v === this.game.vehicles.driving) continue;
+      // ray vs the car's oriented box, in the car's local frame (forward = (sin yaw, 0, cos yaw))
+      const hl = (v.spec?.L ?? 4.4) / 2, hw = (v.spec?.W ?? 1.9) / 2, hh = 0.8;
+      const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
+      const ox = origin.x - v.pos.x, oy = origin.y - (v.pos.y + 0.8), oz = origin.z - v.pos.z;
+      const lo = [ox * cy - oz * sy, oy, ox * sy + oz * cy];          // local origin: x = side, z = forward
+      const ld = [dir.x * cy - dir.z * sy, dir.y, dir.x * sy + dir.z * cy];
+      const ext = [hw, hh, hl];
+      let t0 = 0, t1 = bestT, hit = true;
+      for (let k = 0; k < 3 && hit; k++) {
+        if (Math.abs(ld[k]) < 1e-8) { if (Math.abs(lo[k]) > ext[k]) hit = false; continue; }
+        let ta = (-ext[k] - lo[k]) / ld[k], tb = (ext[k] - lo[k]) / ld[k];
+        if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+        t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        if (t0 > t1) hit = false;
+      }
+      if (hit && t0 < bestT) { bestT = t0; best = v; }
+    }
+    return best ? { v: best, point: origin.clone().addScaledVector(dir, bestT) } : null;
+  }
+
+  /** Blast damage to vehicles (explosions chain into car explosions). */
+  _aoeVehicles(center, radius, damage) {
+    const list = this.game.vehicles?.list;
+    if (!list) return;
+    for (const v of list) {
+      if (!v.active || v.wrecked) continue;
+      const d = Math.hypot(v.pos.x - center.x, v.pos.y + 0.8 - center.y, v.pos.z - center.z) - 1.5;
+      if (d > radius) continue;
+      v.damage?.(damage * (1 - 0.6 * Math.max(0, d) / radius) * 1.2, 'blast');
+    }
+  }
+
   /** fx + AoE in one call. */
   explode(pos, radius, damage, o = {}) {
     this.game.fx.explosion(pos, radius, o.color ?? 0xffa040);
     this.game.audio?.play?.('explosion', { pos });
+    if ((o.team ?? 'player') === 'player') this._aoeVehicles(pos, radius, damage);
     return this.aoe({ center: pos, radius, damage, knockback: o.knockback ?? 14, up: o.up ?? 7, stun: o.stun ?? 0.8, source: o.source, team: o.team ?? 'player', falloff: o.falloff ?? true });
   }
 
@@ -201,6 +241,16 @@ export class Combat {
           const tt = Math.max(0, proj - Math.sqrt(Math.max(0, rr * rr - d2)));
           if (tt < bestT) { bestT = tt; best = t; }
         }
+      }
+    }
+    // cars: player shots damage vehicles that are closer than any enemy hit
+    if (team === 'player') {
+      const car = this._rayVehicle(origin, _dir, best ? bestT : maxT);
+      if (car) {
+        car.v.damage?.(damage * 0.6, 'shot');
+        this.game.fx.sparks?.(car.point, _dir.clone().negate(), 0xffd080, 6, 6, 0.25, 0.08);
+        if (o.tracer) this.game.fx.beam(origin, car.point, o.tracer, 0.06, 0.08);
+        return null;
       }
     }
     if (o.tracer) {

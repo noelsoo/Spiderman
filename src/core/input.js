@@ -78,8 +78,8 @@ export class Input {
     this.move = new THREE.Vector2();   // x = strafe right, y = forward
     this.look = new THREE.Vector2();   // radians this frame (x = yaw, y = pitch)
     this.rightStick = new THREE.Vector2(); // raw right stick (-1..1), for wheel selection
-    this.state = {}; this.prev = {}; this.values = {}; this.sources = {};
-    for (const a of ACTIONS) { this.state[a] = false; this.prev[a] = false; this.values[a] = 0; this.sources[a] = []; }
+    this.state = {}; this.prev = {}; this.raw = {}; this.values = {}; this.sources = {};
+    for (const a of ACTIONS) { this.state[a] = false; this.prev[a] = false; this.raw[a] = false; this.values[a] = 0; this.sources[a] = []; }
     this.consumed = new Set();
     this.mouseSensitivity = 0.0022;
     this.stickSensitivity = 3.2; // rad/s at full deflection
@@ -227,11 +227,12 @@ export class Input {
 
   /** Call once per frame before gameplay update. */
   update(dt) {
-    for (const a of ACTIONS) { this.prev[a] = this.state[a]; this.sources[a].length = 0; }
+    // prev tracks the PHYSICAL state (before consume), so a consumed button that stays held never re-fires as a new press
+    for (const a of ACTIONS) { this.prev[a] = this.raw[a]; this.sources[a].length = 0; }
     this.consumed.clear();
     this.move.set(0, 0); this.look.set(0, 0); this.rightStick.set(0, 0);
     const wheel = this.wheelAcc; this.wheelAcc = 0;
-    if (!this.enabled) { this.mouseDX = this.mouseDY = 0; this._recompute(); return; }
+    if (!this.enabled) { this.mouseDX = this.mouseDY = 0; for (const a of ACTIONS) this.raw[a] = false; this._recompute(); return; }
 
     // keyboard + mouse sources
     for (const a of ACTIONS) {
@@ -271,6 +272,7 @@ export class Input {
       }
       if (used) this.lastDevice = 'gamepad';
     }
+    for (const a of ACTIONS) this.raw[a] = this.sources[a].some(([, v]) => v > 0.25);
     this._recompute();
   }
 
@@ -292,7 +294,7 @@ export class Input {
 
   down(a) { return this.state[a]; }
   pressed(a) { return this.state[a] && !this.prev[a]; }
-  released(a) { return !this.state[a] && this.prev[a]; }
+  released(a) { return !this.raw[a] && this.prev[a]; }
   value(a) { return this.values[a]; }
 
   /** Is a virtual standard pad button held (for menus)? */
