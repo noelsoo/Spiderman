@@ -214,6 +214,60 @@ export function buildSpiderMan(opts = {}) {
   // web shooters
   for (const side of [1, -1]) P(model, model.j[side > 0 ? J.WL : J.WR], cylGeo(0.036 * dims.k, 0.033 * dims.k, 0.07 * dims.k, 10), std(0x1a1a24, { metalness: 0.5, roughness: 0.4 }), { pos: [0, 0.02, 0] });
 
+  // articulated hands: 4 two-segment fingers + a thumb per hand, shared capsule geometry, same glove slot (so symbiote variant re-skins them)
+  const hk = dims.k, FR_ = 0.0098 * hk;
+  const hands = [];
+  const FING = [[-0.62, 0.034, 0.027, 0.9], [-0.2, 0.039, 0.03, 1.0], [0.2, 0.036, 0.028, 1.05], [0.62, 0.029, 0.022, 1.15]]; // [x frac (index..pinky), prox len, dist len, relaxed curl scale]
+  for (const side of [1, -1]) {
+    const wr = model.j[side > 0 ? J.WL : J.WR];
+    const h = { side, w: 0, fingers: [], thumb: null };
+    FING.forEach(([xf, l1, l2, cs], i) => {
+      const x = -side * xf * 0.034 * hk; // index sits on the inner (thumb) side
+      const p1 = new THREE.Object3D(); p1.position.set(x, -dims.hand * 0.5 - 0.034 * hk, 0.004 * hk * (i === 1 || i === 2 ? 1 : 0)); wr.add(p1);
+      P(model, p1, capsuleGeo(FR_, l1 * hk, 3, 6), v0.gloves, { slot: 'gloves', pos: [0, -l1 * hk * 0.5 - FR_ * 0.4, 0] });
+      const p2 = new THREE.Object3D(); p2.position.set(0, -l1 * hk - FR_ * 0.8, 0); p1.add(p2);
+      P(model, p2, capsuleGeo(FR_ * 0.9, l2 * hk, 3, 6), v0.gloves, { slot: 'gloves', pos: [0, -l2 * hk * 0.5 - FR_ * 0.3, 0] });
+      h.fingers.push({ p1, p2, i, cs });
+    });
+    const t1 = new THREE.Object3D(); t1.position.set(side * -0.026 * hk, -dims.hand * 0.5 - 0.004 * hk, 0.022 * hk); wr.add(t1);
+    P(model, t1, capsuleGeo(FR_ * 1.15, 0.022 * hk, 3, 6), v0.gloves, { slot: 'gloves', pos: [0, -0.016 * hk, 0] });
+    const t2 = new THREE.Object3D(); t2.position.set(0, -0.03 * hk, 0); t1.add(t2);
+    P(model, t2, capsuleGeo(FR_ * 1.0, 0.02 * hk, 3, 6), v0.gloves, { slot: 'gloves', pos: [0, -0.012 * hk, 0] });
+    h.thumb = { t1, t2 };
+    hands.push(h);
+  }
+  const posHand = (h, th, loose, flat) => { // th = thwip weight, loose = 0 open curl .. 1 loose fist, flat = pressed flat on a surface
+    const sd = h.side;
+    for (const f of h.fingers) {
+      const thw = f.i === 1 || f.i === 2; // middle + ring fold in the thwip
+      const relax = (0.28 + 0.62 * loose) * f.cs * (1 - 0.7 * flat) + (f.i === 3 ? 0.1 : 0) + (f.i === 0 ? -0.05 : 0);
+      const c1 = thw ? lerp(relax, 1.5, th) : lerp(relax, 0.0, th * 0.9);
+      const c2 = thw ? lerp(relax * 1.15, 1.55, th) : lerp(relax * 1.1, 0.02, th);
+      f.p1.rotation.set(0, 0, -sd * c1);
+      f.p2.rotation.set(0, 0, -sd * c2);
+      f.p1.rotation.x = (f.i - 1.5) * 0.045 * (1 + flat * 2) * (1 - th); // slight spread
+    }
+    const T = h.thumb;
+    // thwip: thumb sticks out sideways/forward; relaxed: lies along the palm
+    T.t1.rotation.set(lerp(-0.25, -0.2, th), 0, -sd * lerp(0.35 + 0.35 * loose, -0.55, th));
+    T.t2.rotation.set(0, 0, -sd * lerp(0.35, 0.0, th));
+  };
+  addHook(model, (c, m) => {
+    const st = c.st;
+    for (let hi = 0; hi < 2; hi++) {
+      const h = hands[hi], right = h.side < 0;
+      let want = 0;
+      if (st === 'aim' || st === 'shoot') want = right ? 1 : 0;
+      else if (st === 'swing') want = (m.swingArm > 0) === !right ? 1 : 0;
+      else if (st === 'zip') want = 1;
+      h.w += (want - h.w) * (1 - Math.exp(-(want > h.w ? 22 : 9) * c.dt));
+      h.loose = (h.loose ?? 0.4) + ((st === 'run' || st === 'sprint' || st === 'charge' || st.startsWith('p') || st === 'uppercut' || st === 'smash' ? 1 : 0.4) - (h.loose ?? 0.4)) * (1 - Math.exp(-10 * c.dt));
+      h.flat = (h.flat || 0) + ((st === 'perch' && right ? 1 : 0) - (h.flat || 0)) * (1 - Math.exp(-8 * c.dt));
+      posHand(h, h.w, h.loose, h.flat);
+      if (h.w > 0.02 && st !== 'aim' && st !== 'shoot') m.j[right ? J.WR : J.WL].rotation.x -= 0.45 * h.w; // cock the wrist up
+    }
+  });
+
   // symbiote tendrils (visible only in the symbiote variant)
   const tm = symMat({ id: 'tend' });
   const tends = [];

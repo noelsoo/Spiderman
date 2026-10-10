@@ -73,7 +73,7 @@ export class SpiderMan extends Hero {
     this.wallN = new THREE.Vector3(0, 0, 1); this.wallLost = 0; this.wallLock = 0;
     this.zipTarget = new THREE.Vector3(); this.zipKind = 'ground'; this.zipN = new THREE.Vector3(); this.zipT = 0; this.zipSpeed = 0;
     this.zipStuck = 0; this._zipLast = new THREE.Vector3(); this.zipHit = new THREE.Vector3();
-    this.airT = 0; this.groundT = 0; this.jumpArmed = false; this.perchT = 0; this.rollT = 0; this.slam = false; this.slamPower = null; this.boostT = 0;
+    this.airT = 0; this.groundT = 0; this.jumpArmed = false; this.perchT = 0; this.stillT = 0; this.edgeT = 0; this.nearEdge = false; this.ledgePerch = false; this.rollT = 0; this.slam = false; this.slamPower = null; this.boostT = 0;
     this.atk = null; this.atkStep = 0; this.atkReset = 0;
     this.dodgeT = 0; this.dodgeAge = 99; this.dodgeDir = new THREE.Vector3();
     this.lash = null; this.ult = null; this.holdSpecial = 0; this.pullUsed = false; this.pullLineT = 0; this.pullTarget = null;
@@ -481,6 +481,7 @@ export class SpiderMan extends Hero {
       else if (this.perchT > 0) this.setAnim('land', 0);
       else if (this.onGround) {
         if (this.rollT > 0) this.setAnim('land', h2);
+        else if (this._perching(dt, mag, h2)) this.setAnim('perch', 0);
         else this.setAnim(h2 > 0.6 ? (h2 > TUNE.walk + 1.5 ? 'sprint' : 'run') : 'idle', h2);
       } else this.setAnim(this.vel.y > 0 ? 'jump' : 'fall', h2);
       if (this.trickT > 0) {
@@ -488,6 +489,24 @@ export class SpiderMan extends Hero {
         this._leanPose(_a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), k * Math.PI * 2 * this.trickDir, 0, 30);
       } else if (!aiming && !this.onGround && h2 > 14 && this.vel.y < 6) this._leanPose(_a.set(this.vel.x, 0, this.vel.z), 0.35, 0, 6);
     } else if (this.charging) this.setAnim('charge', 1);
+    if (mag > 0.1 || this.aiming || this.airT > 0.15) { this.stillT = 0; this.ledgePerch = false; }
+  }
+
+  /** SM2 spider-crouch: standing still > 0.6 s with a >3 m drop a step away, or right after a ledge zip. */
+  _perching(dt, mag, h2) {
+    if (mag > 0.1) { this.stillT = 0; this.ledgePerch = false; return false; }
+    if (h2 > 0.6 && !this.ledgePerch) { this.stillT = 0; return false; }
+    this.stillT += dt;
+    this.edgeT -= dt;
+    if (this.edgeT <= 0) { // re-probe the surroundings a few times a second
+      this.edgeT = 0.2; this.nearEdge = false;
+      const ph = this.game.physics, x = this.pos.x, z = this.pos.z, y = this.pos.y;
+      for (let i = 0; i < 4 && !this.nearEdge; i++) {
+        const a = this.yaw + i * Math.PI / 2;
+        if (y - ph.heightAt(x + Math.sin(a) * 1.0, z + Math.cos(a) * 1.0, y + 0.6) > 3) this.nearEdge = true;
+      }
+    }
+    return this.ledgePerch || (this.stillT > 0.6 && this.nearEdge);
   }
 
   _jump() {
@@ -857,7 +876,7 @@ export class SpiderMan extends Hero {
     this.state = 'free'; this.gravityScale = 1;
     const dir = _a.copy(this.vel); const sp = dir.length();
     if (kind === 'ledge') {
-      this.vel.set(-this.zipN.x * 3, 2, -this.zipN.z * 3); this.perchT = 0.35; this.yaw = Math.atan2(-this.zipN.x, -this.zipN.z);
+      this.vel.set(-this.zipN.x * 3, 2, -this.zipN.z * 3); this.perchT = 0.35; this.ledgePerch = true; this.yaw = Math.atan2(-this.zipN.x, -this.zipN.z);
       this._play('land', { volume: 0.5 });
     } else if (kind === 'wall') {
       this.wallNormal.copy(this.zipN); this.wallN.copy(this.zipN);

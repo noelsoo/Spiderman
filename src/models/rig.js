@@ -247,6 +247,18 @@ S.swing = (m, p, c) => {
   p.set(FL, 0.7); p.set(FR, 0.7);
   p.set(H, pitch, 0, -side * 0.12); p.set(CH, 0.1, side * 0.2, 0); p.set(HD, -pitch * 0.5 - 0.1, 0, 0);
 };
+/** Spider-Man SM2 perch: deep crouch on the balls of the feet, knees wide, right hand planted between the feet, left forearm on the knee, head up scanning. */
+S.perch = (m, p, c) => {
+  const br = Math.sin(c.tm * 1.7), scan = Math.sin(c.tm * 0.45) * 0.5 + Math.sin(c.tm * 0.19) * 0.25;
+  p.ground = true; p.flat = 1; p.rate = 9; p.zeta = 1;
+  p.set(H, 0.6, 0, 0); p.set(SP, 0.2, 0, 0); p.set(CH, 0.3 + br * 0.012, 0.12, 0); p.set(NK, -0.25, 0, 0);
+  p.set(HD, -0.85 + Math.sin(c.tm * 0.31) * 0.05, scan * 0.8, 0);
+  p.set(TL, -1.95, 0, 0.55); p.set(TR, -2.0, 0, -0.55); p.set(KL, 2.0); p.set(KR, 2.05);
+  p.set(FL, 0.75); p.set(FR, 0.75);
+  p.set(AR, -1.3, 0, 0.0); p.set(ER, -0.35); p.set(WR, 0.25);
+  p.set(AL, -0.75, 0, 0.42); p.set(EL, -1.25); p.set(WL, 0.2);
+  p.pos(0, 0.06, 0.03);
+};
 S.zip = (m, p, c) => {
   const v = c.vl; const hs = Math.hypot(v.x, v.z);
   p.ground = false; p.flat = 0; p.rate = 12;
