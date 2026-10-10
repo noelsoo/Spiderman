@@ -305,3 +305,24 @@ Set `usesAim: true` (and optionally `aimPreset`) in the hero's `super(game, cfg)
 * quick tap RMB → `this.pressedSpecial()`; quick tap L2 → `this.pressedAbility2()` — use these helpers instead of `input.pressed('special'|'ability2')` so taps still work.
 * while aiming, **fire** (LMB / R2) is claimed for the hero: read `this.fireDown()` / `this.firePressed()`; swing/attack won't trigger from it.
 * show the reticle with `game.hud.setCrosshair?.('web'|'bow'|'repulsor'|'hex'|...)`, clear with `null` when not aiming; call `game.hud.hitMarker?.(headshot)` on hits.
+
+# v3: Campaign mode, villains
+
+## Modes
+`game.mode` is `'freeroam'` (original open-world wave flow ending with Venom) or `'campaign'`.
+`game.begin(heroId, { mode, missionId })`; the campaign menu calls `game.beginMission(missionId, heroId)`.
+In campaign mode `game.enemies.mode = 'campaign'`: the built-in wave flow is OFF and `game.campaign` (src/campaign/) drives spawns, objectives and win/lose. All 8 heroes can be used in every mission and switched at any time; nothing in a mission may require a specific hero.
+
+## Campaign — `game.campaign` (src/campaign/*)
+`start(missionId)`, `stop()`, `update(dt)` (called every playing frame before enemies), `onFail(reason)` (called when all heroes are down), plus anything the HUD needs (`missions`, `progress`, `current`, `objective`).
+Spawning: `game.enemies.spawn(kind, pos, { isWave, hpScale, wave, rooftop, setBoss })` → Enemy. Unregistered kinds fall back to a goon, so missions run even before a villain exists.
+Boss defeat: villains call `manager.onBossDeath(this)`; in campaign mode this emits `boss:defeated {boss, kind, name}` and returns (no free-roam victory).
+Boss health bar uses `boss.bossTitle ?? boss.name`.
+
+## Enemy & model registries
+`import { registerEnemy } from '../enemies/index.js'` → `registerEnemy('kraven', KravenBoss)`; class signature `new Cls(game, manager, opts)` where opts = `{ wave, ...spawnOpts }`; extend `Enemy` from src/enemies/Enemy.js.
+`import { registerModel } from '../models/index.js'` → `registerModel('kraven', (opts) => CharacterModel)` (same CharacterModel contract as other models: group, height, handR/handL/chest/head, update(dt, anim, entity), setTint, dispose).
+Villain modules are imported from `src/enemies/villains/index.js` (one import line per module).
+
+## Boss fairness rule (all heroes must be able to win)
+Every boss must be hittable by melee-only heroes (Wolverine, Hulk, Captain America): flying/teleporting bosses must regularly land, dive, get stunned or be grounded (e.g. after a combo of damage, after an attack, or by web/hammer/shield hits) for windows of ≥ 3 s. Ranged heroes must also be able to damage them at range. Telegraph big attacks (enemy.windup) so Spider-Man's spider-sense / parry and dodges work. Use phases at 66% / 33% hp.

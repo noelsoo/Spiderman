@@ -29,10 +29,12 @@ import { World } from './world/index.js';
 import { FX } from './combat/fx.js';
 import { Combat } from './combat/combat.js';
 import { EnemyManager } from './enemies/index.js';
+import './enemies/villains/index.js';
 import { Vehicles } from './vehicles/index.js';
 import { Peds } from './peds/index.js';
 import { Economy } from './weapons/economy.js';
 import { Weapons } from './weapons/index.js';
+import { Campaign } from './campaign/index.js';
 import { AudioEngine } from './audio/audio.js';
 import { HUD } from './ui/hud.js';
 import { preloadModels } from './models/index.js';
@@ -82,6 +84,8 @@ class Game {
     this.combat = new Combat(this);
     this.enemies = new EnemyManager(this);
     this.economy = new Economy(this);
+    this.campaign = new Campaign(this);
+    this.mode = 'freeroam';   // 'freeroam' | 'campaign'
     this.weapons = new Weapons(this);
     this.vehicles = new Vehicles(this);
     this.peds = new Peds(this);
@@ -123,7 +127,13 @@ class Game {
   }
 
   /** Called by the title menu. */
-  begin(heroId = 'spiderman') {
+  /** Start a campaign mission (called by the campaign menu). */
+  beginMission(missionId, heroId = 'spiderman') {
+    this.begin(heroId, { mode: 'campaign', missionId });
+  }
+
+  begin(heroId = 'spiderman', { mode = 'freeroam', missionId = null } = {}) {
+    this.mode = mode;
     const sp = this.world.spawnPoint ?? { pos: new THREE.Vector3(0, 0, 0), yaw: 0 };
     this.vehicles.reset?.();
     this.peds.reset?.();
@@ -134,7 +144,10 @@ class Game {
     this.player.activate(sp.pos, null, sp.yaw);
     this.cam.recenter(sp.yaw);
     this.enemies.reset?.();
-    this.enemies.start?.();
+    this.enemies.mode = mode;
+    this.campaign.stop?.();
+    if (mode === 'campaign') this.campaign.start(missionId);
+    else this.enemies.start?.();
     this.hud.setHero(this.player);
     this.audio.unlock?.();
     this.audio.music?.('roam');
@@ -209,7 +222,11 @@ class Game {
         this.hud.toast(`${hero.name} is down! ${this.heroes[alive[0]].name} tags in`);
       }, 900);
     } else {
-      setTimeout(() => { this.state = 'gameover'; this.input.exitPointerLock(); this.hud.showGameOver(this.enemies.stats ?? {}); }, 1200);
+      setTimeout(() => {
+        this.state = 'gameover'; this.input.exitPointerLock();
+        if (this.mode === 'campaign' && this.campaign.onFail) this.campaign.onFail('All heroes are down');
+        else this.hud.showGameOver(this.enemies.stats ?? {});
+      }, 1200);
     }
   }
 
@@ -255,6 +272,7 @@ class Game {
         this.peds.update(dt);
         const focus = this.vehicles.driving ?? this.player;
         this.cam.update(rawDt, focus.pos, this.input.look, { speed: focus.vel?.length?.() ?? 0 });
+        this.campaign.update?.(dt);
         this.enemies.update(dt);
         this.combat.update(dt);
       }

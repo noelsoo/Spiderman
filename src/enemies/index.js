@@ -22,9 +22,14 @@ const WAVES = [
 ];
 let ORB = null;
 
+// Registry of enemy classes: kind -> class(game, manager, opts). Villain/minion modules register themselves here.
+export const ENEMY_KINDS = new Map();
+export function registerEnemy(kind, Cls) { ENEMY_KINDS.set(kind, Cls); }
+
 export class EnemyManager {
   constructor(game) {
     this.game = game;
+    this.mode = 'freeroam';   // 'freeroam' = built-in wave flow ending with Venom; 'campaign' = game.campaign drives spawns
     this.list = [];
     this.stats = { kills: 0, time: 0, wave: 0, maxCombo: 0, damageTaken: 0 };
     this.objectivePos = new THREE.Vector3();
@@ -174,9 +179,13 @@ export class EnemyManager {
   spawn(kind, pos, opts = {}) {
     const wave = opts.wave ?? Math.max(1, this.stats.wave);
     let e;
-    if (kind === 'hunter') e = new KravenHunter(this.game, this, wave, !!opts.rooftop);
+    const Reg = ENEMY_KINDS.get(kind);
+    if (Reg) e = new Reg(this.game, this, { wave, ...opts });
+    else if (kind === 'hunter') e = new KravenHunter(this.game, this, wave, !!opts.rooftop);
     else if (kind === 'venom') e = new Venom(this.game, this);
     else e = new SymbioteGoon(this.game, this, wave);
+    if (opts.hpScale) { e.maxHp *= opts.hpScale; e.hp = e.maxHp; }
+    if (e.isBoss && opts.setBoss !== false) this.boss = e;
     const pl = this.game.player;
     const yaw = pl ? Math.atan2(pl.pos.x - pos.x, pl.pos.z - pos.z) : 0;
     e.spawnAt(pos, yaw);
@@ -327,6 +336,8 @@ export class EnemyManager {
   }
 
   onBossDeath(v) {
+    this.game.events?.emit('boss:defeated', { boss: v, kind: v.kind, name: v.name });
+    if (this.mode === 'campaign') { if (this.boss === v) this.boss = null; this.game.hud?.hideBoss?.(); return; }
     this.phase = 'victory';
     this.victoryT = 3.2;
     this.objectiveActive = false;
@@ -376,7 +387,7 @@ export class EnemyManager {
     if (this.running) this.stats.time += dt;
     if (g.player) this.stats.maxCombo = Math.max(this.stats.maxCombo, g.player.combo || 0);
 
-    this._updateFlow(dt);
+    if (this.mode === 'freeroam') this._updateFlow(dt);
 
     // enemies
     const list = this.list;
@@ -390,7 +401,7 @@ export class EnemyManager {
 
     const b = this.boss;
     if (b && b.alive) {
-      g.hud?.showBoss?.('VENOM', Math.max(0, b.hp), b.maxHp);
+      g.hud?.showBoss?.((b.bossTitle ?? b.name ?? 'BOSS').toUpperCase(), Math.max(0, b.hp), b.maxHp);
       this.objectivePos.copy(b.pos);
     }
   }

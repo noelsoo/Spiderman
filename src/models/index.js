@@ -56,6 +56,9 @@ export async function preloadModels(onProgress) {
 }
 
 // ------------------------------------------------------------------ public builder
+/** Register an extra procedural character builder: registerModel('kraven', (opts) => CharacterModel). */
+export function registerModel(id, builder) { BUILDERS[id] = builder; }
+
 export function buildCharacter(id, opts = {}) {
   if (glbs.has(id)) {
     try { return buildGLB(id, glbs.get(id)); } catch (e) { /* fall back to procedural */ }
