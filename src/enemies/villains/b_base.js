@@ -60,7 +60,7 @@ export class BossB extends FlyerB {
     super(game, manager, { isBoss: true, ...cfg });
     this.bossTitle = cfg.bossTitle ?? cfg.name;
     this.phase = 1; this.pendingPhase = 1;
-    this.poise = 0; this.poiseMax = cfg.poise ?? 240; this.heavyPoise = cfg.heavyPoise ?? 1.6;
+    this.poise = 0; this.poiseMax = cfg.poise ?? 240; this.heavyPoise = cfg.heavyPoise ?? 1.6; this.noStagger = 0;
     this.state = 'intro'; this.stateT = 0;
     this.introDone = false;
     this.minions = [];
@@ -89,10 +89,10 @@ export class BossB extends FlyerB {
     const kind = o.kind ?? 'melee';
     const heavy = dealt >= 30 || (HEAVY_KINDS.has(kind) && dealt >= 14);
     this._phaseCheck();
-    this.poise += dealt * (heavy ? this.heavyPoise : 1);
+    if (this.noStagger <= 0) this.poise += dealt * (heavy ? this.heavyPoise : 1);
     this.onBossHit(dealt, o, heavy);
     if (this.poise >= this.poiseMax * (this.phase === 3 ? 1.25 : 1) && this.canStagger() && this.pendingPhase === this.phase) {
-      this.poise = 0;
+      this.poise = 0; this.noStagger = 7;      // stagger immunity so he cannot be stun-locked
       this.startStagger(heavy);
     }
     return dealt;
@@ -114,6 +114,7 @@ export class BossB extends FlyerB {
     }
     for (const k in this.cd) this.cd[k] -= dt;
     this.poise = Math.max(0, this.poise - 12 * dt);
+    if (this.noStagger > 0) this.noStagger -= dt;
     this._phaseCheck();
     this.think(dt);
   }

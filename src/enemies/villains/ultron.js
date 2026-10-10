@@ -12,7 +12,7 @@ const RED = 0xff2020, EMBER = 0xff7a30;
 
 export class Ultron extends BossB {
   constructor(game, manager, opts = {}) {
-    super(game, manager, { kind: 'ultron', modelId: 'ultron', name: 'ULTRON', hp: 3600, radius: 0.95, height: 2.6, speed: 7, mass: 20, gravity: 0, poise: 300, deathColor: EMBER });
+    super(game, manager, { kind: 'ultron', modelId: 'ultron', name: 'ULTRON', hp: 4000, radius: 0.95, height: 2.6, speed: 7, mass: 20, gravity: 0, poise: 300, deathColor: EMBER });
     this.flying = true; this.flyAccel = 14;
     this.cd = { any: 3, laser: 2, chest: 9, rockets: 5, summon: 10, slam: 9, lash: 4, punch: 2 };
     this.orbitA = rnd(0, 6.28); this.orbitDir = Math.random() < 0.5 ? -1 : 1;
@@ -94,9 +94,9 @@ export class Ultron extends BossB {
     if (this.cd.slam <= 0) { this._startSlam(); return; }
     const opts = [];
     if (d < 5 && this.cd.punch <= 0) opts.push(['punch', 8]);
-    if (this.hasLOS && d < 26 && d > 3 && this.cd.laser <= 0) opts.push(['laser', 5]);
-    if (this.hasLOS && d < 28 && d > 5 && this.cd.chest <= 0) opts.push(['chest', 3]);
-    if (this.hasLOS && d > 4 && this.cd.rockets <= 0) opts.push(['rockets', 5]);
+    if (this.hasLOS && d < 26 && d > 2 && this.cd.laser <= 0) opts.push(['laser', 5]);
+    if (this.hasLOS && d < 28 && d > 3 && this.cd.chest <= 0) opts.push(['chest', 3]);
+    if (this.hasLOS && d > 1.5 && this.cd.rockets <= 0) opts.push(['rockets', 5]);
     if (this.cd.summon <= 0 && this.liveMinions('ultron_drone') < 3) opts.push(['summon', 3]);
     if (this.phase >= 3 && d < 8 && this.cd.lash <= 0) opts.push(['lash', 7]);
     if (!opts.length) { this.cd.any = 0.4; return; }

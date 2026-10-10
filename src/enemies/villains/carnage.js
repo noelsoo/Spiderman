@@ -48,7 +48,7 @@ class SpikePool {
 // ---------------------------------------------------------------------- Carnage
 export class Carnage extends BossB {
   constructor(game, manager, opts = {}) {
-    super(game, manager, { kind: 'carnage', modelId: 'carnage', name: 'CARNAGE', hp: 4200, radius: 0.95, height: 2.4, speed: 8.8, mass: 18, gravity: 30, poise: 320, heavyPoise: 2.4, deathColor: RED });
+    super(game, manager, { kind: 'carnage', modelId: 'carnage', name: 'CARNAGE', hp: 4800, radius: 0.95, height: 2.4, speed: 8.8, mass: 18, gravity: 30, poise: 320, heavyPoise: 2.4, deathColor: RED });
     this.cd = { any: 2, combo: 0, whip: 6, spikes: 8, leap: 7, spawn: 14, regen: 12 };
     this.swings = 0; this.swingMax = 3; this.target3 = new THREE.Vector3(); this.leapsLeft = 0;
     this.spikes = new SpikePool(game);

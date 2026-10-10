@@ -142,9 +142,9 @@ function buildGlider(model) {
     m.castShadow = true; g.add(m); return m;
   };
   const metalM = GLIDER_METAL(), wingM = GLIDER_WING();
-  add(sphereGeo(1, seg(16, 8), seg(8, 6)), metalM, { pos: [0, -0.07, 0.05], scale: [0.4, 0.07, 1.15] });                 // deck
+  add(sphereGeo(1, seg(16, 8), seg(8, 6)), metalM, { pos: [0, -0.02, 0.05], scale: [0.4, 0.07, 1.15] });                 // deck
   for (const s of [1, -1]) {
-    const w = add(batWingGeo(), wingM, { pos: [s * 0.22, -0.05, -0.15], rot: [0, 0, s * 0.09], scale: [s * 1, 1, 1] });       // bat wings
+    const w = add(batWingGeo(), wingM, { pos: [s * 0.22, 0.0, -0.1], rot: [0, 0, s * 0.09], scale: [s * 0.72, 1, 0.8] });       // bat wings
     w.userData.wing = s;
     add(cylGeo(0.09, 0.11, 0.55, 10), metalM, { pos: [s * 0.27, -0.06, -0.85], rot: [Math.PI / 2, 0, 0] });                  // engine pods
     add(coneGeo(0.045, 0.22, 4), metalM, { pos: [s * 0.1, 0.03, 1.12], rot: [-0.6, 0, s * 0.1] });                            // bat ears

@@ -41,7 +41,7 @@ function batMesh() {
 // ---------------------------------------------------------------------- Green Goblin
 export class GreenGoblin extends BossB {
   constructor(game, manager, opts = {}) {
-    super(game, manager, { kind: 'goblin', modelId: 'goblin', name: 'GREEN GOBLIN', hp: 2800, radius: 0.65, height: 2.0, speed: 6.5, mass: 10, gravity: 0, poise: 200, deathColor: 0x9aff40 });
+    super(game, manager, { kind: 'goblin', modelId: 'goblin', name: 'GREEN GOBLIN', hp: 3200, radius: 0.65, height: 2.0, speed: 6.5, mass: 10, gravity: 0, poise: 200, deathColor: 0x9aff40 });
     this.flying = true;
     this.cd = { any: 3, bombs: 2, strafe: 7, bats: 6, dive: 10, drones: 12, gb: 0 };
     this.airDmg = 0;
