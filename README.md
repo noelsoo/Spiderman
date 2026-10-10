@@ -34,23 +34,34 @@ F11 or Alt+Enter toggles fullscreen.
 
 ## Controls
 
-| Action | Keyboard / mouse | PS4 | Spider-Man | Iron Man | Hulk | Thor |
-|---|---|---|---|---|---|---|
-| Move / camera | WASD / mouse | L stick / R stick | | | | |
-| Jump | Space | ✕ | jump, wall jump, hold in air = Web Wings | double-tap = take off, hold = rise | hold = charge super-jump | rise while flying |
-| Swing / fly | Shift (hold) | R2 | web-swing | boost flight | bulldoze charge | hammer-spin flight |
-| Attack | LMB / J | □ | combo, auto-lunge | punches, flying repulsor dash | smash combo, ground pound | hammer combo |
-| Special | RMB / K | R1 | web shot, hold to yank / symbiote tendril lash | repulsor blast | thunderclap or rock throw | hammer throw and recall |
-| Ability | E | L1 | web-zip to ledge | micro-missiles | leap smash | lightning strike |
-| Ability 2 | R | L2 | toggle symbiote suit | charge unibeam | rage mode | God of Thunder aura |
-| Ultimate (full Focus) | F | △ | Web Bomb / Symbiote Surge | unibeam sweep | Worldbreaker smash | lightning storm |
-| Dodge | C / Left Ctrl | ○ | dodge, perfect dodge = slow-mo | dash | shoulder charge | dash |
-| Switch hero | Tab, [ ] or 1–4 | D-pad ← → | | | | |
-| Recenter camera | MMB / V | R3 | | | | |
-| Map | M | Touchpad | | | | |
-| Pause | Esc / P | Options | | | | |
+| Action | Keyboard / mouse | PS4 |
+|---|---|---|
+| Move / camera | WASD / mouse | L stick / R stick |
+| Jump | Space | ✕ |
+| Swing / fly | Shift (hold) | R2 |
+| Attack | LMB / J | □ |
+| Special (tap) | RMB / K | R1 |
+| **Aim / zoom** (hold) | RMB | L2 |
+| **Fire while aiming** | LMB | R2 |
+| Ability | E | L1 |
+| Ability 2 (tap) | R | L2 |
+| Ultimate (full Focus) | Q | R3 |
+| Dodge / parry | C | ○ |
+| **Interact**: steal / enter / exit car, shop | F | △ |
+| **Character wheel** (hold) | Tab | D-pad ↑ |
+| Quick switch hero | [ ] or 1–8 | D-pad ← → |
+| Cycle weapons / scope zoom | X, Z, mouse wheel | D-pad ↓ |
+| Reload | R (while armed) | auto |
+| Map | M | Touchpad |
+| Pause | Esc | Options |
 
-When one hero goes down, the next one tags in. Lose all four and the run ends.
+**Driving:** W / R2 throttle, S / L2 brake and reverse, A–D / L stick steer, Space / ✕ handbrake drift, H / L3 horn, F / △ get out.
+
+**Heroes:** Spider-Man (swinging, wall-crawl, six web-shooter gadgets while aiming, symbiote suit, parry), Iron Man (aimed repulsors, missile lock-on, Proton Cannon), Hulk (grab and throw, Hulk Out, Worldbreaker), Thor (aimed hammer throws, Bifrost, God Blast), Wolverine (claws, lunge, healing factor, Weapon X frenzy), Captain America (ricochet shield, block and parry, Avengers Assemble), Hawkeye (bow with draw-zoom, trick arrows, grapple), Scarlet Witch (hex bolts, telekinesis, levitation, Reality Warp).
+
+**Weapons:** earn cash from fights, buy guns at the four armories (marked on the minimap). Every gun zooms when aimed; the sniper has a 4x/8x/12x scope with hold-breath (Alt / L3).
+
+**Controller trouble?** Settings → Controller shows every device the browser sees, live button readouts, a vibration test and button remapping. If nothing shows up, press a button on the pad, open the game in its own tab rather than an embedded page, and use Chrome or Edge.
 
 ## What's in it
 
