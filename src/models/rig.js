@@ -276,18 +276,18 @@ S.zip = (m, p, c) => {
 S.wallrun = (m, p, c) => {
   const f = c.f;
   const bound = sm((c.sp - 9.5) / 3.5);
-  m.phase += c.dt * c.sp * lerp(2.9, 1.8, bound) * (f.cadence || 1);
+  m.phase += c.dt * c.sp * lerp(2.0, 1.5, bound) * (f.cadence || 1);
   const ph = m.phase, a = Math.sin(ph), b = Math.sin(ph + Math.PI * (1 - bound));
   const ex = m.extra; (ex.plant ||= [0, 0]); ex.plant[0] = sm(0.5 - b * 1.2); ex.plant[1] = sm(0.5 - a * 1.2); ex.wall = 1;
   p.ground = false; p.flat = 0; p.rate = 26; p.zeta = 0.8;
   p.set(H, 0.08 - bound * 0.08, 0, (a - b) * 0.05 + bound * 0); p.pos(0, -0.12 + bound * Math.sin(ph * 2) * 0.03, 0.04);
   p.set(SP, 0.04, (a - b) * 0.1, 0); p.set(CH, 0.05, (a - b) * 0.14, (a - b) * 0.04); p.set(NK, -0.35, 0, 0); p.set(HD, -0.55, Math.sin(ph * 0.5) * 0.08, 0);
   // arms: reach above the head with elbows out, pull down while planted
-  p.set(AR, -2.35 - a * 0.42, 0, -(0.62 + a * 0.12)); p.set(ER, -0.55 - Math.max(0, -a) * 0.55); p.set(WR, -0.5, 0, 0);
-  p.set(AL, -2.35 - b * 0.42, 0, 0.62 + b * 0.12); p.set(EL, -0.55 - Math.max(0, -b) * 0.55); p.set(WL, -0.5, 0, 0);
+  p.set(AR, -2.45 - a * 0.55, 0, -(0.6 + a * 0.18)); p.set(ER, -0.35 - Math.max(0, -a) * 1.0); p.set(WR, -0.5, 0, 0);
+  p.set(AL, -2.45 - b * 0.55, 0, 0.6 + b * 0.18); p.set(EL, -0.35 - Math.max(0, -b) * 1.0); p.set(WL, -0.5, 0, 0);
   // legs: knees splayed out toward the wall, opposite-limb push
-  p.set(TL, -1.25 - a * 0.38, 0, 0.55 + a * 0.12); p.set(KL, 1.3 + a * 0.4); p.set(FL, 0.7);
-  p.set(TR, -1.25 - b * 0.38, 0, -(0.55 + b * 0.12)); p.set(KR, 1.3 + b * 0.4); p.set(FR, 0.7);
+  p.set(TL, -1.2 - a * 0.5, 0, 0.5 + a * 0.2); p.set(KL, 1.25 + a * 0.6); p.set(FL, 0.7);
+  p.set(TR, -1.2 - b * 0.5, 0, -(0.5 + b * 0.2)); p.set(KR, 1.25 + b * 0.6); p.set(FR, 0.7);
 };
 S.wallidle = (m, p, c) => {
   const br = Math.sin(c.tm * 1.7), sc = Math.sin(c.tm * 0.5) * 0.7 + Math.sin(c.tm * 0.23) * 0.3;

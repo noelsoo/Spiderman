@@ -14,7 +14,7 @@ const GREEN = 0x40ff90, GOLD = 0xffd860, FROST = 0x8ff0ff;
 export class Loki extends BossB {
   constructor(game, manager, opts = {}) {
     super(game, manager, { kind: 'loki', modelId: 'loki', name: 'LOKI', hp: 3200, radius: 0.55, height: 1.95, speed: 6.6, mass: 8, gravity: 28, poise: 230, deathColor: GREEN });
-    this.cd = { any: 2.2, blast: 1, beam: 6, tele: 5, illus: 8, goons: 14, shock: 8, glint: 1 };
+    this.cd = { any: 2.2, melee: 0, blast: 1, beam: 6, tele: 5, illus: 8, goons: 14, shock: 8, glint: 1 };
     this.dirSign = Math.random() < 0.5 ? -1 : 1; this.dirT = 2;
     this.dest = new THREE.Vector3(); this.follow = ''; this.swings = 0; this.swingMax = 2; this._t = 0;
     this.ghostSlots = [];
@@ -101,7 +101,7 @@ export class Loki extends BossB {
     if (this.cd.any > 0) return;
 
     const opts = [];
-    if (d < 9) opts.push(['melee', d < 5 ? 8 : 4]);
+    if (d < 9 && this.cd.melee <= 0) opts.push(['melee', d < 5 ? 8 : 4]);
     if (d > 2 && this.hasLOS && this.cd.blast <= 0) opts.push(['blast', 4]);
     if (d > 3 && this.hasLOS && this.cd.beam <= 0) opts.push(['beam', 2 + this.phase]);
     if (this.cd.tele <= 0) opts.push(['tele', 3]);
@@ -113,7 +113,7 @@ export class Loki extends BossB {
     let r = Math.random() * tot, pick = opts[0][0];
     for (const o of opts) { r -= o[1]; if (r <= 0) { pick = o[0]; break; } }
     switch (pick) {
-      case 'melee': this.swings = 0; this.swingMax = this.phase === 1 ? 2 : 3; this._go('melee'); this.sub = 'approach'; break;
+      case 'melee': this.cd.melee = rnd(3, 4.5) / sp; this.swings = 0; this.swingMax = this.phase === 1 ? 2 : 3; this._go('melee'); this.sub = 'approach'; break;
       case 'blast': this._go('blast'); this.cd.blast = rnd(2.5, 4) / sp; break;
       case 'beam': this._go('beam'); this.cd.beam = rnd(8, 11) / sp; break;
       case 'tele': this.pickBlinkPoint(_d, 4.5, 6.5); this.cd.tele = 6.5; this.vanishTo(_d, 'strike'); break;

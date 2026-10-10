@@ -130,18 +130,18 @@ export class Carnage extends BossB {
     else { this.setAnim('idle', 1); }
     if (this.cd.any > 0) return;
     const opts = [];
-    if (d < 6) opts.push(['combo', 8]); else if (d < 14) opts.push(['combo', 3]);
-    if (d < 10 && this.cd.whip <= 0) opts.push(['whip', 5]);
-    if (d > 3 && d < 24 && this.cd.spikes <= 0) opts.push(['spikes', 5]);
-    if (d > 6 && this.cd.leap <= 0) opts.push(['leap', 5]);
+    if (this.cd.combo <= 0) opts.push(['combo', d < 6 ? 8 : d < 14 ? 3 : 0.5]);
+    if (d < 11 && this.cd.whip <= 0) opts.push(['whip', 5]);
+    if (d > 1.5 && d < 24 && this.cd.spikes <= 0) opts.push(['spikes', 6]);
+    if (d > 4 && this.cd.leap <= 0) opts.push(['leap', 5]);
     if (this.cd.spawn <= 0 && this.liveMinions('carnage_spawn') < 4) opts.push(['spawn', this.phase === 1 ? 2 : 3]);
     if (this.phase >= 3 && this.cd.regen <= 0 && this.hp < this.maxHp * 0.3 && d > 5) opts.push(['regen', 9]);
-    if (!opts.length) { this.cd.any = 0.4; return; }
+    if (!opts.length) { if (d < 14) opts.push(['combo', 1]); else { this.cd.any = 0.4; return; } }
     let tot = 0; for (const o of opts) tot += o[1];
     let r = Math.random() * tot, pick = opts[0][0];
     for (const o of opts) { r -= o[1]; if (r <= 0) { pick = o[0]; break; } }
     switch (pick) {
-      case 'combo': this.swings = 0; this.swingMax = this.phase === 1 ? 3 : this.phase === 2 ? 4 : 5; this._go('combo'); this.sub = 'approach'; break;
+      case 'combo': this.cd.combo = rnd(3, 4.5) / sp; this.swings = 0; this.swingMax = this.phase === 1 ? 3 : this.phase === 2 ? 4 : 5; this._go('combo'); this.sub = 'approach'; break;
       case 'whip': this.sweeps = this.phase === 3 ? 2 : 1; this._go('whip'); this.cd.whip = rnd(7, 9) / sp; break;
       case 'spikes': this._go('spikes'); this.cd.spikes = rnd(10, 13) / sp; break;
       case 'leap': this.leapsLeft = this.phase === 3 ? 1 + (Math.random() < 0.5 ? 1 : 0) : 0; this._go('leapWind'); this.cd.leap = 9 - this.phase; break;
