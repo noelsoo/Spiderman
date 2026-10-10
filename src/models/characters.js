@@ -1,6 +1,7 @@
 // Procedural builders for every character. All geometry/materials are cached and shared between instances.
 import * as THREE from 'three';
 import { buildRig, makeDims, ProcModel, J } from './rig.js';
+import { buildMjolnir } from './mjolnir.js';
 import {
   G, std, metal, glow, glowInstance, symMat, limbGeo, profileGeo, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo,
   mergeParts, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
@@ -547,39 +548,55 @@ export function buildThor() {
     pos.needsUpdate = true; cgeo.computeVertexNormals();
   }, () => { cgeo.dispose(); });
 
-  // ---- Mjolnir
-  const hammer = new THREE.Group();
-  const mh = metal(0x9aa1ab, { roughness: 0.3 }), mdark = metal(0x4b4f58, { roughness: 0.4 }), strap = std(0x2a1d14, { roughness: 0.8 });
-  const parts = [];
-  const head = new THREE.Mesh(boxGeo(0.34, 0.17, 0.17), mh); head.position.y = 0.17; hammer.add(head);
-  for (const s of [1, -1]) { const e = new THREE.Mesh(boxGeo(0.04, 0.2, 0.2), mdark); e.position.set(s * 0.17, 0.17, 0); hammer.add(e); }
-  const band = new THREE.Mesh(boxGeo(0.12, 0.175, 0.175), mdark); band.position.y = 0.17; hammer.add(band);
-  const handle = new THREE.Mesh(cylGeo(0.022, 0.022, 0.38, 8), strap); handle.position.y = -0.05; hammer.add(handle);
-  const cap = new THREE.Mesh(sphereGeo(0.032, 8, 6), mdark); cap.position.y = -0.24; hammer.add(cap);
-  const loop = new THREE.Mesh(G('hammerloop', () => new THREE.TorusGeometry(0.035, 0.007, 6, 12)), strap); loop.position.set(0, -0.27, 0); hammer.add(loop);
-  hammer.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
-  const hw = 0.82;
+  // ---- Mjolnir (shared mesh: lives in the right hand and is re-parented to the world while thrown)
+  const mj = buildMjolnir();
+  const hammer = mj.group;
+  const hw = 1.0;
+  const grip = { pos: new V3(0, -0.02, 0), rot: new THREE.Euler(1.0, 0, -0.12) };
+  model.hammerGrip = grip;
   let spinA = 0, spinK = 0;
   model.hammerSpin = false;
-  addHook(model, (c) => { // hammer twirl while summoning (cast) or on demand
-    const want = model.hammerAttached && (model.hammerSpin || c.st === 'cast') ? 1 : 0;
-    spinK += (want - spinK) * (1 - Math.exp(-10 * c.dt));
-    if (spinK > 0.02) { spinA += c.dt * 16 * spinK; hammer.rotation.set(Math.PI - 0.15, spinA, 0.1); } else if (spinK > 0 && model.hammerAttached) place();
-  });
-  const grip = { pos: new V3(0, -0.2 * hw, 0.0), rot: new THREE.Euler(Math.PI - 0.15, 0, 0.1) };
+  const _hq = new THREE.Quaternion(), _hd = new V3(), _hy = new V3(0, 1, 0);
   const place = () => { hammer.position.copy(grip.pos); hammer.rotation.copy(grip.rot); hammer.scale.setScalar(hw); };
+  addHook(model, (c) => {
+    if (!model.hammerAttached) return;
+    // hammer twirl: swung by the wrist strap in a circle around the hand (strap taut), while flying / summoning
+    const want = model.hammerSpin || c.st === 'cast' ? 1 : 0;
+    spinK += (want - spinK) * (1 - Math.exp(-9 * c.dt));
+    if (spinK > 0.02) {
+      spinA += c.dt * 15 * spinK;
+      const R = 0.42 * hw, a = spinA, k = Math.min(1, spinK);
+      _hd.set(Math.cos(a) * 0.35, Math.sin(a), Math.cos(a + 1.2) * 0.35).normalize();       // slightly tilted circle
+      _hq.setFromUnitVectors(_hy, _hd);                                                          // head outward, pommel (strap) toward the hand
+      hammer.position.copy(grip.pos).lerp(_hd.clone().multiplyScalar(R).add(grip.pos), k);
+      hammer.quaternion.setFromEuler(grip.rot).slerp(_hq, k);
+    } else place();
+    mj.update(c.dt);
+  }, () => mj.dispose());
   model.handR.add(hammer); place();
   model.hammer = hammer;
+  model.mjolnir = mj;
   model.hammerAttached = true;
-  // detach: hides the in-hand hammer and returns a world-space clone (not added to any scene) for the hero to use
+  // knuckles / thumb wrapped round the handle (visible only while the hammer is in the hand)
+  const fingers = new THREE.Group();
+  const skinF = std(0x3a2a20, { roughness: 0.7 });
+  for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(capsuleGeo(0.0105, 0.03, 2, 6), skinF); f.rotation.z = Math.PI / 2; f.position.set(0, 0.032 - i * 0.0215, 0.0235); fingers.add(f); }
+  fingers.position.copy(grip.pos);
+  hammer.add(fingers); fingers.scale.setScalar(1);
+  // detach: hammer leaves the hand and is handed to the hero (placed in the world by the caller)
   model.detachHammer = () => {
     model.group.updateMatrixWorld(true);
-    const c = hammer.clone(true);
-    hammer.matrixWorld.decompose(c.position, c.quaternion, c.scale);
-    hammer.visible = false; model.hammerAttached = false;
-    return c;
+    hammer.updateWorldMatrix(true, false);
+    hammer.removeFromParent();
+    fingers.visible = false; model.hammerAttached = false; spinK = 0;
+    return hammer;
   };
-  model.attachHammer = () => { hammer.visible = true; model.hammerAttached = true; return hammer; };
+  model.attachHammer = () => {
+    if (hammer.parent !== model.handR) model.handR.add(hammer);
+    place(); fingers.visible = true; hammer.visible = true; model.hammerAttached = true; mj.snap();
+    return hammer;
+  };
+  model.setHammerCharge = (k) => mj.setCharge(k);
   return finish(model);
 }
 

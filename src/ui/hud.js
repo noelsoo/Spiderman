@@ -3,6 +3,7 @@
 // input abstraction (input.padButton / input.move / input.rightStick / input.padInfo / input.lastRawButton), never
 // through raw navigator.getGamepads() buttons, so they work for every controller profile.
 import './hud.css';
+import { installCampaignUI } from './campaign-ui.js';
 
 const ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet'];
 
@@ -113,6 +114,7 @@ export class HUD {
     this._driveHinted = false; this._dhintT = 0;
     this._padT = 0; this._ctlT = 0;
     this._buildGame();
+    this._buildCampaignLayer();
     this._applySettings();
 
     // audio unlock on first interaction
@@ -385,15 +387,15 @@ export class HUD {
     this.$.screens.appendChild(el);
     const scr = { name, el, items: [], index: 0, back: null, data };
     this.screen = scr;
-    this.lockUntil = performance.now() + (name === 'gameover' || name === 'victory' ? 700 : 300);
+    this.lockUntil = performance.now() + (name === 'gameover' || name === 'victory' || name === 'missionwin' || name === 'missionfail' ? 700 : 300);
     this['_build_' + name](scr);
     this._focus(scr.index, true);
     return scr;
   }
 
-  _push(name) { // open sub-screen, remembering the parent
+  _push(name, data) { // open sub-screen, remembering the parent
     this.stack.push(this.screen.name);
-    this._open(name);
+    this._open(name, data);
   }
 
   _back() {
@@ -420,6 +422,7 @@ export class HUD {
     scr.index = (i + n) % n;
     scr.items.forEach((it, k) => it.el.classList.toggle('foc', k === scr.index));
     if (scr.name !== 'title') scr.items[scr.index].el.scrollIntoView?.({ block: 'nearest' });
+    scr.items[scr.index].onFocus?.();
     if (!silent) this.game.audio?.play('ui_move');
   }
 
@@ -435,7 +438,6 @@ export class HUD {
     const scr = this.screen; if (!scr) return;
     const it = scr.items[scr.index];
     if (it?.adj) { it.adj(dir); this.game.audio?.play('ui_move'); return; }
-    if (scr.name === 'title') this._selectHero(dir);
   }
 
   _btn(scr, label, act, cls = '') {
@@ -460,35 +462,23 @@ export class HUD {
 
   _build_title(scr) {
     scr.el.innerHTML = `
-      <div class="top"><h1>Spider-Man<em>Symbiote City</em></h1></div>
+      <div class="top"><h1>Spider-Man<em>Symbiote City</em></h1><div class="tagline">Sinister Symbiosis</div></div>
       <div class="bottom">
-        <div class="cards"></div>
         <div class="menu"></div>
         <div class="hint" data-r="starthint"></div>
         <div class="padind" data-r="padind" title="Controller settings"></div>
       </div>
       <div class="foot">Fan-made tribute &middot; not affiliated with Marvel or Insomniac</div>`;
-    const cards = scr.el.querySelector('.cards');
-    for (const id of ORDER) {
-      const info = HERO_INFO[id];
-      const h = this.game.heroes?.[id];
-      const c = document.createElement('div');
-      c.className = 'card'; c.dataset.id = id;
-      c.style.setProperty('--c', cssColor(h?.color, info.color));
-      c.innerHTML = `<div class="pt">${EMBLEM[id]}</div><div class="ct"><h3>${esc(h?.name || info.name)}</h3><ul>${info.powers.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>`;
-      c.addEventListener('click', () => { this.heroSel = id; this.game.audio?.play('ui_move'); this._paintCards(); });
-      c.addEventListener('dblclick', () => this._start());
-      cards.appendChild(c);
-    }
     const menu = scr.el.querySelector('.menu');
     const mk = (label, act, cls) => { const b = this._btn(scr, label, act, cls); menu.appendChild(b); return b; };
-    mk('Start', () => this._start(), 'big');
+    mk('Campaign', () => this._push('campaign'), 'big');
+    mk('Free Roam', () => this._push('heroselect', { mode: 'freeroam' }));
     mk('Controls', () => this._push('controls'));
     mk('Settings', () => this._push('settings'));
     scr.padind = scr.el.querySelector('[data-r="padind"]');
     scr.padind.addEventListener('click', () => { this.game.audio?.play('ui_select'); this._push('controller'); });
     scr.starthint = scr.el.querySelector('[data-r="starthint"]');
-    this._paintCards();
+    scr.nav = (dir) => { this._focus(scr.index + (dir === 'left' || dir === 'up' ? -1 : 1)); return true; };
     this._titleStatus(scr, true);
   }
 
@@ -521,8 +511,8 @@ export class HUD {
     scr.padind.innerHTML = html + ' <u>Controller settings</u>';
     const pad = connected;
     scr.starthint.innerHTML = pad
-      ? `${this._glyph('jump', true)} / click to start &nbsp;&middot;&nbsp; D-pad ◀ ▶ choose hero`
-      : 'Click / press Enter to start &nbsp;&middot;&nbsp; ◀ ▶ choose hero';
+      ? `${this._glyph('jump', true)} select &nbsp;&middot;&nbsp; D-pad ◀ ▶ navigate`
+      : 'Click / press Enter to select &nbsp;&middot;&nbsp; ◀ ▶ navigate';
   }
 
   _start() {
@@ -541,10 +531,13 @@ export class HUD {
     add('Resume', () => this._resume());
     add('Controls', () => this._push('controls'));
     add('Settings', () => this._push('settings'));
-    add('Restart', () => {
+    const camp = this.game.mode === 'campaign' && !!this.game.campaign?.active;
+    add(camp ? 'Restart Mission' : 'Restart', () => {
       const g = this.game; this.hideMenus(); g.audio?.duck?.(false);
-      g.begin(g.player?.id || this.lastHero);
+      if (camp) g.campaign.restart();
+      else g.begin(g.player?.id || this.lastHero);
     });
+    if (camp) add('Abandon Mission', () => this.abandonMission());
     add('Quit to Title', () => this._quit());
   }
 
@@ -554,6 +547,7 @@ export class HUD {
     g.audio?.duck?.(false);
     g.audio?.engine?.(false); g.audio?.siren?.(false);
     for (const h of Object.values(g.heroes || {})) h.deactivate?.();
+    g.campaign?.stop?.();
     g.enemies?.reset?.();
     g.state = 'menu';
     this.maxCombo = 0;
@@ -775,10 +769,10 @@ export class HUD {
       return;
     }
     switch (k) {
-      case 'ArrowUp': case 'KeyW': this._focus(scr.index - 1); break;
-      case 'ArrowDown': case 'KeyS': this._focus(scr.index + 1); break;
-      case 'ArrowLeft': case 'KeyA': this._horiz(-1); break;
-      case 'ArrowRight': case 'KeyD': this._horiz(1); break;
+      case 'ArrowUp': case 'KeyW': this._nav('up'); break;
+      case 'ArrowDown': case 'KeyS': this._nav('down'); break;
+      case 'ArrowLeft': case 'KeyA': this._nav('left'); break;
+      case 'ArrowRight': case 'KeyD': this._nav('right'); break;
       case 'Enter': case 'NumpadEnter': case 'Space': this._activate(); break;
       case 'Escape': case 'Backspace': this._back(); break;
       case 'KeyP': if (scr.name === 'pause') this._resume(); else handled = false; break;
@@ -822,6 +816,7 @@ export class HUD {
 
   _nav(dir) {
     const scr = this.screen; if (!scr) return;
+    if (scr.nav && scr.nav(dir)) return;
     if (dir === 'up') this._focus(scr.index - 1);
     else if (dir === 'down') this._focus(scr.index + 1);
     else this._horiz(dir === 'left' ? -1 : 1);
@@ -1003,7 +998,7 @@ export class HUD {
     }
 
     // objective distance + waypoint
-    const op = g.enemies?.objectivePos;
+    const op = g.enemies?.objectiveActive ? g.enemies.objectivePos : null;
     if (op && this.objText) {
       const d = Math.hypot(op.x - p.pos.x, op.z - p.pos.z);
       const ds = `${Math.round(d)} m`;
@@ -1320,3 +1315,5 @@ function ds4Svg() {
     <circle cx="350" cy="186" r="7" fill="#39427a" stroke="#9aa6e6"/>
     ${t}</svg>`;
 }
+
+installCampaignUI(HUD, { ORDER, HERO_INFO, EMBLEM, esc, fmtTime, cssColor });

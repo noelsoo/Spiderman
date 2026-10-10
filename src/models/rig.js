@@ -89,6 +89,7 @@ const K = {
   thr2S: [[AL, -1.25, 0, 0.12], [AR, -1.25, 0, -0.12], [EL, -0.2, 0, 0], [ER, -0.2, 0, 0], [CH, 0.55, 0, 0], [H, 0.3, 0, 0], [HD, 0.1, 0, 0], [TL, -0.7, 0, 0.2], [KL, 0.6, 0, 0], [TR, 0.5, 0, -0.2], [KR, 0.2, 0, 0], [POSK, 0, 0, 0.2]],
   smashW: [[AL, -3.05, 0, 0.18], [AR, -3.05, 0, -0.18], [EL, -0.35, 0, 0], [ER, -0.35, 0, 0], [CH, -0.3, 0, 0], [H, -0.2, 0, 0], [HD, -0.25, 0, 0], [TL, -0.2, 0, 0.2], [KL, 0.4, 0, 0], [TR, 0.2, 0, -0.2], [KR, 0.4, 0, 0]],
   smashS: [[AL, -0.9, 0, 0.12], [AR, -0.9, 0, -0.12], [EL, -0.25, 0, 0], [ER, -0.25, 0, 0], [CH, 0.6, 0, 0], [H, 0.4, 0, 0], [HD, 0.25, 0, 0], [TL, -0.55, 0, 0.2], [KL, 0.8, 0, 0], [TR, -0.25, 0, -0.2], [KR, 0.6, 0, 0], [POSK, 0, 0, 0.25]],
+  catS: [[AR, -1.35, 0, -0.2], [ER, -0.35, 0, 0], [AL, -0.5, 0, 0.45], [EL, -1.3, 0, 0], [CH, 0.12, 0.45, 0], [H, 0.08, 0.1, 0], [HD, 0, -0.25, 0], [TL, -0.5, 0, 0.12], [KL, 0.45, 0, 0], [TR, 0.4, 0, -0.1], [KR, 0.3, 0, 0]],
   land: [[H, 0.35, 0, 0], [CH, 0.25, 0, 0], [TL, -1.0, 0, 0.15], [TR, -0.9, 0, -0.15], [KL, 1.7, 0, 0], [KR, 1.6, 0, 0], [AL, -0.4, 0, 0.7], [AR, -0.4, 0, -0.7], [EL, -0.5, 0, 0], [ER, -0.5, 0, 0]],
 };
 const KL_ = {}; // mirrored (left) versions
@@ -269,26 +270,33 @@ S.zip = (m, p, c) => {
   p.set(TL, 0.35, 0, 0.12); p.set(TR, 0.55, 0, -0.1); p.set(KL, 0.3); p.set(KR, 0.15); p.set(FL, 0.9); p.set(FR, 0.9);
   p.set(HD, -0.7); p.set(NK, -0.3);
 };
+// SM2 wall crawl. Local frame while on a wall: +Y = direction of travel along the wall, +Z = into the wall (chest to the wall).
+// Phase is driven by distance travelled. Group A = right hand + left foot, group B = left hand + right foot (spider crawl);
+// at sprint speed the pairs merge into a bounding scramble (both hands plant, both legs kick).
 S.wallrun = (m, p, c) => {
   const f = c.f;
-  m.phase += c.dt * (6 + c.sp * 0.8) * f.cadence;
-  const ph = m.phase, a = Math.sin(ph), b = Math.sin(ph + Math.PI);
-  p.ground = false; p.flat = 0; p.rate = 14;
-  p.set(H, m.customRotation ? 0.15 : 0.55, 0, 0); p.pos(0, -0.18, 0);
-  p.set(AL, -2.1 - a * 0.5, 0, 0.45); p.set(AR, -2.1 - b * 0.5, 0, -0.45); p.set(EL, -0.45 - Math.max(0, a) * 0.5); p.set(ER, -0.45 - Math.max(0, b) * 0.5);
-  p.set(TL, -0.9 + a * 0.6, 0, 0.45); p.set(TR, -0.9 + b * 0.6, 0, -0.45);
-  p.set(KL, 1.5 - a * 0.5); p.set(KR, 1.5 - b * 0.5);
-  p.set(FL, 0.4); p.set(FR, 0.4);
-  p.set(CH, 0.1, a * 0.2, a * 0.05); p.set(HD, -0.7, 0, 0);
+  const bound = sm((c.sp - 9.5) / 3.5);
+  m.phase += c.dt * c.sp * lerp(2.9, 1.8, bound) * (f.cadence || 1);
+  const ph = m.phase, a = Math.sin(ph), b = Math.sin(ph + Math.PI * (1 - bound));
+  const ex = m.extra; (ex.plant ||= [0, 0]); ex.plant[0] = sm(0.5 - b * 1.2); ex.plant[1] = sm(0.5 - a * 1.2); ex.wall = 1;
+  p.ground = false; p.flat = 0; p.rate = 26; p.zeta = 0.8;
+  p.set(H, 0.08 - bound * 0.08, 0, (a - b) * 0.05 + bound * 0); p.pos(0, -0.12 + bound * Math.sin(ph * 2) * 0.03, 0.04);
+  p.set(SP, 0.04, (a - b) * 0.1, 0); p.set(CH, 0.05, (a - b) * 0.14, (a - b) * 0.04); p.set(NK, -0.35, 0, 0); p.set(HD, -0.55, Math.sin(ph * 0.5) * 0.08, 0);
+  // arms: reach above the head with elbows out, pull down while planted
+  p.set(AR, -2.35 - a * 0.42, 0, -(0.62 + a * 0.12)); p.set(ER, -0.55 - Math.max(0, -a) * 0.55); p.set(WR, -0.5, 0, 0);
+  p.set(AL, -2.35 - b * 0.42, 0, 0.62 + b * 0.12); p.set(EL, -0.55 - Math.max(0, -b) * 0.55); p.set(WL, -0.5, 0, 0);
+  // legs: knees splayed out toward the wall, opposite-limb push
+  p.set(TL, -1.25 - a * 0.38, 0, 0.55 + a * 0.12); p.set(KL, 1.3 + a * 0.4); p.set(FL, 0.7);
+  p.set(TR, -1.25 - b * 0.38, 0, -(0.55 + b * 0.12)); p.set(KR, 1.3 + b * 0.4); p.set(FR, 0.7);
 };
 S.wallidle = (m, p, c) => {
-  const br = Math.sin(c.tm * 1.7);
-  p.ground = false; p.flat = 0; p.rate = 10;
-  p.set(H, m.customRotation ? 0.15 : 0.5, 0, 0); p.pos(0, -0.2, 0);
-  p.set(AL, -1.35, 0, 0.7); p.set(AR, -1.2, 0, -0.75); p.set(EL, -0.6); p.set(ER, -0.7);
-  p.set(TL, -1.1, 0, 0.5); p.set(TR, -0.9, 0, -0.5); p.set(KL, 1.6); p.set(KR, 1.5);
-  p.set(FL, 0.4); p.set(FR, 0.4);
-  p.set(CH, 0.1 + br * 0.02); p.set(HD, -0.6 + Math.sin(c.tm * 0.6) * 0.1, Math.sin(c.tm * 0.5) * 0.3, 0);
+  const br = Math.sin(c.tm * 1.7), sc = Math.sin(c.tm * 0.5) * 0.7 + Math.sin(c.tm * 0.23) * 0.3;
+  const ex = m.extra; (ex.plant ||= [0, 0]); ex.plant[0] = ex.plant[1] = 1; ex.wall = 1;
+  p.ground = false; p.flat = 0; p.rate = 10; p.zeta = 1;
+  p.set(H, 0.06, 0, 0); p.pos(0, -0.12, 0.05);
+  p.set(AL, -2.5, 0, 0.7 + br * 0.02); p.set(AR, -2.45, 0, -0.72 - br * 0.02); p.set(EL, -0.4); p.set(ER, -0.42); p.set(WL, -0.5); p.set(WR, -0.5);
+  p.set(TL, -1.3, 0, 0.7); p.set(TR, -1.25, 0, -0.72); p.set(KL, 1.4 + br * 0.03); p.set(KR, 1.35 - br * 0.03); p.set(FL, 0.7); p.set(FR, 0.7);
+  p.set(SP, 0.03, sc * 0.1, 0); p.set(CH, 0.05 + br * 0.02, sc * 0.12, 0); p.set(NK, -0.3, sc * 0.35, 0); p.set(HD, -0.5 + Math.sin(c.tm * 0.37) * 0.12, sc * 0.55, 0);
 };
 S.glide = (m, p, c) => {
   const v = c.vl; const hs = Math.hypot(v.x, v.z);
@@ -380,6 +388,10 @@ S.throw = (m, p, c) => {
   stance(p, c.f); const a = atk(c.t, 0.18, 0.08, 0.15, 0.3); p.rate = 26;
   const two = c.f.throwStyle === 'two';
   p.mix(two ? K.thr2W : K.thrW, Math.max(0, -a)); p.mix(two ? K.thr2S : K.thrS, Math.max(0, a));
+};
+S.catch = (m, p, c) => { // Thor: arm snaps out to catch Mjolnir, then recoils with the impact
+  stance(p, c.f); const w = c.t < 0.08 ? 1 : Math.max(0, 1 - sm((c.t - 0.08) / 0.34)); p.mix(K.catS, w);
+  const rc = c.t < 0.2 ? Math.sin(Math.min(1, c.t / 0.2) * Math.PI) : 0; p.add(CH, -0.12 * rc, 0, 0); p.add(AR, 0.3 * rc, 0, 0); p.rate = 30;
 };
 S.smash = (m, p, c) => { stance(p, c.f); const a = atk(c.t, 0.3, 0.09, 0.2, 0.4); p.mix(K.smashW, Math.max(0, -a)); p.mix(K.smashS, Math.max(0, a)); p.rate = 26; };
 /** two-handed ranged hold. Chest-space IK targets keep the grip hand pointing straight along +Z. */
@@ -606,7 +618,7 @@ export class ProcModel {
       const mv = clamp(spH / 8, 0, 1);
       p.r[H * 3] += clamp(this._acc * 0.010, -0.1, 0.14) * mv; p.r[H * 3 + 2] += -clamp(this.yawRate * 0.028, -0.3, 0.3) * mv;
     }
-    if (st.charAt(0) === 'p' && st.length === 6 || st === 'kick' || st === 'uppercut' || st === 'throw' || st === 'smash') p.zeta = Math.min(p.zeta, 0.58);
+    if (st.charAt(0) === 'p' && st.length === 6 || st === 'kick' || st === 'uppercut' || st === 'throw' || st === 'catch' || st === 'smash') p.zeta = Math.min(p.zeta, 0.58);
     // critically (or slightly under-) damped spring per joint: overshoot + follow-through
     const k = 1 - Math.exp(-p.rate * (this.prof.tempo || 1) * dt);
     const cur = this.cur, tr = p.r, vel = this.vel;
@@ -684,6 +696,7 @@ export class ProcModel {
     if (prev === 'dodge' && this.cur) this.cur[H * 3] = ((this.cur[H * 3] % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
     if (next === 'swing' && !this._fixedSide) this.swingArm *= -1;
     if (next === 'dodge') this.flipDir = 1;
+    if (next !== 'wallrun' && next !== 'wallidle') this.extra.wall = 0;
     this.state = next;
   }
 

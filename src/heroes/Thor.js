@@ -56,6 +56,8 @@ export class Thor extends Hero {
     this._impactVy = 0; this._noFocus = false;
     this.audioT = 0; this.sparkT = 0; this.crackleT = 0;
     this.glow = new GlowSprite(game.scene, 0x9fd8ff);
+    this.hGlow = new GlowSprite(game.scene, 0x7cc8ff);   // faint blue glow around the flying hammer
+    this.hFlip = null; this._pend = null; this._chg = 0; this._flipA = Math.PI / 2;
     this.beam = new BeamMesh(game.scene, 0x7cc8ff);
     this.beamOuter = new BeamMesh(game.scene, 0x4a8cff);
     this.beamT = 0; this.beamFrom = new THREE.Vector3(); this.beamTo = new THREE.Vector3(); this.beamW = 1;
@@ -70,7 +72,7 @@ export class Thor extends Hero {
     this.flying = false; this.glideT = 0; this.auraT = 0; this.ult = null; this.dmgMul = 1; this.gravityScale = 1;
     this.charged = false; this.hitStreak = 0; this.tCharge = 0; this._noFocus = false;
     this.timers.clear();
-    this.glow.set(_a, 1, 0); this.beam.hide(); this.beamOuter.hide(); this.beamT = 0;
+    this.glow.set(_a, 1, 0); this.hGlow.set(_a, 1, 0); this.beam.hide(); this.beamOuter.hide(); this.beamT = 0;
     setReticle(this, null);
     this.game.cam.fovKick = 0;
     this.model.group.rotation.set(0, this.yaw, 0);
@@ -90,28 +92,30 @@ export class Thor extends Hero {
 
   // ---- hammer bookkeeping ----------------------------------------------------------------
   _resetHammer(silent) {
+    this._pend = null;
     if (this.proj) { this.proj.life = 0; this.proj.dead = true; this.proj.alive = false; this.proj = null; }
-    if (!this.hasHammer) { this.model.attachHammer?.(); }
     this._dropHammerMesh();
+    if (!this.model.hammerAttached) { this.model.attachHammer?.(); }
     this.hasHammer = true; this.hammerState = 'held'; this.imbued = false;
     void silent;
   }
   _dropHammerMesh() {
     if (this.hTrail) { this.hTrail.stop?.(); this.hTrail = null; }
     if (this.hGroup?.parent) this.hGroup.parent.remove(this.hGroup);
+    this.hGlow?.set(_a, 1, 0);
   }
-  /** Flying hammer visual: a wrapper placed by the projectile, with the real Mjolnir mesh spinning inside it. */
+  /** Flying hammer visual: the one real Mjolnir mesh leaves the hand and is re-parented under a wrapper the projectile moves.
+   *  hGroup (travel direction, +Z) > hFlip (head-first / handle-first) > hSpin (spin about the handle axis) > Mjolnir. */
   _hammerMesh() {
     const g = this.game;
-    const clone = this.model.detachHammer?.();          // hides the in-hand hammer and gives a world-space clone
     if (!this.hGroup) {
-      this.hGroup = new THREE.Group(); this.hSpin = new THREE.Group(); this.hGroup.add(this.hSpin);
-      if (clone) { clone.position.set(0, 0, 0); clone.quaternion.identity(); clone.scale.multiplyScalar(1.6); this.hSpin.add(clone); }
-      else {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, 0.3), new THREE.MeshStandardMaterial({ color: 0x9aa1ab, metalness: 0.8, roughness: 0.3 }));
-        this.hSpin.add(m);
-      }
+      this.hGroup = new THREE.Group(); this.hFlip = new THREE.Group(); this.hSpin = new THREE.Group();
+      this.hGroup.add(this.hFlip); this.hFlip.add(this.hSpin);
       this.hGroup.userData.noOrient = true;
+    }
+    if (this.model.hammerAttached) {
+      const hm = this.model.detachHammer?.();
+      if (hm) { hm.position.set(0, -0.26, 0); hm.quaternion.identity(); hm.scale.setScalar(1.5); this.hSpin.add(hm); this.model.mjolnir?.snap?.(); }
     }
     if (!this.hGroup.parent) g.scene.add(this.hGroup);
     return this.hGroup;
@@ -317,6 +321,7 @@ export class Thor extends Hero {
     this.actionAnim = anims[step]; this.actionT = dur[step]; this.setAnim(anims[step]);
     this.chain++; this.chainT = 1.1;
     g.audio?.play('whoosh', { volume: 0.5 });
+    if (armed) { const tr = g.fx?.trail?.(this.model.mjolnir?.tip ?? this.model.handR, this.charged ? 0xc8e8ff : 0xdfe9f5, 0.22, 0.26); if (tr) this.timers.after(dur[step] + 0.05, () => tr.stop?.()); }
     if (this.charged && armed) g.fx?.lightning?.(objPos(this.model.handR, _a, this.center).clone(), objPos(this.model.handR, _b, this.center).clone().add(_c.set(0, 3, 0)), BOLT, 0.2, 2);
     this.timers.after(delay[step], () => {
       if (!this.active) return;
@@ -376,20 +381,35 @@ export class Thor extends Hero {
     const dir = to.clone().sub(from).normalize();
     const range = imbued ? IMBUE_RANGE : THROW_RANGE, speed = imbued ? IMBUE_SPEED : THROW_SPEED;
     const dist = clamp(from.distanceTo(to) + 6, 12, range);
-    const mesh = this._hammerMesh();
-    mesh.position.copy(from);
-    this.hasHammer = false; this.hammerState = 'out'; this.hammerT = 0; this.outLife = dist / speed;
+    this.hasHammer = false; this.hammerState = 'out'; this.hammerT = 0; this.outLife = dist / speed + 0.16;
     this.imbued = imbued; if (imbued && this.charged) this.charged = false;
     this.curveSide = Math.random() < 0.5 ? -1 : 1;
     this.lastHammerPos.copy(from);
     if (!aimed || !this.aiming) this.yaw = Math.atan2(dir.x, dir.z);
     this.actionAnim = 'throw'; this.actionT = 0.4; this.setAnim('throw');
-    g.audio?.play('throw'); g.audio?.play('whoosh');
+    g.audio?.play('throw');
+    const tok = this._pend = {};
+    // wind-up (the rig's throw pose cocks the arm back), then release on the forward stroke
+    this.timers.after(0.16, () => {
+      if (this._pend !== tok || !this.active) return;
+      this._pend = null;
+      this._release(to, dist, speed, imbued, power);
+    });
+  }
+
+  _release(to, dist, speed, imbued, power) {
+    const g = this.game;
+    const from = objPos(this.model.handR, _a, this.center).clone();
+    const dir = to.clone().sub(from); if (dir.lengthSq() < 1e-4) dir.copy(this.forward); dir.normalize();
+    const mesh = this._hammerMesh();
+    mesh.position.copy(from);
+    this.lastHammerPos.copy(from); this.hammerT = 0; this.outLife = dist / speed;
+    g.audio?.play('whoosh');
     g.fx?.flash?.(from, BOLT, imbued ? 5 : 3, 0.12);
     if (imbued) { g.fx?.lightning?.(from.clone(), from.clone().addScaledVector(dir, 4), 0xc8e8ff, 0.2, 3); g.cam.shake(0.2); rumble(g, 0.6, 0.4, 140); g.audio?.play('thunder', { volume: 0.4 }); }
     else g.cam.shake(0.06);
     if (this.hTrail) this.hTrail.stop?.();
-    this.hTrail = g.fx?.trail?.(this.hGroup, imbued ? 0xc8e8ff : BOLT, imbued ? 0.7 : 0.35, 0.35) ?? null;
+    this.hTrail = g.fx?.trail?.(this.model.mjolnir?.tip ?? this.hGroup, imbued ? 0xe0f2ff : 0xbfe6ff, imbued ? 0.7 : 0.4, 0.4) ?? null;
     const dmg = (imbued ? IMBUE_DMG * (0.8 + 0.2 * power) : THROW_DMG) * this.dmgMul;
     this.proj = g.combat?.projectile?.({
       pos: from, vel: dir.clone().multiplyScalar(speed), damage: dmg, radius: imbued ? 1.3 : 1.1, life: this.outLife, color: BOLT, size: 0.5, mesh,
@@ -401,8 +421,11 @@ export class Thor extends Hero {
 
   _hammerHit(tg, p, dmg, imbued) {
     const g = this.game;
-    g.audio?.play('hammer'); rumble(g, 0.4, 0.3, 80);
+    g.audio?.play('hammer'); g.audio?.play('heavyhit', { volume: 0.7 }); rumble(g, 0.5, 0.4, 100);
     const pt = p?.pos ?? tg.pos;
+    g.fx?.ring?.(pt.clone(), imbued ? 4.5 : 2.8, 0xdfeeff, 0.3); g.fx?.shockwave?.(pt.clone(), imbued ? 4 : 2.4, BOLT);
+    g.fx?.burst?.(pt.clone(), 0xfff2c0, 16, 9, 0.35, 0.18); g.fx?.hitSpark?.(pt.clone(), 0xffffff, true);
+    g.cam.shake(0.14); if (!imbued) hitStop(g, 0.06, 0.07);
     g.fx?.lightning?.(pt.clone(), enemyCenter(tg, _c).clone(), BOLT, 0.12, 1);
     if (this.aiming || imbued) precisionHit(this, tg, pt, dmg);
     if (imbued) {
@@ -415,6 +438,7 @@ export class Thor extends Hero {
   _startReturn() {
     if (this.hammerState !== 'out') return;
     const g = this.game;
+    if (this._pend) { this._pend = null; this.hasHammer = true; this.hammerState = 'held'; return; } // recalled during the wind-up
     if (this.proj) { this.proj.life = 0; this.proj.dead = true; this.proj.alive = false; if (this.proj.pos) this.lastHammerPos.copy(this.proj.pos); }
     this.hammerState = 'back'; this.hammerT = 0; this.backSpeed = RETURN_SPEED_MIN;
     const hand = objPos(this.model.handR, _a, this.center);
@@ -445,7 +469,7 @@ export class Thor extends Hero {
     const hand = objPos(this.model.handR, _a, this.center);
     const cur = p?.pos ?? this.lastHammerPos;
     const dist = cur.distanceTo(hand);
-    this.backSpeed = Math.min(RETURN_SPEED_MAX, this.backSpeed + 55 * dt);
+    this.backSpeed = Math.min(RETURN_SPEED_MAX, this.backSpeed + 55 * dt, 16 + dist * 7);
     _b.subVectors(hand, cur).normalize();
     _c.set(-_b.z, 0, _b.x).multiplyScalar(this.curveSide * clamp(dist * 0.4, 0, 7));
     this.recallTarget.pos.copy(hand).add(_c); this.recallTarget.center.copy(this.recallTarget.pos);
@@ -453,7 +477,7 @@ export class Thor extends Hero {
       _t.subVectors(this.recallTarget.pos, cur).normalize().multiplyScalar(this.backSpeed);
       p.vel.lerp(_t, 1 - Math.exp(-7 * dt));
     }
-    if (dist < 1.8 || this.hammerT > 4.5 || !p) this._catch();
+    if (dist < 1.0 || this.hammerT > 4.5 || !p) this._catch();
     void g;
   }
 
@@ -464,11 +488,13 @@ export class Thor extends Hero {
     this.model.attachHammer?.();
     this.hasHammer = true; this.hammerState = 'held'; this.imbued = false;
     this.useCooldown('throw', 0.3);
+    this.actionAnim = 'catch'; this.actionT = 0.42; this.setAnim('catch');
     const hand = objPos(this.model.handR, _a, this.center).clone();
     g.audio?.play('catch'); g.fx?.flash?.(hand, BOLT, 5, 0.15);
     g.fx?.lightning?.(hand.clone().add(_b.set(0, 2, 0)), hand, BOLT, 0.15, 3);
     g.fx?.burst?.(hand, BOLT, 14, 5, 0.3, 0.2);
-    g.cam.shake(0.12); rumble(g, 0.4, 0.2, 90);
+    g.fx?.ring?.(hand.clone(), 1.6, 0xdfeeff, 0.2); g.fx?.hitSpark?.(hand.clone(), 0xffffff, true);
+    g.cam.shake(0.2); rumble(g, 0.5, 0.3, 110);
   }
 
   // ---- lightning strike -------------------------------------------------------------------------------------------------
@@ -736,18 +762,34 @@ export class Thor extends Hero {
     this.roll = damp(this.roll, rollT, 5, dt);
     applyTilt(this, this.pitch, this.roll);
 
-    // flying Mjolnir: end-over-end spin, aligned with its travel
+    // flying Mjolnir: head leads, spins about its own handle axis; on the way back it turns to arrive handle-first
+    this.model.hammerSpin = this.flying && this.hasHammer && !this.ult;
     if (this.hGroup?.parent && this.hSpin) {
       const v = this.proj?.vel;
       if (v && v.lengthSq() > 1) { _d.copy(this.hGroup.position).add(v); this.hGroup.lookAt(_d); }
-      this.hSpin.rotation.x += dt * (this.hammerState === 'back' ? 22 : 17);
-      if (Math.random() < (this.imbued ? 0.9 : 0.4)) g.fx?.burst?.(this.hGroup.position.clone(), this.imbued ? 0xc8e8ff : BOLT, 1, 1, 0.25, 0.15);
-      if (this.imbued && Math.random() < 0.5) g.fx?.lightning?.(this.hGroup.position.clone(), this.hGroup.position.clone().add(_b.set(rand(-1.2, 1.2), rand(-1.2, 1.2), rand(-1.2, 1.2))), 0xc8e8ff, 0.08, 1);
-    }
+      let k = 0;
+      if (this.hammerState === 'back') { _b.copy(objPos(this.model.handR, _a, this.center)); k = clamp((9 - this.hGroup.position.distanceTo(_b)) / 6, 0, 1); k = k * k * (3 - 2 * k); }
+      this._flipA = Math.PI / 2 - k * Math.PI;
+      this.hFlip.rotation.x = this._flipA;
+      this.hSpin.rotation.y += dt * (this.hammerState === 'back' ? 17 : 15) * (1 - k * 0.9);
+      this.model.mjolnir?.update?.(dt);
+      const hp = this.hGroup.position;
+      this.hGlow.set(hp, this.imbued ? 3.2 : 1.9, this.imbued ? 0.55 : 0.28);
+      if (Math.random() < (this.imbued ? 0.9 : 0.4)) g.fx?.burst?.(hp.clone(), this.imbued ? 0xc8e8ff : BOLT, 1, 1, 0.25, 0.15);
+      // short crackling arcs wrapped around the flying hammer
+      if (Math.random() < (this.imbued ? 0.9 : 0.55)) g.fx?.lightning?.(hp.clone().add(_b.set(rand(-0.4, 0.4), rand(-0.4, 0.4), rand(-0.4, 0.4))), hp.clone().add(_b.set(rand(-0.9, 0.9), rand(-0.9, 0.9), rand(-0.9, 0.9))), this.imbued ? 0xc8e8ff : BOLT, 0.08, 1);
+      if (this.imbued && Math.random() < 0.5) g.fx?.lightning?.(hp.clone(), hp.clone().add(_b.set(rand(-1.6, 1.6), rand(-1.6, 1.6), rand(-1.6, 1.6))), 0xc8e8ff, 0.1, 1);
+      this.audioT -= dt;
+      if (this.audioT <= 0) { this.audioT = 0.28; g.audio?.play('whoosh', { volume: 0.35, pitch: 0.9 + Math.random() * 0.3 }); }
+    } else this.hGlow.set(_a, 1, 0);
+    // engraving glow: charged storm / imbue / God of Thunder aura / charging a throw
+    const wantChg = (this.charged || this.imbued || this.auraT > 0) ? 0.75 + 0.25 * Math.sin(g.time * 22) : (this.tCharge > 0.15 ? clamp(this.tCharge / IMBUE_MAX, 0, 1) * 0.8 : 0);
+    this._chg = damp(this._chg, wantChg, 10, dt);
+    this.model.setHammerCharge?.(this._chg);
     // stored storm in Mjolnir / imbue charge: glow + crackle at the hand
     if (!this.ult) {
       if (this.charged && this.hasHammer) {
-        const h = objPos(this.model.handR, _a, this.center);
+        const h = objPos(this.model.hammer ?? this.model.handR, _a, this.center);
         this.glow.set(h, 1.0 + Math.sin(g.time * 18) * 0.25, 0.8);
         this.crackleT -= dt;
         if (this.crackleT <= 0) { this.crackleT = 0.18; g.fx?.lightning?.(h.clone(), h.clone().add(_b.set(rand(-0.8, 0.8), rand(0.3, 1.6), rand(-0.8, 0.8))), BOLT, 0.12, 1); }

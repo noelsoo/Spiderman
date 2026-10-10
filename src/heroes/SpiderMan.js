@@ -26,7 +26,7 @@ const TUNE = {
   swingGravity: 26, swingMax: 56, swingPump: 9, swingSteer: 16, swingReel: 14, ropeShorten: 0.9,
   anchorMin: 10, anchorMax: 95, groundClear: 4, swingMinRise: 6, launchUp: 17,
   // wall
-  wallSpeed: 14, wallSprint: 17, wallJumpOut: 11, wallJumpUp: 12.5,
+  wallSpeed: 7, wallSprint: 14, wallSymbiote: 10, wallOffset: 0.4, wallJumpOut: 11, wallJumpUp: 12.5,
   // zip
   zipRange: 60, zipSpeed: 58, zipBoost: 34, zipBoostCd: 2.2,
   // glide
@@ -40,6 +40,7 @@ const TUNE = {
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
+const lerp1 = (a, b, t) => a + (b - a) * t;
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
 const _w = new THREE.Vector3(), _hp = new THREE.Vector3(), _hp2 = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
@@ -63,6 +64,32 @@ export class SpiderMan extends Hero {
     this.symbiote = false;
     this.consumesWeaponWheel = false; // true while aiming: the weapons system should not cycle guns with the wheel / D-pad down
     this._resetState();
+    this._installWallHands();
+  }
+
+  /** Spread the fingers flat on the wall while crawling / clinging (runs after the glove hook). */
+  _installWallHands() {
+    const m = this.model, j = m.j;
+    if (!j || !m.hooks?.fns || m._wallHands) return;
+    m._wallHands = true;
+    const hands = [9, 10].map((wj, hi) => {
+      const sd = hi === 0 ? 1 : -1;
+      const fingers = j[wj].children.filter((o) => o.children.length === 1 && o.children[0].children.length === 0 && o.position.y < -0.07 && !o.isMesh).sort((a, b) => (-sd * a.position.x) - (-sd * b.position.x));
+      return { sd, fingers, w: 0 };
+    });
+    m.hooks.fns.push((c, mm) => {
+      const on = mm.extra?.wall ? 1 : 0;
+      for (let hi = 0; hi < 2; hi++) {
+        const h = hands[hi];
+        h.w += (on * (0.6 + 0.4 * (mm.extra.plant?.[hi] ?? 1)) - h.w) * (1 - Math.exp(-14 * c.dt));
+        if (h.w < 0.02) continue;
+        h.fingers.forEach((p1, i) => {
+          const spread = (i - 1.5) * 0.2;
+          p1.rotation.z = lerp1(p1.rotation.z, -h.sd * 0.1, h.w); p1.rotation.x = lerp1(p1.rotation.x, spread, h.w);
+          p1.children[0].rotation.z = lerp1(p1.children[0].rotation.z, -h.sd * 0.05, h.w);
+        });
+      }
+    });
   }
 
   _resetState() {
@@ -717,7 +744,7 @@ export class SpiderMan extends Hero {
     return false;
   }
   _enterWall() {
-    this.state = 'wall'; this.wallN.copy(this.wallNormal).setY(0).normalize(); this.wallLost = 0; this._wallBox = this.wallContact;
+    this.state = 'wall'; this.wallN.copy(this.wallNormal).setY(0).normalize(); this.wallLost = 0; this._wallBox = this.wallContact; this._wallK = 0; (this._wallUp ||= new THREE.Vector3()).copy(UP);
     this.atk = null; this.lash = null; this.spin = null; this.lines.swing.hide(); this.aimAirT = 0;
     // convert some momentum into climbing speed
     const sp = Math.hypot(this.vel.x, this.vel.z);
@@ -777,7 +804,7 @@ export class SpiderMan extends Hero {
     let side = mag > 0.05 ? wish.dot(t) : 0;
     if (mag > 0.05 && Math.abs(up) < 0.35 && Math.abs(side) < 0.35) { up = 0; side = 0; }
     if (aimHold || this.sling) { up = 0; side = 0; }
-    const speed = input.down('sprint') || this.symbiote ? TUNE.wallSprint : TUNE.wallSpeed;
+    const speed = input.down('sprint') ? TUNE.wallSprint : this.symbiote ? TUNE.wallSymbiote : TUNE.wallSpeed;
     const tx = t.x * side * speed, tz = t.z * side * speed, ty = up * speed;
     const acc = 70 * dt;
     const stick = this.onWall ? 2.5 : 7;
@@ -796,14 +823,22 @@ export class SpiderMan extends Hero {
     if (this.onGround && up < -0.1) { this.state = 'free'; this.wallLock = 0.3; this.gravityScale = 1; this.sling = null; return; }
     if (this.wallLost > 0.15) { this._leaveWall(); return; }
 
-    const sp = Math.hypot(this.vel.x, this.vel.z) + Math.abs(this.vel.y);
+    // speed along the wall plane (ignores the stick-to-wall component)
+    const vn = this.vel.x * n.x + this.vel.z * n.z;
+    _a.set(this.vel.x - n.x * vn, this.vel.y, this.vel.z - n.z * vn);
+    const sp = _a.length();
     if (this.sling) this.setAnim('charge', 1);
     else if (this.shootT > 0) { if (this.anim.state !== 'shoot') this.setAnim('shoot', 1); }
-    else this.setAnim(sp > 1.5 ? 'wallrun' : 'wallidle', sp);
+    else this.setAnim(sp > 1.2 ? 'wallrun' : 'wallidle', sp);
     this.yaw = Math.atan2(-n.x, -n.z);
-    const mv = _b.set(this.vel.x + n.x * 2.5, this.vel.y, this.vel.z + n.z * 2.5);
-    if (mv.lengthSq() < 0.5) mv.copy(UP); else mv.normalize();
-    this._setPose(mv, n, 10);
+    // chest to the wall; head points along the direction of travel (world-up when still / climbing straight up)
+    const wu = this._wallUp || (this._wallUp = new THREE.Vector3(0, 1, 0));
+    if (sp > 2.5) {
+      _a.multiplyScalar(1 / sp);
+      if (_a.y < -0.25) { _a.y = -0.25; _a.normalize(); }
+      wu.lerp(_a, 1 - Math.exp(-7 * dt)).normalize();
+    } else wu.lerp(UP, 1 - Math.exp(-5 * dt)).normalize();
+    this._setPose(_b.copy(n).negate(), wu, 11);
   }
 
   // ---- ZIP -------------------------------------------------------------------
@@ -1397,9 +1432,14 @@ export class SpiderMan extends Hero {
 
     this._applyPose(dt);
     if (this.state === 'wall' && this.model.customRotation) {
-      // put the character's origin on the wall surface at body height
+      // chest-center sits wallOffset off the wall surface; blend in over the first moments so entry doesn't pop
       const g = this.model.group; const n = this.wallN;
-      g.position.set(this.pos.x - n.x * (this.radius + 0.02), this.pos.y + this.height * 0.5, this.pos.z - n.z * (this.radius + 0.02));
+      this._wallK = Math.min(1, (this._wallK ?? 1) + dt * 7);
+      const k = this._wallK * this._wallK * (3 - 2 * this._wallK);
+      _a.set(this.pos.x + n.x * (TUNE.wallOffset - this.radius), this.pos.y + this.height * 0.5, this.pos.z + n.z * (TUNE.wallOffset - this.radius));
+      _b.set(0, this.height * 0.5, 0).applyQuaternion(g.quaternion);
+      _a.sub(_b);
+      g.position.lerp(_a, k);
     } else if (this.model.customRotation && (this.state === 'swing' || this.state === 'glide' || this.state === 'zip')) {
       this.model.group.position.y = this.pos.y + 0.0;
     }
