@@ -5,7 +5,7 @@
 //   throttle = input.value('throttle') (W / R2)   brake+reverse = input.value('brake') (S / L2)
 //   steer = input.move.x (A,D / L stick)           handbrake = input.down('handbrake') (Space / X)   horn = H / L3
 //   exit = interact (F / triangle, handled by main.js -> tryInteract)
-//   Drive-by shooting is NOT implemented (weapons are holstered while driving; LMB/R1 do nothing).
+//   Drive-by shooting lives in weapons.updateDriving() (RMB/L1 aim, LMB/R1 fire; this file only suppresses cam auto-recenter while aiming).
 import * as THREE from 'three';
 import { L } from '../world/city.js';
 import { KINDS, SPECS, PAINTS, VAN_PAINTS, TAXI_YELLOW, POLICE_WHITE, CarModel, CarInstancer, initCarAssets } from './models.js';
@@ -652,7 +652,7 @@ export class Vehicles {
     } else this._hornT = 0;
     // camera: free look, auto re-centre behind the car after 1.5 s without look input
     const cam = this.game.cam;
-    if (inp.look.x * inp.look.x + inp.look.y * inp.look.y > 1e-6 || inp.down('recenter')) this._lookIdle = 0; else this._lookIdle += dt;
+    if (inp.look.x * inp.look.x + inp.look.y * inp.look.y > 1e-6 || inp.down('recenter') || this.game.weapons?.drivebyAiming) this._lookIdle = 0; else this._lookIdle += dt;
     if (this._lookIdle > 1.5) {
       const k = 1 - Math.exp(-2.6 * dt);
       cam.yaw += wrapPi(v.yaw + Math.PI - cam.yaw) * k;

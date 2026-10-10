@@ -14,7 +14,7 @@ export { WEAPONS, WEAPON_BY_ID, SHOP_ITEMS, MEDKIT };
 const TAU = Math.PI * 2;
 const UP = new THREE.Vector3(0, 1, 0);
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
-const _u = new THREE.Vector3(), _v = new THREE.Vector3();
+const _u = new THREE.Vector3(), _v = new THREE.Vector3(), _dm = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _e = new THREE.Euler();
@@ -52,6 +52,8 @@ export class Weapons {
     this._ui = null;
     this._zoomI = 0; this._rp = 0; this._ry = 0; this._shotN = 0; this._breath = 3; this._breathHold = false;
     this._casings = [];
+    this._drv = null;                       // { v, muzzle } while a drive-by is being processed
+    this.drivebyAiming = false;
   }
 
   // ===================================================================== lifecycle
@@ -289,8 +291,14 @@ export class Weapons {
 
   _muzzle(out) {
     const gun = this._gun;
+    if (this._drv) return out.copy(this._drv.muzzle);
     if (gun) { gun.updateWorldMatrix(true, true); gun.userData.muzzle.getWorldPosition(out); return out; }
     return out.copy(this.game.player.center);
+  }
+
+  _drivingMuzzle(v, out) {
+    const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
+    return out.set(v.pos.x + cy * 0.75 + sy * 0.3, v.pos.y + 1.3, v.pos.z - sy * 0.75 + cy * 0.3);   // driver (left) window
   }
 
   // ===================================================================== ambient hook (called every frame via cam.update)
@@ -358,7 +366,7 @@ export class Weapons {
     const u = this._ui; if (!u) return;
     const g = this.game, def = this.equipped, hud = g.hud, own = !hud?.handlesWeapons;
     const st = def ? this.owned.get(def.id) : null;
-    const armed = !!def && !g.vehicles?.driving && !g.player?.dead;
+    const armed = !!def && (!g.vehicles?.driving || (this.drivebyAiming && this._driveGun(def))) && !g.player?.dead;
     const hasHudXh = typeof hud?.setCrosshair === 'function';
     u.cash.style.display = own ? '' : 'none';
     if (u.sig.cash !== g.economy.cash) { u.sig.cash = g.economy.cash; u.cash.textContent = '$' + Math.round(g.economy.cash).toLocaleString('en-US'); }
@@ -403,7 +411,7 @@ export class Weapons {
 
   _spread(def) {
     const p = this.game.player;
-    const moving = p ? Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 10) : 0;
+    const moving = this._drv ? Math.min(1, Math.abs(this._drv.v.speed || 0) / 20) : p ? Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 10) : 0;
     const b = this.game.cam.aimT;
     let sp = lerp(def.spread, def.aimSpread, b) + moving * def.spread * 0.5 * (1 - 0.6 * b) + this._bloom + 0.0015;
     if (def.scope && b > 0.8) sp += this._swayAmt() * 0.0015 * (1 + moving * 6);
@@ -493,6 +501,67 @@ export class Weapons {
     }
   }
 
+  _driveGun(def) { return !!def && def.kind === 'hitscan' && !def.scope; }
+
+  // ===================================================================== drive-by (called while driving, instead of update)
+  // Hold aim (RMB / L1) to lean out and aim; fire with LMB / R1. Throttle/brake/steer are untouched: only the
+  // physical sources used here (mouse buttons, L1, R1) are consumed — never L2/R2, which are brake/throttle.
+  updateDriving(dt, v) {
+    const g = this.game, inp = g.input, p = g.player;
+    this.drivebyAiming = false;
+    if (!p || !v || g.state !== 'playing') return;
+    this._cd -= dt; this._shotAge += dt; this._emptyT -= dt;
+    this._bloom = Math.max(0, this._bloom - dt * 0.09);
+    if (this._shotAge > 0.3) this._shotN = 0;
+    if (!p.dead) {
+      if (inp.pressed('weaponNext')) this.cycle(1);
+      if (inp.pressed('weaponPrev')) this.cycle(-1);
+    }
+    this._recoilRecover(dt);
+    const def = this.equipped;
+    const st = def ? this.owned.get(def.id) : null;
+    if (!def || !st || p.dead || !this._driveGun(def)) { this.aiming = false; this._fireWas = false; this._reloadWas = false; this.reloadProgress = -1; this._reload = Math.min(0, this._reload); return; }
+
+    const has = (a, id) => inp.sources[a].some((s) => s[0] === id && s[1] > 0.25 && !inp.consumed.has(id));
+    const aimM = has('aim', 'm:2'), aimP = has('ability', 'p:4');
+    const aimHeld = aimM || aimP;
+    const fireM = has('attack', 'm:0'), fireP = has('special', 'p:5');
+    const wantFire = aimHeld && (fireM || fireP);
+    const reloadHeld = inp.down('reload');
+    const claim = [];
+    if (aimM) claim.push('m:2'); if (aimP) claim.push('p:4');
+    if (wantFire) { if (fireM) claim.push('m:0'); if (fireP) claim.push('p:5'); }
+    if (claim.length) { for (const c of claim) inp.consumed.add(c); inp._recompute(); }
+    const fireEdge = wantFire && !this._fireWas; this._fireWas = wantFire;
+    const reloadEdge = reloadHeld && !this._reloadWas; this._reloadWas = reloadHeld;
+    this.aiming = aimHeld; this.drivebyAiming = aimHeld;
+
+    if (this._reload > 0) {
+      this._reload -= dt;
+      this.reloadProgress = 1 - Math.max(0, this._reload) / this._reloadT;
+      if (this._reload <= 0) this._finishReload(def, st);
+    } else this.reloadProgress = -1;
+    if (!aimHeld) return;
+
+    g.cam.requestAim({ fov: 55, distance: 6.5, shoulder: 1.2, height: 2.2 });
+    g.hud?.setCrosshair?.('gun');
+    this._drv = { v, muzzle: this._drivingMuzzle(v, _dm) };
+    try {
+      this._aimInfo(def.range, this._aimPt);
+      if (this._reload <= 0) {
+        if (reloadEdge) this._startReload(def, st);
+        const trigger = def.auto ? wantFire : fireEdge;
+        if (this._cd <= 0) {
+          if (trigger) {
+            if (st.clip > 0) this._shoot(def, st, p);
+            else if (st.reserve > 0) this._startReload(def, st);
+            else if (fireEdge && this._emptyT <= 0) { g.audio?.play?.('empty'); g.hud?.toast?.('Out of ammo'); this._emptyT = 0.5; }
+          } else if (st.clip === 0 && st.reserve > 0) this._startReload(def, st);
+        }
+      }
+    } finally { this._drv = null; }
+  }
+
   _requestAim(def, dt, inp) {
     const g = this.game;
     if (def.scope) {
@@ -537,7 +606,7 @@ export class Weapons {
     cam.getWorldDirection(_d);
     const dir = _d;
     _u.copy(cam.position);
-    const along = Math.max(0.5, _v.subVectors(p.center, _u).dot(dir));
+    const along = Math.max(0.5, _v.subVectors(this._drv ? this._drv.muzzle : p.center, _u).dot(dir));
     _u.addScaledVector(dir, along);                                   // start in front of the camera, level with the hero
     const wall = g.physics.raycast(_u, dir, range);
     const maxT = wall ? wall.distance : range;
@@ -591,7 +660,7 @@ export class Weapons {
     const kp = def.recoil * aimK * climb * (0.85 + Math.random() * 0.3);
     const ky = def.recoil * aimK * 0.45 * (Math.sin(this._shotN * 0.9) * 0.6 + (Math.random() - 0.5));
     cam.pitch += kp; cam.yaw += ky; this._rp += kp; this._ry += ky;
-    this._ejectCasing(def, p);
+    if (!this._drv) this._ejectCasing(def, p);
     if (def.kind !== 'throw') {
       g.fx?.flash?.(muzzle, 0xffc060, def.heavy ? 6 : 3, 0.07);
       g.fx?.glow?.(muzzle, 0xffd890, def.kind === 'launcher' ? 1.8 : 0.7 + def.recoil * 4, 0.06);
@@ -601,7 +670,7 @@ export class Weapons {
     }
     g.input.rumble(Math.min(1, 0.15 + def.recoil * 8), Math.min(1, 0.2 + def.recoil * 4), def.heavy ? 160 : 55);
     g.audio?.play?.(def.sound, { pos: muzzle });
-    if (p.anim.state === 'shoot' || p.anim.state === 'throw') p.anim.t = 0;
+    if (!this._drv && (p.anim.state === 'shoot' || p.anim.state === 'throw')) p.anim.t = 0;
     this._bloom = Math.min(0.05, this._bloom + def.spread * 0.18 + def.recoil * 0.12);
     g.events.emit('weapon:fired', { weapon: def.id, pos: muzzle.clone() });
     this._crimeT -= 0; if (performance.now() - this._crimeT > 3000) { this._crimeT = performance.now(); g.events.emit('crime', { severity: 1, pos: muzzle.clone(), kind: 'shots' }); }

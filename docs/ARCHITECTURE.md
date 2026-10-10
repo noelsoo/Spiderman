@@ -227,7 +227,7 @@ Every raw pad is translated to the W3C standard layout first (DS4 raw layouts fo
 | handbrake | Space | ✕ | |
 | horn | H | L3 | |
 | exit car | F | △ | |
-| drive-by (if gun) | LMB | R1? (vehicles agent decides; document it) | |
+| drive-by (pistol/SMG/shotgun/rifle equipped) | hold RMB = lean out & aim, LMB fires | hold L1 = aim, R1 fires (L2/R2 stay brake/throttle) | `weapons.updateDriving(dt, car)` runs before `vehicles.update`; claims only `m:2`/`m:0`/`p:4`/`p:5` via `input.consumed`; muzzle = driver window (car pos + 0.75 m toward the driver/left side, up 1.3 m); aim cam `{fov:55,distance:6.5,shoulder:1.2,height:2.2}`; weapon cycling still works; same damage/rate/ammo/recoil/spread rules, emits `weapon:fired` |
 
 `input.consume(...actions)` releases every action fed by the same physical inputs for the rest of the frame. `input.consumeSticks()` zeroes move/look. `input.padInfo()` lists all pads (id, mapping, profile, live buttons/axes) for the diagnostics screen; `input.lastRawButton` is the raw index of the last pressed button (for remapping); `input.padButton(stdIndex)` reads the virtual standard pad.
 

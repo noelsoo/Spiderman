@@ -55,7 +55,7 @@ F11 or Alt+Enter toggles fullscreen.
 | Map | M | Touchpad |
 | Pause | Esc | Options |
 
-**Driving:** W / R2 throttle, S / L2 brake and reverse, A–D / L stick steer, Space / ✕ handbrake drift, H / L3 horn, F / △ get out.
+**Driving:** W / R2 throttle, S / L2 brake and reverse, A–D / L stick steer, Space / ✕ handbrake drift, H / L3 horn, F / △ get out. **Drive-by** (pistol / SMG / shotgun / rifle equipped): hold RMB / L1 to lean out and aim, LMB / R1 fires, X / Z / wheel / D-pad ↓ cycle weapons; throttle, brake and steering keep working.
 
 **Heroes:** Spider-Man (swinging, wall-crawl, six web-shooter gadgets while aiming, symbiote suit, parry), Iron Man (aimed repulsors, missile lock-on, Proton Cannon), Hulk (grab and throw, Hulk Out, Worldbreaker), Thor (aimed hammer throws, Bifrost, God Blast), Wolverine (claws, lunge, healing factor, Weapon X frenzy), Captain America (ricochet shield, block and parry, Avengers Assemble), Hawkeye (bow with draw-zoom, trick arrows, grapple), Scarlet Witch (hex bolts, telekinesis, levitation, Reality Warp).
 

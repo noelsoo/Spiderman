@@ -250,6 +250,7 @@ class Game {
           if (!wheelOpen) this.player.update(dt);
           else { this.player.syncModel?.(dt); }
         }
+        else if (!wheelOpen) this.weapons.updateDriving?.(dt, driving);   // drive-by: hold aim (RMB / L1), fire (LMB / R1)
         this.vehicles.update(dt);                        // traffic + the car being driven (reads input itself)
         this.peds.update(dt);
         const focus = this.vehicles.driving ?? this.player;
