@@ -185,7 +185,7 @@ class Strap {
   constructor(group, material) {
     this.group = group;
     this.p = []; this.o = []; for (let i = 0; i < N; i++) { this.p.push(new V3()); this.o.push(new V3()); }
-    this.inv = new THREE.Matrix4(); this.tmp = new V3(); this.last = new V3(); this.fresh = true; this.acc = 0;
+    this.inv = new THREE.Matrix4(); this.tmp = new V3(); this.wa = new V3(); this.q = new V3(); this.last = new V3(); this.fresh = true; this.acc = 0;
     const R = 6;
     this.geo = new THREE.BufferGeometry();
     this.pos = new Float32Array(N * R * 3);
@@ -218,7 +218,7 @@ class Strap {
     dt = Math.min(dt, 1 / 30); if (dt <= 0) { this.write(); return; }
     const n = Math.max(1, Math.round(dt / (1 / 60))), h = dt / n;
     for (let s2 = 0; s2 < n; s2++) {
-      const wanchor = this.tmp.copy(ANCHOR).applyMatrix4(g.matrixWorld);
+      const wanchor = this.wa.copy(ANCHOR).applyMatrix4(g.matrixWorld);
       for (let i = 1; i < N; i++) {
         const p = this.p[i], o = this.o[i];
         const vx = (p.x - o.x) * 0.985, vy = (p.y - o.y) * 0.985, vz = (p.z - o.z) * 0.985;
@@ -240,7 +240,7 @@ class Strap {
         }
         // stay out of the handle / pommel (a thin vertical capsule around the hammer's own axis)
         for (let i = 1; i < N; i++) {
-          const q = this.tmp.copy(this.p[i]); g.worldToLocal(q);
+          const q = this.q.copy(this.p[i]); g.worldToLocal(q);
           if (q.y > -0.255 && q.y < 0.2) { const rr = Math.hypot(q.x, q.z); if (rr < 0.032) { const sc = 0.032 / (rr || 1e-5); q.x = rr ? q.x * sc : 0.032; q.z *= rr ? sc : 1; this.p[i].copy(g.localToWorld(q)); } }
         }
         this.p[0].copy(wanchor);
@@ -258,7 +258,7 @@ class Strap {
       T.subVectors(L[(i + 1) % N], L[(i + N - 1) % N]).normalize();
       A.crossVectors(T, Math.abs(T.z) > 0.92 ? new V3(1, 0, 0) : ref).normalize(); B.crossVectors(T, A).normalize();
       for (let k = 0; k < R; k++) {
-        const th = (k / R) * Math.PI * 2, c = Math.cos(th) * 0.0085, s = Math.sin(th) * 0.0035; // flat strap: wide along A, thin along B
+        const th = (k / R) * Math.PI * 2, c = Math.cos(th) * 0.0065, s = Math.sin(th) * 0.003; // flat strap: wide along A, thin along B
         const o = (i * R + k) * 3;
         this.pos[o] = L[i].x + A.x * c + B.x * s; this.pos[o + 1] = L[i].y + A.y * c + B.y * s; this.pos[o + 2] = L[i].z + A.z * c + B.z * s;
       }
@@ -277,7 +277,7 @@ export function buildMjolnir() {
   // head: face order for BoxGeometry groups = +x, -x, +y, -y, +z, -z
   const head = new THREE.Mesh(S.head, [S.matEnd, S.matEnd, S.matTop, S.matTop, S.matSide, S.matSide]);
   head.position.y = 0.3; head.castShadow = true; group.add(head);
-  for (const sg of [1, -1]) add(S.cap, S.rim, sg * 0.168, 0.3, 0);
+  for (const sg of [1, -1]) { const c = new THREE.Mesh(S.cap, sg > 0 ? [S.matEnd, S.rim, S.rim, S.rim, S.rim, S.rim] : [S.rim, S.matEnd, S.rim, S.rim, S.rim, S.rim]); c.position.set(sg * 0.168, 0.3, 0); c.castShadow = true; group.add(c); }
   add(S.collar, S.rim, 0, 0.197, 0);
   add(S.neck, S.rim, 0, 0.145, 0);
   add(S.wrap, S.leather, 0, -0.015, 0);
@@ -285,6 +285,7 @@ export function buildMjolnir() {
   add(S.pommel, S.rim, 0, 0, 0);
   add(S.lug, S.rim, 0, -0.258, 0);
   const strap = new Strap(group, S.strap);
-  const tip = new THREE.Object3D(); tip.position.set(0.17, 0.3, 0); group.add(tip); // head end (trail anchor)
-  return { group, tip, strap, update: (dt) => strap.update(dt), snap: () => strap.snap(), setCharge: setMjolnirCharge, dispose: () => strap.dispose() };
+  const tip = new THREE.Object3D(); tip.position.set(0.17, 0.3, 0); group.add(tip); // head end (melee trail anchor)
+  const trailPt = new THREE.Object3D(); trailPt.position.set(0, 0.3, 0); group.add(trailPt); // head centre on the handle axis (flight trail)
+  return { group, tip, trailPt, strap, update: (dt) => strap.update(dt), snap: () => strap.snap(), setCharge: setMjolnirCharge, dispose: () => strap.dispose() };
 }
