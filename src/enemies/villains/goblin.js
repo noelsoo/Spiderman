@@ -55,7 +55,7 @@ export class GreenGoblin extends BossB {
     this.fly0 = true;
   }
 
-  get airThreshold() { return this.maxHp * 0.07; }
+  get airThreshold() { return this.maxHp * 0.06; }
   get airborne() { return this.flying && !this.ballistic && this.state !== 'phase' && this.state !== 'intro'; }
 
   // ---------------------------------------------------------------- damage rules
@@ -70,7 +70,7 @@ export class GreenGoblin extends BossB {
   onBossHit(dealt, o, heavy) {
     if (!this.airborne) return;
     const k = o.kind ?? 'melee';
-    const w = k === 'melee' ? 0.25 : (k === 'web' || k === 'hammer' || k === 'shield' || k === 'lightning') ? 3 : (k === 'aoe' || k === 'missile' || k === 'rock') ? 1.6 : 1.2;
+    const w = k === 'melee' ? 0.25 : (k === 'web' || k === 'hammer' || k === 'shield' || k === 'lightning') ? 3 : (k === 'aoe' || k === 'missile' || k === 'rock') ? 1.8 : 1.5;
     this.airDmg += dealt * w;
     if (this.airDmg >= this.airThreshold) this.knockOff('shot');
   }
@@ -142,7 +142,7 @@ export class GreenGoblin extends BossB {
   think(dt) {
     const pl = this.target, g = this.game;
     this.model.fx.glider = this.flying || (this.state === 'remount' && this.stateT > 0.25) ? 1 : 0;
-    this.airDmg = Math.max(0, this.airDmg - 5 * dt);
+    this.airDmg = Math.max(0, this.airDmg - 3 * dt);
     if (this.flying) this.airT += dt; else this.airT = 0;
     if (!pl) { this.hold(); this.setAnim('hover', 1); return; }
     const s = this.state;

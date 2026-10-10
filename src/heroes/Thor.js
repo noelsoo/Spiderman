@@ -409,7 +409,7 @@ export class Thor extends Hero {
     if (imbued) { g.fx?.lightning?.(from.clone(), from.clone().addScaledVector(dir, 4), 0xc8e8ff, 0.2, 3); g.cam.shake(0.2); rumble(g, 0.6, 0.4, 140); g.audio?.play('thunder', { volume: 0.4 }); }
     else g.cam.shake(0.06);
     if (this.hTrail) this.hTrail.stop?.();
-    this.hTrail = g.fx?.trail?.(this.model.mjolnir?.tip ?? this.hGroup, imbued ? 0xe0f2ff : 0xbfe6ff, imbued ? 0.7 : 0.4, 0.4) ?? null;
+    this.hTrail = g.fx?.trail?.(this.model.mjolnir?.tip ?? this.hGroup, imbued ? 0xe0f2ff : 0xbfe6ff, imbued ? 0.3 : 0.16, 0.4) ?? null;
     const dmg = (imbued ? IMBUE_DMG * (0.8 + 0.2 * power) : THROW_DMG) * this.dmgMul;
     this.proj = g.combat?.projectile?.({
       pos: from, vel: dir.clone().multiplyScalar(speed), damage: dmg, radius: imbued ? 1.3 : 1.1, life: this.outLife, color: BOLT, size: 0.5, mesh,

@@ -32,7 +32,7 @@ function maps(c, ctx, o = {}) {
     const edge = Math.min(1, Math.hypot(dx, dy) * 0.5);
     const ridge = Math.max(0, (v - 0.62) * 3);
     const brushed = streak[y] * 0.05 + (r() - 0.5) * 0.05;
-    const base = 0.30 + (v - 0.45) * 0.28 + ridge * 0.22 + edge * 0.18 + brushed;
+    const base = 0.40 + (v - 0.45) * 0.28 + ridge * 0.22 + edge * 0.18 + brushed;
     const cr = Math.min(1, Math.max(0, base)) * 255;
     cd.data[p] = cr * 0.98; cd.data[p + 1] = cr * 1.0; cd.data[p + 2] = cr * 1.06; cd.data[p + 3] = 255;
     // roughness: polished on ridges / worn edges, rougher in the grooves, tiny scratches
@@ -136,17 +136,28 @@ function shared() {
   })();
 
   const steel = (m, nrm) => new THREE.MeshPhysicalMaterial({
-    color: 0xaebbd2, map: m.color, normalMap: m.normal, normalScale: new THREE.Vector2(nrm, nrm), roughnessMap: m.rough, roughness: 1, metalness: 1,
+    color: 0xc4d0e4, map: m.color, normalMap: m.normal, normalScale: new THREE.Vector2(nrm, nrm), roughnessMap: m.rough, roughness: 1, metalness: 1,
     clearcoat: 0.22, clearcoatRoughness: 0.35, emissive: 0x7fcfff, emissiveMap: m.emissive, emissiveIntensity: 0, envMapIntensity: 1.0,
   });
   const matSide = steel(side, 1.4), matEnd = steel(end, 1.4), matTop = steel(top, 1.1);
   const rim = new THREE.MeshPhysicalMaterial({ color: 0x4a5160, metalness: 1, roughness: 0.32, clearcoat: 0.3, clearcoatRoughness: 0.3, envMapIntensity: 1.0, emissive: 0x7fcfff, emissiveIntensity: 0 });
   const leather = new THREE.MeshStandardMaterial({ color: 0xffffff, map: leatherMaps.col, normalMap: leatherMaps.n, normalScale: new THREE.Vector2(1.1, 1.1), roughness: 0.72, metalness: 0.02 });
-  const strap = new THREE.MeshStandardMaterial({ color: 0x3a281c, roughness: 0.78, metalness: 0.02 });
+  const strap = new THREE.MeshStandardMaterial({ color: 0x4a3322, roughness: 0.78, metalness: 0.02, side: THREE.DoubleSide });
 
   const seg = q === 'low' ? 2 : 3;
-  const head = new RoundedBoxGeometry(0.32, 0.2, 0.2, seg, 0.014);
-  const cap = new RoundedBoxGeometry(0.034, 0.214, 0.214, seg, 0.012);
+  // planar UVs from position + dominant normal axis (RoundedBoxGeometry's own UVs collapse on some faces)
+  const boxUV = (geo, w, h, d) => {
+    const P = geo.attributes.position, N = geo.attributes.normal, U = geo.attributes.uv;
+    for (let i = 0; i < P.count; i++) {
+      const ax = Math.abs(N.getX(i)), ay = Math.abs(N.getY(i)), az = Math.abs(N.getZ(i)), x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      if (az >= ax && az >= ay) U.setXY(i, 0.5 + (N.getZ(i) > 0 ? x : -x) / w, 0.5 + y / h);
+      else if (ax >= ay) U.setXY(i, 0.5 + (N.getX(i) > 0 ? -z : z) / d, 0.5 + y / h);
+      else U.setXY(i, 0.5 + x / w, 0.5 + (N.getY(i) > 0 ? -z : z) / d);
+    }
+    U.needsUpdate = true; return geo;
+  };
+  const head = boxUV(new RoundedBoxGeometry(0.32, 0.2, 0.2, seg, 0.014), 0.32, 0.2, 0.2);
+  const cap = boxUV(new RoundedBoxGeometry(0.034, 0.214, 0.214, seg, 0.012), 0.034, 0.214, 0.214);
   const collar = new THREE.CylinderGeometry(0.03, 0.036, 0.026, 14);
   const wrap = new THREE.CylinderGeometry(0.0205, 0.0205, 0.33, 14, 1);
   const neck = new THREE.CylinderGeometry(0.019, 0.019, 0.1, 10);
