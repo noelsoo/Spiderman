@@ -132,8 +132,8 @@ export class Carnage extends BossB {
     const opts = [];
     if (this.cd.combo <= 0) opts.push(['combo', d < 6 ? 8 : d < 14 ? 3 : 0.5]);
     if (d < 11 && this.cd.whip <= 0) opts.push(['whip', 5]);
-    if (d > 1.5 && d < 24 && this.cd.spikes <= 0) opts.push(['spikes', 6]);
-    if (d > 4 && this.cd.leap <= 0) opts.push(['leap', 5]);
+    if (d < 24 && this.cd.spikes <= 0) opts.push(['spikes', 6]);
+    if (this.cd.leap <= 0) opts.push(['leap', d > 4 ? 5 : 2.5]);
     if (this.cd.spawn <= 0 && this.liveMinions('carnage_spawn') < 4) opts.push(['spawn', this.phase === 1 ? 2 : 3]);
     if (this.phase >= 3 && this.cd.regen <= 0 && this.hp < this.maxHp * 0.3 && d > 5) opts.push(['regen', 9]);
     if (!opts.length) { if (d < 14) opts.push(['combo', 1]); else { this.cd.any = 0.4; return; } }

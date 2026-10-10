@@ -81,7 +81,7 @@ export class GreenGoblin extends BossB {
   }
   canStagger() { return this.state === 'ground' && this.stagger <= 0; }
   startStagger(heavy) {
-    this.stagger = heavy ? 1.8 : 1.2; this.groundT = Math.min(this.groundT + (heavy ? 1.0 : 0.6), 7.0);
+    this.stagger = heavy ? 1.8 : 1.2; this.groundT = Math.min(this.groundT + (heavy ? 1.0 : 0.6), 6.4);
     this.sub = ''; this.windup = 0; this.attacking = false;
     this.say('STAGGERED!');
   }

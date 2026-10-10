@@ -102,8 +102,8 @@ export class Loki extends BossB {
 
     const opts = [];
     if (d < 9 && this.cd.melee <= 0) opts.push(['melee', d < 5 ? 8 : 4]);
-    if (d > 2 && this.hasLOS && this.cd.blast <= 0) opts.push(['blast', 4]);
-    if (d > 3 && this.hasLOS && this.cd.beam <= 0) opts.push(['beam', 2 + this.phase]);
+    if (this.hasLOS && this.cd.blast <= 0) opts.push(['blast', 4]);
+    if (this.hasLOS && this.cd.beam <= 0) opts.push(['beam', 2 + this.phase]);
     if (this.cd.tele <= 0) opts.push(['tele', 3]);
     if (this.cd.illus <= 0 && this.ghosts.length === 0) opts.push(['illus', 4]);
     if (this.phase >= 2 && this.cd.goons <= 0 && this.liveMinions() < 4) opts.push(['goons', 3]);

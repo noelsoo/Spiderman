@@ -94,9 +94,9 @@ export class Ultron extends BossB {
     if (this.cd.slam <= 0) { this._startSlam(); return; }
     const opts = [];
     if (d < 5 && this.cd.punch <= 0) opts.push(['punch', 8]);
-    if (this.hasLOS && d < 26 && d > 2 && this.cd.laser <= 0) opts.push(['laser', 5]);
-    if (this.hasLOS && d < 28 && d > 3 && this.cd.chest <= 0) opts.push(['chest', 3]);
-    if (this.hasLOS && d > 1.5 && this.cd.rockets <= 0) opts.push(['rockets', 5]);
+    if (this.hasLOS && d < 26 && this.cd.laser <= 0) opts.push(['laser', 5]);
+    if (this.hasLOS && d < 28 && this.cd.chest <= 0) opts.push(['chest', 3]);
+    if (this.hasLOS && this.cd.rockets <= 0) opts.push(['rockets', 5]);
     if (this.cd.summon <= 0 && this.liveMinions('ultron_drone') < 3) opts.push(['summon', 3]);
     if (this.phase >= 3 && d < 8 && this.cd.lash <= 0) opts.push(['lash', 7]);
     if (!opts.length) { this.cd.any = 0.4; return; }
