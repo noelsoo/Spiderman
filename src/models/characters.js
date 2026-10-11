@@ -5,7 +5,7 @@ import { buildMjolnir } from './mjolnir.js';
 import {
   G, std, metal, glow, glowInstance, symMat, limbGeo, profileGeo, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo,
   mergeParts, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
-  M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, faceTexture, faceShell, seg, qk, quality,
+  M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, scaleMaps, armorMaps, arcTexture, thorDiscTexture, capeTexture, tornShortsTexture, veinNormal, symEmblemTexture, antiStreakTexture, drawTex, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
@@ -334,12 +334,12 @@ export function buildIronMan() {
   const dims = makeDims(1.0, { headR: 0.11 });
   const rig = buildRig(dims, 1.1);
   const model = new ProcModel('ironman', rig, { prof: { stance: 'relaxed', flyStyle: 'iron', hover: 'iron', flipDodge: false, cadence: 0.92, stride: 0.95, armSwing: 0.8, shoot: 'palm', lean: 1.0, landStyle: 'hero' } });
-  const pm = panelMaps(1), nS = new V2(0.75, 0.75);
-  const red = withRim(phys(0xa0101a, { roughness: 0.34, metalness: 0.86, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 1, clearcoatRoughness: 0.07 }), 0xffc9a0, 0.14);
-  const gold = withRim(phys(0xd9a53b, { roughness: 0.3, metalness: 0.95, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.6, clearcoatRoughness: 0.1 }), 0xfff0c0, 0.12);
+  const pm = armorMaps(1), nS = new V2(0.8, 0.8);
+  const red = withRim(phys(0xa50e18, { map: pm.map, roughness: 0.3, metalness: 0.88, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.4, sheenColor: new THREE.Color(0xff6a50), sheenRoughness: 0.3 }), 0xffc9a0, 0.14);
+  const gold = withRim(phys(0xe0aa3a, { map: pm.map, roughness: 0.26, metalness: 0.96, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.7, clearcoatRoughness: 0.08 }), 0xfff0c0, 0.12);
   const dark = std(0x24242a, { metalness: 0.7, roughness: 0.45 });
   const info = buildBody(model, {
-    mats: { default: red, abdomen: gold, pelvis: gold, neck: dark, head: red, shoulder: red, upperArm: red, foreArm: gold, hand: gold, thigh: red, shin: gold, foot: red, chest: red },
+    mats: { default: red, abdomen: red, pelvis: gold, neck: dark, head: red, shoulder: red, upperArm: red, foreArm: gold, hand: gold, thigh: gold, shin: red, foot: red, chest: red },
     torso: { sx: 1.3, sz: 0.86, chestR: 1.12, waistR: 1.0 },
     head: { R: 0.11, sx: 0.88, sy: 1.1, sz: 1.0 },
     arm: { u0: 0.054, u1: 0.045, f0: 0.05, f1: 0.04, ub: 0.08, fb: 0.1 },
@@ -354,9 +354,14 @@ export function buildIronMan() {
   P(model, hj, boxGeo(0.02, 0.03, 0.14), red, { pos: [0, H.y0 + H.R * 0.95, -0.01] });
   // arc reactor
   const cj = model.j[J.CH], cr = info.chestRad(0.22);
-  const ringGeo = G('arcring', () => new THREE.TorusGeometry(0.05, 0.012, 8, 20));
+  const ringGeo = G('arcring', () => new THREE.TorusGeometry(0.058, 0.011, 8, 24));
   P(model, cj, ringGeo, gold, { pos: [0, 0.22, cr.rz + 0.008] });
-  P(model, cj, G('arcdisc', () => new THREE.CircleGeometry(0.043, 20)), glow(0xaee8ff, 3.2), { pos: [0, 0.22, cr.rz + 0.012], cast: false });
+  P(model, cj, G('arcdisc', () => new THREE.CircleGeometry(0.056, 28)), new THREE.MeshBasicMaterial({ map: arcTexture(), transparent: true, toneMapped: false, color: new THREE.Color(1.6, 1.8, 2) }), { pos: [0, 0.22, cr.rz + 0.014], cast: false });
+  // shoulder/chest layered plates (clavicle + rib plates) for silhouette
+  for (const s2 of [1, -1]) {
+    P(model, cj, boxGeo(0.07, 0.05, 0.03), red, { pos: [s2 * 0.1 * dims.k, 0.32 * dims.k, cr.rz * 0.8], rot: [0.5, 0, s2 * -0.5] });
+    P(model, cj, boxGeo(0.12, 0.012, 0.06), gold, { pos: [s2 * 0.09 * dims.k, 0.07 * dims.k, cr.rz * 0.8], rot: [0.25, s2 * -0.35, 0] });
+  }
   // chest gold trim: two curved side plates + collar
   for (const s of [1, -1]) P(model, cj, sphereGeo(1, 12, 8), gold, { pos: [s * cr.rx * 0.78, 0.12, cr.rz * 0.45], scale: [0.055, 0.1, 0.05], rot: [0, s * 0.5, s * 0.25] });
   P(model, model.j[J.NK], cylGeo(0.062 * dims.k, 0.07 * dims.k, 0.05, seg(14, 8)), gold, { pos: [0, 0.0, 0] });
@@ -401,11 +406,11 @@ export function buildHulk() {
   const dims = makeDims(1.42, { headR: 0.098, neck: 0.1 });
   const rig = buildRig(dims, 1.0);
   const model = new ProcModel('hulk', rig, { prof: { stance: 'hulk', cadence: 0.78, stride: 1.05, armSwing: 1.0, lean: 1.25, bob: 2.0, flipDodge: false, throwStyle: 'two', wide: 0.12, tempo: 0.9, knuckle: true } });
-  const sm_ = skinMaps();
+  const sm_ = skinMaps('#5ba83f', '#245a22', 6);
   sm_.map.repeat.set(2, 2); sm_.normal.repeat.set(2, 2);
-  const skin = withRim(phys(0xffffff, { map: sm_.map, normalMap: sm_.normal, normalScale: new V2(1.1, 1.1), roughness: 0.52, metalness: 0.0, sheen: 0.6, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xa8ff90), clearcoat: 0.08, clearcoatRoughness: 0.6 }), 0xb8ff9a, 0.1);
+  const skin = withRim(phys(0xffffff, { map: sm_.map, normalMap: sm_.normal, normalScale: new V2(1.1, 1.1), roughness: 0.52, metalness: 0.0, sheen: 0.9, sheenRoughness: 0.4, sheenColor: new THREE.Color(0xc8ff90), clearcoat: 0.18, clearcoatRoughness: 0.45 }), 0xb8ff9a, 0.12);
   const skinD = std(0x3f8530, { roughness: 0.6, normalMap: sm_.normal, normalScale: new V2(0.8, 0.8) });
-  const shorts = std(0x5a2d86, { roughness: 0.85, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
+  const shorts = std(0xffffff, { map: tornShortsTexture(), roughness: 0.88, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
   const info = buildBody(model, {
     mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin },
     torso: { sx: 1.62, sz: 0.95, chestR: 1.38, waistR: 1.05 },
@@ -423,6 +428,10 @@ export function buildHulk() {
   for (const [x, z, r] of [[0.16, 0.0, 0.2], [-0.17, 0.02, -0.25], [0.0, 0.2, 0], [0.05, -0.2, 0.1]]) P(model, model.j[J.H], flap, shorts, { pos: [x * k * 1.2, -0.26 * k, z * k], rot: [0, 0, r] });
   P(model, model.j[J.TL], cylGeo(0.088 * k, 0.1 * k, 0.17 * k, 12), shorts, { pos: [0, -0.1 * k, 0] });
   P(model, model.j[J.TR], cylGeo(0.088 * k, 0.1 * k, 0.17 * k, 12), shorts, { pos: [0, -0.1 * k, 0] });
+  // frayed thigh hems on the shorts
+  const fr = [], rf = rng(17);
+  for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; fr.push({ geo: coneGeo(0.016 * k, (0.04 + rf() * 0.05) * k, 3), pos: [Math.cos(a) * 0.097 * k, -0.19 * k, Math.sin(a) * 0.097 * k], rot: [Math.PI + (rf() - 0.5) * 0.4, 0, (rf() - 0.5) * 0.4] }); }
+  for (const jt of [J.TL, J.TR]) P(model, model.j[jt], mergeParts('hulkfray' + k, fr), shorts, { cast: false });
   // pec/ab definition
   const cr = info.chestRad(0.2 * k);
   for (const s of [1, -1]) P(model, model.j[J.CH], sphereGeo(1, 14, 10), skinD, { pos: [s * cr.rx * 0.42, 0.2 * k, cr.rz * 0.58], scale: [0.095 * k, 0.07 * k, 0.07 * k] });
@@ -435,6 +444,10 @@ export function buildHulk() {
   const eyeM = glow(0xffffff, 1.6);
   for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.34, hr * 0.12, hr * 0.12), eyeM, { pos: [s * hr * 0.42, H.y0 + hr * 0.05, hr * 0.86], rot: [0, s * 0.2, -s * 0.3], cast: false });
   P(model, hj, boxGeo(hr * 0.7, hr * 0.12, hr * 0.12), std(0x1c2a18), { pos: [0, H.y0 - hr * 0.5, hr * 0.92] }); // mouth
+  const tt = [];
+  for (let i = 0; i < 8; i++) { const u = i / 7 * 2 - 1; tt.push({ geo: coneGeo(0.007, 0.022, 4), pos: [u * hr * 0.3, H.y0 - hr * 0.44 + u * u * 0.01, hr * 0.97], rot: [Math.PI + 0.1, 0, 0] }); tt.push({ geo: coneGeo(0.006, 0.016, 4), pos: [u * hr * 0.28, H.y0 - hr * 0.58 - u * u * 0.01, hr * 0.96], rot: [-0.1, 0, 0] }); }
+  P(model, hj, mergeParts('hulkteeth' + hr, tt), std(0xe8e4d0, { roughness: 0.4 }), { cast: false });
+  P(model, hj, sphereGeo(1, 10, 8), skinD, { pos: [0, H.y0 + hr * 0.36, hr * 0.9], scale: [hr * 0.9, hr * 0.16, hr * 0.3] }); // heavy brow ridge
   const hairM = std(0x15150f, { roughness: 0.9 });
   P(model, hj, G('hulkhair', () => new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.52)), hairM, { pos: [0, H.y0 + hr * 0.12, -hr * 0.1], scale: [hr * 1.06, hr * 1.04, hr * 1.12], rot: [-0.25, 0, 0] });
   // face: painted angry eyes/mouth + nose + ears
@@ -445,7 +458,7 @@ export function buildHulk() {
   P(model, model.j[J.SP], mergeParts('hulkabs' + k, absP), skinD, {});
   // wild hair spikes
   const hs = [];
-  for (let i = 0; i < 9; i++) { const a = (i / 8 - 0.5) * 2.6; hs.push({ geo: coneGeo(0.03, 0.09, 5), pos: [Math.sin(a) * hr * 0.9, H.y0 + hr * 0.75 + Math.cos(a * 2) * 0.01, -Math.cos(a) * hr * 0.35], rot: [-0.5 + Math.cos(a) * 0.2, 0, -Math.sin(a) * 0.7] }); }
+  for (let i = 0; i < 16; i++) { const a = (i / 15 - 0.5) * 3.0; hs.push({ geo: coneGeo(0.03, 0.09 + (i % 3) * 0.02, 5), pos: [Math.sin(a) * hr * 0.9, H.y0 + hr * 0.75 + Math.cos(a * 2) * 0.01, -Math.cos(a) * hr * 0.35], rot: [-0.5 + Math.cos(a) * 0.2, 0, -Math.sin(a) * 0.7] }); }
   P(model, hj, mergeParts('hulkspikes' + hr, hs), hairM, {});
   // fists knuckles
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.WL : J.WR], sphereGeo(1, 10, 8), skinD, { pos: [0, -dims.hand * 0.78, 0.045 * k], scale: [0.06 * k, 0.035 * k, 0.04 * k] });
@@ -457,7 +470,8 @@ export function buildThor() {
   const dims = makeDims(1.04, { headR: 0.112 });
   const rig = buildRig(dims, 1.06);
   const model = new ProcModel('thor', rig, { prof: { stance: 'relaxed', flyStyle: 'super', hover: 'thor', flipDodge: true, cadence: 0.9, stride: 1.0, lean: 1.0, throwStyle: 'one', landStyle: 'hero' } });
-  const suit = withRim(phys(0x1d2230, { roughness: 0.7, normalMap: fabricNormal(5, 0.55, 'thorfab'), normalScale: new V2(0.8, 0.8), sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x6a8cff) }), 0x9fc0ff, 0.14);
+  const tsm = scaleMaps('#15171f', '#4a5266', 10); tsm.map.repeat.set(3, 3); tsm.normal.repeat.set(3, 3);
+  const suit = withRim(phys(0xffffff, { map: tsm.map, normalMap: tsm.normal, normalScale: new V2(0.9, 0.9), roughness: 0.5, metalness: 0.45, clearcoat: 0.25, clearcoatRoughness: 0.4, sheen: 0.5, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x6a8cff) }), 0x9fc0ff, 0.14);
   const leather = std(0x3a2a20, { roughness: 0.75, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9) });
   const silver = withRim(phys(0xb8bec8, { roughness: 0.28, metalness: 0.95, clearcoat: 0.5, clearcoatRoughness: 0.15, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.4, 0.4) }), 0xffffff, 0.12);
   const skin = std(0xe0b090, { roughness: 0.62 });
@@ -484,7 +498,7 @@ export function buildThor() {
     // tilt to face outward
     last.rot = [Math.PI / 2, 0, 0];
   }
-  P(model, cj, mergeParts('thordiscs' + k, discParts), metal(0xe2e6ec, { roughness: 0.2 }), {});
+  P(model, cj, mergeParts('thordiscs' + k, discParts), std(0xffffff, { map: thorDiscTexture(), metalness: 0.92, roughness: 0.28, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.3, 0.3) }), {});
   // belt
   P(model, model.j[J.SP], cylGeo(0.155 * k, 0.16 * k, 0.05 * k, 16), leather, { pos: [0, 0.05 * k, 0], scale: [1.28, 1, 0.8] });
   P(model, model.j[J.SP], boxGeo(0.07 * k, 0.07 * k, 0.03), silver, { pos: [0, 0.05 * k, 0.125 * k] });
@@ -495,7 +509,7 @@ export function buildThor() {
   const hr = H.R;
   P(model, hj, G('thorhairc', () => new THREE.SphereGeometry(1, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5)), hair, { pos: [0, H.y0 + hr * 0.12, -hr * 0.1], rot: [-0.42, 0, 0], scale: [hr * 1.07, hr * 1.1, hr * 1.12] });
   const strands = [];
-  for (let i = 0; i < 7; i++) { const a = (i / 6 - 0.5) * 2.0; strands.push({ geo: capsuleGeo(0.022, 0.2, 3, 6), pos: [Math.sin(a) * hr * 0.95, H.y0 - hr * 0.5 - 0.02 * Math.abs(a), -Math.cos(a) * hr * 0.9], rot: [0.12, 0, -Math.sin(a) * 0.15], scale: [1.3, 1.1 - Math.abs(a) * 0.15, 1] }); }
+  for (let i = 0; i < 7; i++) { const a = (i / 6 - 0.5) * 2.0; strands.push({ geo: capsuleGeo(0.022, 0.2, 3, 6), pos: [Math.sin(a) * hr * 0.95, H.y0 - hr * 0.5 - 0.02 * Math.abs(a), -Math.cos(a) * hr * 0.9], rot: [0.12, 0, -Math.sin(a) * 0.15], scale: [1.3, 0.55 - Math.abs(a) * 0.1, 1] }); }
   P(model, hj, mergeParts('thorstrands' + hr, strands), hair, {});
   P(model, hj, sphereGeo(1, 12, 8), hair, { pos: [0, H.y0 - hr * 0.7, hr * 0.42], scale: [hr * 0.55, hr * 0.3, hr * 0.45] }); // beard
   addFace(model, H, { tex: { skin: '#e0b090', iris: '#5aa0e8', brow: '#a8802c', lip: '#a8564e', mood: 'smirk', stubble: 0.5 }, skin });
@@ -506,7 +520,7 @@ export function buildThor() {
   // ---- cape: one cloth mesh driven by a lagged chain
   const R = 9, C = 4, capeLen = 1.1 * k, capeW0 = 0.46 * k, capeW1 = 0.8 * k;
   const cgeo = new THREE.PlaneGeometry(1, 1, C, R);
-  const cmat = std(0xa4121b, { roughness: 0.8, side: THREE.DoubleSide, metalness: 0.0, normalMap: fabricNormal(10, 0.5, 'capefab'), normalScale: new V2(0.6, 0.6) });
+  const cmat = std(0xffffff, { map: capeTexture(), roughness: 0.82, side: THREE.DoubleSide, metalness: 0.0, normalMap: fabricNormal(10, 0.5, 'capefab'), normalScale: new V2(0.6, 0.6) });
   const cape = new THREE.Mesh(cgeo, cmat); cape.frustumCulled = false; cape.castShadow = true;
   cj.add(cape); model.parts.push(cape); cape.userData.mat = cmat;
   const ang = new Float32Array(R + 1).fill(0.15), rol = new Float32Array(R + 1);
@@ -601,16 +615,22 @@ export function buildThor() {
 }
 
 // ================================================================== VENOM
-export function buildVenom() {
-  const dims = makeDims(1.3, { headR: 0.165, neck: 0.14 });
+export function buildVenom() { return buildSymbiote({}); }
+/** Shared symbiote humanoid: Venom (boss, ~2.6 m) and Anti-Venom (playable, ~2.0 m). */
+export function buildSymbiote(cfg = {}) {
+  const anti = !!cfg.anti, K = cfg.k ?? 1.3, HR = cfg.headR ?? 0.165;
+  const dims = makeDims(K, { headR: HR, neck: anti ? 0.11 : 0.14 });
   const rig = buildRig(dims, 1.05);
-  const model = new ProcModel('venom', rig, { prof: { stance: 'hulk', cadence: 0.82, stride: 1.05, armSwing: 1.1, lean: 1.35, bob: 1.6, flipDodge: false, wide: 0.1, tempo: 0.95 } });
-  const vn = grainNormal('venom', 9, 3.2);
-  const sym = symMat({ id: 'venom', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16, normalMap: vn, normalScale: 0.9 });
+  const model = new ProcModel(cfg.id || 'venom', rig, { prof: { stance: 'hulk', cadence: 0.82, stride: 1.05, armSwing: 1.1, lean: 1.35, bob: 1.6, flipDodge: false, wide: 0.1, tempo: 0.95 } });
+  const vn = veinNormal(anti ? 5 : 3, 3.4);
+  const symOpt = anti
+    ? { id: 'anti', color: 0xffffff, map: antiStreakTexture(), rim: 0x9fe8ff, rimK: 0.5, rough: 0.16, normalMap: vn, normalScale: 0.9 }
+    : { id: 'venom', color: 0x040407, rim: 0x2f6bff, rimK: 0.8, rough: 0.12, normalMap: vn, normalScale: 1.1 };
+  const sym = symMat(symOpt);
   const info = buildBody(model, {
     mats: { default: sym },
     torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
-    head: { R: 0.165, sx: 1.25, sy: 1.0, sz: 1.1 },
+    head: { R: HR, sx: anti ? 0.98 : 1.25, sy: 1.0, sz: anti ? 1.0 : 1.1 },
     arm: { u0: 0.06, u1: 0.048, f0: 0.052, f1: 0.04, ub: 0.28, fb: 0.3, shoulder: 1.45 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.25, sb: 0.28 },
     armM: 1.6, foreM: 1.8, legM: 1.2, neckR: 0.08,
@@ -619,56 +639,66 @@ export function buildVenom() {
   const k = dims.k, hj = model.j[J.HD], H = info.headInfo, hr = H.R;
   // eyes: huge jagged white
   const eyeM = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.5, roughness: 0.2 });
-  addEyes(model, H, 'venom', eyeM, null, { grow: 1.1, dy: -0.01, lift: 0.012, depth: 0.01, dx: 0.0 });
-  // mouth cavity
+  if (anti) addEyes(model, H, 'venom', eyeM, std(0x050508, { roughness: 0.3 }), { grow: 0.56, dy: -0.004, lift: 0.014, depth: 0.01, dx: 0.0, rimGrow: 1.0, rimDx: 0.0, rimDy: 0.0 });
+  else addEyes(model, H, 'venom', eyeM, null, { grow: 1.1, dy: -0.01, lift: 0.012, depth: 0.01, dx: 0.0 });
+  const fangs = !anti;
+  // mouth: Venom = huge toothy maw + long tongue; Anti-Venom = closed grin line with a few fangs
   const mouth = std(0x1a0508, { roughness: 0.6 });
-  P(model, hj, sphereGeo(1, 16, 10), mouth, { pos: [0, H.y0 - hr * 0.5, hr * H.sz * 0.78], scale: [hr * H.sx * 0.92, hr * 0.3, hr * 0.32], cast: false });
-  // teeth: arcs of cones
-  const teeth = [], rg = rng(5);
-  const N = 13;
-  for (let i = 0; i < N; i++) {
-    const u = i / (N - 1) * 2 - 1, phi = u * 1.05;
-    const x = Math.sin(phi) * hr * H.sx * 1.0, z = Math.cos(phi) * hr * H.sz * 1.0 * 0.96;
-    const yU = H.y0 - hr * 0.36 + u * u * hr * 0.2, yL = H.y0 - hr * 0.66 + u * u * hr * 0.2;
-    const sz = (0.026 + rg() * 0.018) * (1 - Math.abs(u) * 0.3);
-    teeth.push({ geo: coneGeo(0.011, sz * 1.6, 5), pos: [x, yU - sz * 0.5, z * 0.97 + 0.0], rot: [Math.PI + 0.1, -phi, 0] });
-    teeth.push({ geo: coneGeo(0.011, sz * 1.5, 5), pos: [x, yL + sz * 0.5, z * 0.97 + 0.0], rot: [-0.1, -phi, 0] });
+  const toothM = phys(0xf2efe4, { roughness: 0.3, clearcoat: 1 });
+  const tongueMat = std(0xb01020, { roughness: 0.25, emissive: 0x300004, emissiveIntensity: 0.4 });
+  let tongue = null;
+  if (!anti) {
+    P(model, hj, sphereGeo(1, 16, 10), mouth, { pos: [0, H.y0 - hr * 0.5, hr * H.sz * 0.78], scale: [hr * H.sx * 0.92, hr * 0.3, hr * 0.32], cast: false });
+    const teeth = [], rg = rng(5), N = 15;
+    for (let i = 0; i < N; i++) {
+      const u = i / (N - 1) * 2 - 1, phi = u * 1.05;
+      const x = Math.sin(phi) * hr * H.sx * 1.0, z = Math.cos(phi) * hr * H.sz * 0.96;
+      const yU = H.y0 - hr * 0.36 + u * u * hr * 0.2, yL = H.y0 - hr * 0.66 + u * u * hr * 0.2;
+      const sz = (0.03 + rg() * 0.024) * (1 - Math.abs(u) * 0.3) * (i % 2 ? 1.0 : 1.35);
+      teeth.push({ geo: coneGeo(0.011, sz * 1.7, 5), pos: [x, yU - sz * 0.5, z * 0.97], rot: [Math.PI + 0.1, -phi, 0] });
+      teeth.push({ geo: coneGeo(0.011, sz * 1.6, 5), pos: [x, yL + sz * 0.5, z * 0.97], rot: [-0.1, -phi, 0] });
+    }
+    P(model, hj, mergeParts('venomteeth2', teeth), toothM, { cast: false });
+    const t2 = [];
+    for (let i = 0; i < 9; i++) { const u = i / 8 * 2 - 1, phi = u * 0.85; t2.push({ geo: coneGeo(0.008, 0.03, 4), pos: [Math.sin(phi) * hr * H.sx * 0.86, H.y0 - hr * 0.42 + u * u * hr * 0.15, Math.cos(phi) * hr * H.sz * 0.82], rot: [Math.PI + 0.15, -phi, 0] }); }
+    P(model, hj, mergeParts('venomteeth3', t2), std(0xe4e0d0, { roughness: 0.4 }), { cast: false });
+    tongue = new Tendril({ segs: 16, radial: 6, r0: 0.03, r1: 0.007, material: tongueMat, ref: new V3(0, 1, 0) });
+    hj.add(tongue.mesh);
+    for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.9, hr * 0.12, hr * 0.5), sym, { pos: [s * hr * 0.5, H.y0 + hr * 0.62, hr * 0.78], rot: [0.1, 0, -s * 0.3] }); // brow ridge
+  } else {
+    P(model, hj, sphereGeo(1, 12, 8), mouth, { pos: [0, H.y0 - hr * 0.52, hr * H.sz * 0.9], scale: [hr * 0.6, hr * 0.035, hr * 0.12], cast: false });
+    const ft = []; for (let i = 0; i < 7; i++) { const u = i / 6 * 2 - 1; ft.push({ geo: coneGeo(0.006, 0.02, 4), pos: [u * hr * 0.5, H.y0 - hr * 0.5, hr * H.sz * (0.98 - u * u * 0.18)], rot: [Math.PI, 0, 0] }); }
+    P(model, hj, mergeParts('antifangs', ft), toothM, { cast: false });
+    for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.8, hr * 0.12, hr * 0.5), sym, { pos: [s * hr * 0.46, H.y0 + hr * 0.48, hr * 0.8], rot: [0.1, 0, -s * 0.28] });
   }
-  P(model, hj, mergeParts('venomteeth', teeth), std(0xf2efe4, { roughness: 0.35 }), { cast: false });
-  // inner teeth row + gum ridge
-  const t2 = [];
-  for (let i = 0; i < 9; i++) { const u = i / 8 * 2 - 1, phi = u * 0.85; t2.push({ geo: coneGeo(0.008, 0.03, 4), pos: [Math.sin(phi) * hr * H.sx * 0.86, H.y0 - hr * 0.42 + u * u * hr * 0.15, Math.cos(phi) * hr * H.sz * 0.82], rot: [Math.PI + 0.15, -phi, 0] }); }
-  P(model, hj, mergeParts('venomteeth2', t2), std(0xe4e0d0, { roughness: 0.4 }), { cast: false });
-  // tongue
-  const tongueMat = std(0xb01020, { roughness: 0.35, emissive: 0x300004, emissiveIntensity: 0.4 });
-  const tongue = new Tendril({ segs: 14, radial: 6, r0: 0.026, r1: 0.007, material: tongueMat, ref: new V3(0, 1, 0) });
-  hj.add(tongue.mesh);
-  // brow ridge + head spikes
-  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.9, hr * 0.12, hr * 0.5), sym, { pos: [s * hr * 0.5, H.y0 + hr * 0.62, hr * 0.78], rot: [0.1, 0, -s * 0.3] });
   // claws
   for (const s of [1, -1]) {
-    const cl = [];
-    for (let i = -1; i <= 1; i++) cl.push({ geo: coneGeo(0.013 * k, 0.11 * k, 5), pos: [i * 0.03 * k, -0.075 * k, 0.045 * k], rot: [Math.PI + 0.35, 0, i * 0.12] });
-    cl.push({ geo: coneGeo(0.013 * k, 0.09 * k, 5), pos: [-s * 0.052 * k, -0.04 * k, 0.03 * k], rot: [Math.PI + 0.5, 0, -s * 0.8] });
-    P(model, model.j[s > 0 ? J.WL : J.WR], mergeParts('venomclaw' + (s > 0 ? 'L' : 'R') + k, cl), std(0xe8e6dc, { roughness: 0.3 }), { pos: [0, -dims.hand * 0.5, 0] });
+    const cl = [], cs = anti ? 0.7 : 1;
+    for (let i = -1; i <= 1; i++) cl.push({ geo: coneGeo(0.013 * k * cs, 0.11 * k * cs, 5), pos: [i * 0.03 * k, -0.075 * k, 0.045 * k], rot: [Math.PI + 0.35, 0, i * 0.12] });
+    cl.push({ geo: coneGeo(0.013 * k * cs, 0.09 * k * cs, 5), pos: [-s * 0.052 * k, -0.04 * k, 0.03 * k], rot: [Math.PI + 0.5, 0, -s * 0.8] });
+    P(model, model.j[s > 0 ? J.WL : J.WR], mergeParts('venomclaw' + (anti ? 'a' : '') + (s > 0 ? 'L' : 'R') + k, cl), anti ? std(0xe9eef4, { roughness: 0.25 }) : std(0xe8e6dc, { roughness: 0.3 }), { pos: [0, -dims.hand * 0.5, 0] });
   }
-  // spikes along forearms / shoulders / back
-  const sp = [];
-  for (let i = 0; i < 4; i++) sp.push({ geo: coneGeo(0.016 * k, 0.09 * k, 5), pos: [0.0, -0.05 * k - i * 0.055 * k, -0.045 * k], rot: [-2.6, 0, 0] });
-  for (const s of [1, -1]) P(model, model.j[s > 0 ? J.EL : J.ER], mergeParts('venomforespike' + k, sp), sym, { pos: [s * 0.0, 0.0, 0.0] });
-  const bs = [];
-  for (let i = 0; i < 5; i++) bs.push({ geo: coneGeo(0.03 * k, 0.16 * k, 5), pos: [0, (0.05 + i * 0.065) * k, -0.135 * k - Math.sin(i / 4 * 3) * 0.02], rot: [-2.2, 0, 0] });
-  P(model, model.j[J.CH], mergeParts('venombackspikes' + k, bs), sym, {});
-  for (const s of [1, -1]) P(model, model.j[s > 0 ? J.AL : J.AR], coneGeo(0.035 * k, 0.2 * k, 6), sym, { pos: [s * 0.04 * k, 0.1 * k, -0.02], rot: [0.1, 0, -s * 0.9] });
-  // chest emblem
+  // spikes along forearms / shoulders / back (Venom only; Anti-Venom keeps a sleek silhouette)
+  if (!anti) {
+    const sp = [];
+    for (let i = 0; i < 4; i++) sp.push({ geo: coneGeo(0.016 * k, 0.09 * k, 5), pos: [0.0, -0.05 * k - i * 0.055 * k, -0.045 * k], rot: [-2.6, 0, 0] });
+    for (const s of [1, -1]) P(model, model.j[s > 0 ? J.EL : J.ER], mergeParts('venomforespike' + k, sp), sym, {});
+    const bs = [];
+    for (let i = 0; i < 5; i++) bs.push({ geo: coneGeo(0.03 * k, 0.16 * k, 5), pos: [0, (0.05 + i * 0.065) * k, -0.135 * k - Math.sin(i / 4 * 3) * 0.02], rot: [-2.2, 0, 0] });
+    P(model, model.j[J.CH], mergeParts('venombackspikes' + k, bs), sym, {});
+    for (const s of [1, -1]) P(model, model.j[s > 0 ? J.AL : J.AR], coneGeo(0.035 * k, 0.2 * k, 6), sym, { pos: [s * 0.04 * k, 0.1 * k, -0.02], rot: [0.1, 0, -s * 0.9] });
+  }
+  // chest + back emblem (tendril-edged spider)
   const cr = info.chestRad(0.22 * k);
-  const embM = std(0xffffff, { map: emblemTexture('#ffffff'), transparent: true, alphaTest: 0.4, roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.25, side: THREE.DoubleSide });
-  P(model, model.j[J.CH], curvedPlane(0.34 * k, 0.34 * k, cr.rx, cr.rz, 0.006), embM, { pos: [0, 0.2 * k, 0], cast: false });
+  const embM = std(0xffffff, { map: symEmblemTexture(anti ? 'anti' : 'venom'), transparent: true, alphaTest: 0.35, roughness: anti ? 0.3 : 0.25, emissive: anti ? 0x000000 : 0xffffff, emissiveIntensity: anti ? 0 : 0.2, side: THREE.DoubleSide });
+  P(model, model.j[J.CH], curvedPlane(0.42 * k, 0.42 * k, cr.rx, cr.rz, 0.007), embM, { pos: [0, 0.2 * k, 0], cast: false });
+  if (anti) P(model, model.j[J.CH], curvedPlane(0.2 * k, 0.2 * k, cr.rx, cr.rz, 0.007), embM, { pos: [0, 0.22 * k, 0], rot: [0, Math.PI, 0], cast: false });
   // back tendrils
   const tends = [];
-  const tm = symMat({ id: 'venomt', color: 0x040407, rim: 0x2f6bff, rimK: 0.75, rough: 0.16, normalMap: vn, normalScale: 0.9 });
+  const tm = symMat({ ...symOpt, id: symOpt.id + 't' });
   const roots = [[0.14, 0.3, -0.12, 0.9, 0.45, -0.7], [-0.14, 0.3, -0.12, -0.9, 0.45, -0.7], [0.08, 0.15, -0.14, 0.7, 0.0, -1.0], [-0.08, 0.15, -0.14, -0.7, 0.0, -1.0], [0.0, 0.34, -0.12, 0.0, 0.7, -0.8]];
-  roots.forEach((r, i) => {
+  const ts = anti ? 0.72 : 1;
+  (anti ? roots.slice(0, 3) : roots).forEach((r, i) => {
     const t = new Tendril({ segs: 16, radial: 6, r0: 0.075 * k * 0.8, r1: 0.014, material: tm, ref: new V3(0, 1, 0) });
     model.j[J.CH].add(t.mesh); tends.push({ t, r, ph: i * 1.7 });
   });
@@ -680,14 +710,15 @@ export function buildVenom() {
         const w1 = Math.sin(c.tm * (2.0 + rage * 3) + ph + u * 5.5) * 0.14 * u * (0.6 + rage), w2 = Math.cos(c.tm * 1.6 + ph * 1.3 + u * 4) * 0.1 * u;
         const dir = new V3(r[3], r[4], r[5]).normalize();
         out.set(r[0] + dir.x * len * u + w1, r[1] + dir.y * len * u * (1 - 0.65 * u) + w2 + u * u * 0.2 * (1 - rage), r[2] + dir.z * len * u - sp2 * 0.012 * u * u);
+        out.multiplyScalar(ts);
       });
     }
     // tongue
     const out = c.st === 'dead' ? 0.4 : 1;
-    tongue.update((u, o) => {
-      o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.2 * out + Math.sin(c.tm * 3 + u * 4) * 0.02 * u, hr * H.sz * 0.88 + u * 0.22 * out);
+    tongue?.update((u, o) => {
+      o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.28 * out + Math.sin(c.tm * 3 + u * 4) * 0.025 * u, hr * H.sz * 0.88 + u * 0.3 * out);
     });
-  }, () => { tends.forEach((x) => x.t.dispose()); tongue.dispose(); });
+  }, () => { tends.forEach((x) => x.t.dispose()); tongue?.dispose(); });
   return finish(model);
 }
 

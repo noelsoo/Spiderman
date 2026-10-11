@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import {
   G, std, metal, glow, glowInstance, phys, withRim, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo, mergeParts, rng, seg,
-  fabricNormal, grainNormal, scaleMaps, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
+  fabricNormal, grainNormal, scaleMaps, capChestTexture, capStripesTexture, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
 } from './common.js';
 import { P, addHook, buildBody, addFace, finish, curvedPlane } from './characters.js';
 
@@ -136,15 +136,14 @@ export function buildCaptain() {
   const sc = scaleMaps('#14235c', '#4466b8', 8);
   sc.map.repeat.set(3, 2); sc.normal.repeat.set(3, 2);
   const scaleMat = withRim(phys(0xffffff, { map: sc.map, normalMap: sc.normal, normalScale: new V2(1.0, 1.0), roughness: 0.42, metalness: 0.35, clearcoat: 0.4, clearcoatRoughness: 0.3 }), 0x9fc0ff, 0.14);
-  const stripeTex = drawTex('capStripes', 512, 256, (ctx, W, H) => {
-    const n = 13; for (let i = 0; i < n; i++) { ctx.fillStyle = i & 1 ? '#f1f1f1' : '#b3121e'; ctx.fillRect((i * W) / n, 0, W / n + 1, H); }
-  });
+  const stripeTex = capStripesTexture();
   const stripes = cloth(0xffffff, { map: stripeTex });
   const red = cloth(0xa81420, { roughness: 0.5 });
+  const gloveM = leather(0x4a2c18, { roughness: 0.62 });
   const navy = cloth(0x1a2a6c);
   const skin = std(0xe3b490, { roughness: 0.62 });
   const info = buildBody(model, {
-    mats: { default: scaleMat, chest: scaleMat, abdomen: stripes, pelvis: navy, neck: skin, head: skin, shoulder: scaleMat, upperArm: scaleMat, foreArm: scaleMat, hand: red, thigh: navy, shin: red, foot: red },
+    mats: { default: scaleMat, chest: scaleMat, abdomen: stripes, pelvis: navy, neck: skin, head: skin, shoulder: scaleMat, upperArm: scaleMat, foreArm: scaleMat, hand: gloveM, thigh: navy, shin: red, foot: gloveM },
     torso: { sx: 1.46, sz: 0.86, chestR: 1.16, waistR: 0.9 },
     head: { R: 0.108, sx: 0.92, sy: 1.08, sz: 1.0 },
     arm: { u0: 0.058, u1: 0.047, f0: 0.047, f1: 0.037, ub: 0.14, fb: 0.14 },
@@ -154,7 +153,7 @@ export function buildCaptain() {
   const hj = model.j[J.HD], cj = model.j[J.CH], H = info.headInfo, hr = H.R;
   // star + chest
   const cr = info.chestRad(0.2 * k);
-  const starM = std(0xffffff, { map: starTexture(), transparent: true, alphaTest: 0.3, roughness: 0.45, side: THREE.DoubleSide });
+  const starM = phys(0xffffff, { map: capChestTexture(), transparent: true, alphaTest: 0.3, roughness: 0.35, metalness: 0.2, clearcoat: 0.5, side: THREE.DoubleSide });
   P(model, cj, curvedPlane(0.26 * k, 0.26 * k, cr.rx, cr.rz, 0.004), starM, { pos: [0, 0.2 * k, 0], cast: false });
   // belt, buckle, pouches
   const brown = leather(0x5a3a1e);
@@ -162,6 +161,12 @@ export function buildCaptain() {
   P(model, model.j[J.SP], boxGeo(0.05 * k, 0.05 * k, 0.025), metal(0xc9a74a, { roughness: 0.3 }), { pos: [0, 0.055 * k, 0.131 * k] });
   const pch = []; for (const x of [-0.1, 0.1]) pch.push({ geo: boxGeo(0.055 * k, 0.06 * k, 0.04 * k), pos: [x * k * 1.35, 0.055 * k, 0.1 * k], rot: [0, x * 4, 0] });
   P(model, model.j[J.SP], mergeParts('capPouch' + k, pch), brown, {});
+  // leather straps: harness over the shoulders + thigh holster strap + wrist cuffs
+  const strapG = G('capstrap', () => new THREE.BoxGeometry(0.03 * k, 0.17 * k, 0.012));
+  for (const s of [1, -1]) {
+    P(model, cj, strapG, brown, { pos: [s * cr.rx * 0.5, 0.31 * k, cr.rz * 0.72], rot: [0.35, 0, s * 0.18], cast: false });
+    P(model, model.j[s > 0 ? J.TL : J.TR], cylGeo(0.071 * k, 0.067 * k, 0.025 * k, seg(12, 8)), brown, { pos: [0, -dims.thigh * 0.55, 0] });
+  }
   // shoulder straps: sleeve/neck detail
   for (const s of [1, -1]) {
     P(model, model.j[s > 0 ? J.EL : J.ER], cylGeo(0.05 * k, 0.042 * k, dims.fore * 0.38, seg(12, 8)), red, { pos: [0, -dims.fore * 0.82, 0] }); // gauntlet

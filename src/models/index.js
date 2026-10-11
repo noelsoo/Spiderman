@@ -13,9 +13,10 @@ import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js
 import { buildSpiderMan, buildIronMan, buildHulk, buildThor, buildVenom, buildGoon, buildHunter } from './characters.js';
 import { buildWolverine, buildCaptain, buildHawkeye, buildScarlet } from './heroes2.js';
 import { buildCivilian, buildCop } from './people.js';
+import './symbiotes.js';
 
 export const MODEL_IDS = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'goon', 'hunter', 'civilian', 'cop'];
-const TARGET_HEIGHT = { spiderman: 1.78, ironman: 1.88, hulk: 2.7, thor: 1.95, venom: 2.6, goon: 1.8, hunter: 1.85, wolverine: 1.65, captain: 1.88, hawkeye: 1.85, scarlet: 1.75, civilian: 1.75, cop: 1.82 };
+const TARGET_HEIGHT = { spiderman: 1.78, ironman: 1.88, hulk: 2.7, thor: 1.95, venom: 2.6, antivenom: 2.0, goon: 1.8, hunter: 1.85, wolverine: 1.65, captain: 1.88, hawkeye: 1.85, scarlet: 1.75, civilian: 1.75, cop: 1.82 };
 
 const glbs = new Map(); // id -> gltf
 const BUILDERS = { spiderman: buildSpiderMan, ironman: buildIronMan, hulk: buildHulk, thor: buildThor, venom: buildVenom, goon: buildGoon, hunter: buildHunter,

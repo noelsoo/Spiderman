@@ -470,7 +470,7 @@ export function skinMaps(base = '#4f9d3b', vein = '#2f6e2a', seed = 4) {
   const veins = (cx, col, lw, a) => {
     const rr = rng(seed + 5);
     cx.lineCap = 'round'; cx.lineJoin = 'round';
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 28; i++) {
       let x = rr() * W, y = rr() * W, ang = rr() * 6.28;
       for (let b = 0; b < 3; b++) {
         cx.strokeStyle = col; cx.globalAlpha = a; cx.lineWidth = lw * s * (1 - b * 0.28);
@@ -482,7 +482,11 @@ export function skinMaps(base = '#4f9d3b', vein = '#2f6e2a', seed = 4) {
     }
     cx.globalAlpha = 1;
   };
-  veins(ctx, vein, 3.2, 0.55);
+  veins(ctx, vein, 3.2, 0.7);
+  blurOn(hctx, 1.2 * s); hctx.strokeStyle = '#fff'; hctx.lineWidth = 3 * s; const rc = rng(seed + 2); // skin creases / knuckle folds
+  for (let i = 0; i < 40; i++) { const x = rc() * W, y = rc() * W, l = (14 + rc() * 40) * s; hctx.globalAlpha = 0.7; hctx.beginPath(); hctx.arc(x, y, l, 0.3, 1.9); hctx.stroke(); }
+  hctx.globalAlpha = 1; blurOff(hctx);
+  ctx.strokeStyle = 'rgba(20,60,20,0.35)'; ctx.lineWidth = 2 * s; const rc2 = rng(seed + 2); for (let i = 0; i < 40; i++) { const x = rc2() * W, y = rc2() * W, l = (14 + rc2() * 40) * s; ctx.beginPath(); ctx.arc(x, y, l, 0.3, 1.9); ctx.stroke(); }
   blurOn(hctx, 1.4 * s); veins(hctx, '#fff', 4, 0.9); blurOff(hctx);
   const rp = rng(seed + 9);
   ctx.fillStyle = 'rgba(15,50,15,0.35)';
@@ -652,4 +656,160 @@ export function drawTex(key, W, H, fn, o = {}) {
   const t = tex(c, o.repeat); if (o.offsetX) t.offset.x = o.offsetX;
   if (o.clamp) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   texCache.set(k, t); return t;
+}
+
+// ================================================================== v3: richer character textures (Iron Man / Cap / Hulk / Thor / Venom / Anti-Venom)
+/** layered armour plates: colour overlay (seams, wear, bolt rings) + normal (seams, stepped plates, vents, bolts) + roughness (flake, wear). */
+export function armorMaps(seed = 1) {
+  const key = 'armor' + seed + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), s = W / 512, r = rng(seed * 31 + 5);
+  const [hc, hx] = canvas(W, W); hx.fillStyle = '#808080'; hx.fillRect(0, 0, W, W);
+  const [cc, cx] = canvas(W, W); cx.fillStyle = '#f0f0f0'; cx.fillRect(0, 0, W, W);
+  const vs = [0, 0.25, 0.5, 0.75], hs = [0.14, 0.36, 0.6, 0.82];
+  blurOn(hx, 0.8 * s);
+  // stepped plates
+  for (let i = 0; i < 9; i++) {
+    const x = r() * W * 0.8, y = r() * W * 0.85, w = (0.12 + r() * 0.16) * W, h = (0.07 + r() * 0.1) * W;
+    hx.fillStyle = '#9a9a9a'; hx.fillRect(x, y, w, h);
+    hx.strokeStyle = '#000'; hx.lineWidth = 2.4 * s; hx.strokeRect(x, y, w, h);
+    cx.strokeStyle = 'rgba(0,0,0,0.45)'; cx.lineWidth = 1.8 * s; cx.strokeRect(x, y, w, h);
+  }
+  hx.strokeStyle = '#000'; hx.lineWidth = 3.6 * s; cx.strokeStyle = 'rgba(0,0,0,0.6)'; cx.lineWidth = 2.6 * s;
+  for (const u of vs) for (const c of [[hx], [cx]]) { c[0].beginPath(); c[0].moveTo(u * W, 0); c[0].lineTo(u * W, W); c[0].stroke(); }
+  for (const v of hs) for (const c of [[hx], [cx]]) { c[0].beginPath(); c[0].moveTo(0, v * W); c[0].lineTo(W, v * W); c[0].stroke(); }
+  // vents
+  for (let g = 0; g < 4; g++) {
+    const x = (0.05 + r() * 0.8) * W, y = (0.05 + r() * 0.85) * W;
+    for (let i = 0; i < 5; i++) { hx.beginPath(); hx.moveTo(x, y + i * 5 * s); hx.lineTo(x + 26 * s, y + i * 5 * s); hx.stroke(); cx.beginPath(); cx.moveTo(x, y + i * 5 * s); cx.lineTo(x + 26 * s, y + i * 5 * s); cx.stroke(); }
+  }
+  // bolts
+  for (const u of vs) for (const v of hs) for (const o of [-10, 10]) {
+    hx.fillStyle = '#fff'; hx.beginPath(); hx.arc(u * W + o * s, v * W - 10 * s, 2.3 * s, 0, 6.3); hx.fill();
+    cx.fillStyle = 'rgba(0,0,0,0.35)'; cx.beginPath(); cx.arc(u * W + o * s, v * W - 10 * s, 3 * s, 0, 6.3); cx.fill();
+  }
+  blurOff(hx);
+  // edge wear scratches
+  cx.strokeStyle = 'rgba(255,255,255,0.7)'; cx.lineWidth = 1 * s;
+  for (let i = 0; i < 70; i++) { const x = r() * W, y = r() * W, a = r() * 6.3, l = (4 + r() * 14) * s; cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); cx.stroke(); }
+  const h = heightOf(hx, W, W); noiseInto(h, W, W, r, 0.035);
+  const normal = ntex(heightToNormal(h, W, W, 2.6));
+  const [rc, rx] = canvas(W, W); rx.fillStyle = '#9c9c9c'; rx.fillRect(0, 0, W, W);
+  for (let i = 0; i < W * W / 50; i++) { const v = 100 + r() * 120; rx.fillStyle = `rgb(${v},${v},${v})`; rx.fillRect(r() * W, r() * W, 1.5, 1.5); }
+  rx.strokeStyle = '#e8e8e8'; rx.lineWidth = 2 * s; for (const u of vs) { rx.beginPath(); rx.moveTo(u * W, 0); rx.lineTo(u * W, W); rx.stroke(); }
+  const res = { map: tex(cc), normal, rough: ntex(rc) }; texCache.set(key, res); return res;
+}
+
+/** triangular arc reactor with inner rings (glow decal, transparent bg) */
+export function arcTexture() {
+  return drawTex('arcreactor', 256, 256, (ctx, W) => {
+    const m = W / 2; ctx.clearRect(0, 0, W, W);
+    const g = ctx.createRadialGradient(m, m, 0, m, m, m); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.5, 'rgba(170,235,255,1)'); g.addColorStop(0.8, 'rgba(60,170,230,0.9)'); g.addColorStop(1, 'rgba(60,170,230,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(m, m, m * 0.97, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,90,140,0.9)'; ctx.lineWidth = 5;
+    for (const r of [0.86, 0.66]) { ctx.beginPath(); ctx.arc(m, m, m * r, 0, 6.3); ctx.stroke(); }
+    ctx.lineWidth = 3; for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283; ctx.beginPath(); ctx.moveTo(m + Math.cos(a) * m * 0.66, m + Math.sin(a) * m * 0.66); ctx.lineTo(m + Math.cos(a) * m * 0.86, m + Math.sin(a) * m * 0.86); ctx.stroke(); }
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(60,190,255,1)'; ctx.lineWidth = 6; ctx.beginPath();
+    for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + i * 2.094; ctx[i ? 'lineTo' : 'moveTo'](m + Math.cos(a) * m * 0.5, m + Math.sin(a) * m * 0.5); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }, { clamp: true });
+}
+
+/** Captain America chest: bevelled star over navy, plus belt-crossing straps are separate meshes */
+export function capChestTexture() {
+  return drawTex('capchest', 256, 256, (ctx, W) => {
+    ctx.clearRect(0, 0, W, W);
+    const star = (cx, cy, R, r, off = 0) => { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i & 1 ? r : R; ctx[i ? 'lineTo' : 'moveTo'](cx + off + Math.cos(a) * rr, cy + off + Math.sin(a) * rr); } ctx.closePath(); };
+    ctx.fillStyle = '#7a8ab0'; star(W / 2, W / 2 + 8, W * 0.47, W * 0.19, 3); ctx.fill(); // bevel shadow
+    ctx.fillStyle = '#dfe4ee'; star(W / 2, W / 2 + 8, W * 0.47, W * 0.19, -2); ctx.fill(); // bevel highlight
+    const g = ctx.createLinearGradient(0, 0, W, W); g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#cfd6e6');
+    ctx.fillStyle = g; star(W / 2, W / 2 + 8, W * 0.43, W * 0.175); ctx.fill();
+  }, { clamp: true });
+}
+/** striped abdomen with fabric weave (u = around) */
+export function capStripesTexture() {
+  return drawTex('capStripes2', 512, 256, (ctx, W, H) => {
+    const n = 13;
+    for (let i = 0; i < n; i++) { ctx.fillStyle = i & 1 ? '#ececec' : '#a8101c'; ctx.fillRect((i * W) / n, 0, W / n + 1, H); }
+    ctx.globalAlpha = 0.12; ctx.fillStyle = '#000';
+    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    for (let x = 0; x < W; x += 3) ctx.fillRect(x, 0, 1, H);
+    ctx.globalAlpha = 1;
+  });
+}
+/** Thor chest disc (engraved concentric rings + knot) */
+export function thorDiscTexture() {
+  return drawTex('thordisc', 128, 128, (ctx, W) => {
+    const m = W / 2; const g = ctx.createRadialGradient(m * 0.8, m * 0.8, 2, m, m, m); g.addColorStop(0, '#f4f6fa'); g.addColorStop(1, '#8a929e');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, W);
+    ctx.strokeStyle = 'rgba(40,46,56,0.8)'; ctx.lineWidth = 3;
+    for (const r of [0.86, 0.66, 0.2]) { ctx.beginPath(); ctx.arc(m, m, m * r, 0, 6.3); ctx.stroke(); }
+    ctx.lineWidth = 4; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * 1.047; ctx.moveTo(m, m); ctx.lineTo(m + Math.cos(a) * m * 0.66, m + Math.sin(a) * m * 0.66); } ctx.stroke();
+    ctx.lineWidth = 2; for (let i = 0; i < 24; i++) { const a = i / 24 * 6.283; ctx.beginPath(); ctx.moveTo(m + Math.cos(a) * m * 0.7, m + Math.sin(a) * m * 0.7); ctx.lineTo(m + Math.cos(a) * m * 0.84, m + Math.sin(a) * m * 0.84); ctx.stroke(); }
+  }, { clamp: true });
+}
+/** cape cloth: deep red with vertical fold shading, darker hem at v=0 (bottom) */
+export function capeTexture() {
+  return drawTex('thorcape', 256, 256, (ctx, W, H) => {
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#5a0a10'); g.addColorStop(0.12, '#8e1119'); g.addColorStop(1, '#b4161f');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 9; i++) { const x = (i + 0.5) / 9 * W; const f = ctx.createLinearGradient(x - 14, 0, x + 14, 0); f.addColorStop(0, 'rgba(0,0,0,0)'); f.addColorStop(0.5, i & 1 ? 'rgba(0,0,0,0.22)' : 'rgba(255,120,110,0.12)'); f.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = f; ctx.fillRect(x - 14, 0, 28, H); }
+    ctx.globalAlpha = 0.14; ctx.fillStyle = '#000'; for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1); for (let x = 0; x < W; x += 3) ctx.fillRect(x, 0, 1, H); ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(30,0,0,0.55)'; ctx.fillRect(0, H - 14, W, 14); ctx.fillStyle = 'rgba(190,150,70,0.5)'; ctx.fillRect(0, H - 16, W, 2);
+  });
+}
+/** Hulk shorts: faded purple with tears (colour) */
+export function tornShortsTexture() {
+  return drawTex('hulkshorts', 256, 256, (ctx, W, H) => {
+    ctx.fillStyle = '#5b2f88'; ctx.fillRect(0, 0, W, H); const r = rng(44);
+    for (let i = 0; i < 60; i++) { ctx.fillStyle = r() < 0.5 ? 'rgba(20,0,40,0.18)' : 'rgba(200,150,255,0.10)'; ctx.fillRect(r() * W, r() * H, 6 + r() * 30, 2 + r() * 8); }
+    ctx.globalAlpha = 0.12; ctx.fillStyle = '#000'; for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#3a1f58'; ctx.beginPath(); ctx.moveTo(0, H); for (let x = 0; x <= W; x += 10) ctx.lineTo(x, H - 10 - r() * 22); ctx.lineTo(W, H); ctx.fill();
+  });
+}
+/** branching vein height-map -> normal (symbiote sinew). tile with repeat */
+export function veinNormal(seed = 3, strength = 3.0) {
+  const key = 'vein' + seed + strength + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), s = W / 512, r = rng(seed);
+  const [c, ctx] = canvas(W, W); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W);
+  blurOn(ctx, 1.5 * s); ctx.lineCap = 'round'; ctx.strokeStyle = '#fff';
+  const branch = (x, y, a, len, w) => {
+    if (len < 4 || w < 0.6) return;
+    ctx.lineWidth = w * s; ctx.beginPath(); ctx.moveTo(x, y);
+    for (let i = 0; i < 5; i++) { a += (r() - 0.5) * 0.8; x += Math.cos(a) * len * 0.2 * s; y += Math.sin(a) * len * 0.2 * s; ctx.lineTo(x, y); }
+    ctx.stroke(); branch(x, y, a + 0.2, len * 0.8, w * 0.8); if (r() < 0.8) branch(x, y, a + (r() - 0.5) * 2, len * 0.6, w * 0.65);
+  };
+  for (let i = 0; i < 12; i++) branch(r() * W, r() * W, r() * 6.3, 90, 6);
+  blurOff(ctx);
+  const h = heightOf(ctx, W, W); noiseInto(h, W, W, r, 0.04);
+  const t = ntex(heightToNormal(h, W, W, strength)); texCache.set(key, t); return t;
+}
+/** spider emblem with tendril edges. style 'venom' (white on transparent) | 'anti' (black on transparent) */
+export function symEmblemTexture(style = 'venom') {
+  return drawTex('symemb' + style, 256, 256, (ctx, W) => {
+    ctx.clearRect(0, 0, W, W);
+    const col = style === 'anti' ? '#07070b' : '#f6f6f6'; ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const cx = W / 2, r = rng(12);
+    ctx.beginPath(); ctx.ellipse(cx, W * 0.6, W * 0.07, W * 0.2, 0, 0, 6.3); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx, W * 0.34, W * 0.045, W * 0.075, 0, 0, 6.3); ctx.fill();
+    const legs = [[[0.04, 0.3], [0.2, 0.1], [0.46, 0.03]], [[0.05, 0.36], [0.26, 0.2], [0.49, 0.2]], [[0.05, 0.42], [0.3, 0.46], [0.47, 0.72]], [[0.05, 0.5], [0.2, 0.7], [0.3, 0.97]]];
+    for (const sd of [-1, 1]) for (const leg of legs) {
+      // tapered leg: wide at body, thin tendril tip
+      for (let i = 0; i < 2; i++) {
+        const [a, b, c] = leg; ctx.lineWidth = W * (i ? 0.012 : 0.04);
+        ctx.beginPath(); ctx.moveTo(cx + sd * a[0] * W, a[1] * W); ctx.quadraticCurveTo(cx + sd * b[0] * W, b[1] * W, cx + sd * (i ? c[0] * 1.05 : (b[0] + c[0]) / 2) * W, (i ? c[1] : (b[1] + c[1]) / 2) * W); ctx.stroke();
+      }
+      const [, , c] = leg; for (let k = 0; k < 3; k++) { const ang = r() * 6.3; ctx.lineWidth = W * 0.008; ctx.beginPath(); ctx.moveTo(cx + sd * c[0] * W, c[1] * W); ctx.quadraticCurveTo(cx + sd * c[0] * W + Math.cos(ang) * 10, c[1] * W + Math.sin(ang) * 10, cx + sd * c[0] * W + Math.cos(ang + 0.6) * 20, c[1] * W + Math.sin(ang + 0.6) * 20); ctx.stroke(); }
+    }
+    ctx.lineWidth = W * 0.014; for (const sd of [-1, 1]) for (let k = 0; k < 4; k++) { const x0 = cx + sd * (0.05 + r() * 0.05) * W, y0 = (0.5 + k * 0.08) * W; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(x0 + sd * 12, y0 + 22, x0 + sd * 4, y0 + 40 + r() * 20); ctx.stroke(); }
+  }, { clamp: true });
+}
+/** anti-venom body streaks: white with black/grey streaks (u around) */
+export function antiStreakTexture() {
+  return drawTex('antistreak', 256, 256, (ctx, W, H) => {
+    ctx.fillStyle = '#f2f4f8'; ctx.fillRect(0, 0, W, H); const r = rng(8);
+    for (let i = 0; i < 26; i++) { const x = r() * W, w = 1.5 + r() * 5, y = r() * H, l = 30 + r() * 120; const g = ctx.createLinearGradient(0, y, 0, y + l); g.addColorStop(0, 'rgba(10,10,16,0)'); g.addColorStop(0.3, `rgba(10,10,16,${0.35 + r() * 0.5})`); g.addColorStop(1, 'rgba(10,10,16,0)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, l); }
+    for (let i = 0; i < 40; i++) { ctx.fillStyle = `rgba(160,190,215,${0.05 + r() * 0.1})`; ctx.fillRect(r() * W, r() * H, 6 + r() * 30, 2 + r() * 10); }
+  });
 }
