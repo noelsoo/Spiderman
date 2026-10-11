@@ -55,10 +55,10 @@ export class CarnageHero extends SymbioteHero {
     const S = skin();
     super(game, {
       id: 'carnage', name: 'Carnage', color: '#c0101c', modelId: 'carnage',
-      maxHp: 240, walkSpeed: 8, runSpeed: 15, jumpSpeed: 13, gravity: 27, radius: 0.5, height: 2.1, airControl: 0.5, mass: 1.3,
+      maxHp: 240, walkSpeed: 8, runSpeed: 15, jumpSpeed: 15.5, gravity: 27, radius: 0.5, height: 2.1, airControl: 0.5, mass: 1.3,
       tendril: { material: S.tend, count: 32 },
       mv: {
-        walk: 8, run: 15, sprint: 19, jump: 13, jumpFwd: 5, doubleJump: true, airCtl: 0.6, stepShake: 0,
+        walk: 8, run: 15, sprint: 23, jump: 15.5, jumpFwd: 6, doubleJump: true, airCtl: 0.6, stepShake: 0,
         wallSpeed: 15, wallSprint: 22, wallJumpOut: 13, wallJumpUp: 15,
         dashSp: 27, dashTime: 0.2, dodgeCd: 0.5, fxColor: RED,
         launch: { range: 60, minDist: 4, speed: 64, accel: 220, lift: 0, steer: 2, cd: 0.3, maxT: 1.2, endDist: 2, releaseUp: 3, keep: 0.7, width: 0.12, turn: 400, anyHit: true, enemyZip: true, airDash: 22, anim: 'zip', pitches: [0.35, 0.6, 0.9, 0.15] },

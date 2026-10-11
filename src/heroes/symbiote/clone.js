@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { buildCharacter } from '../../models/index.js';
 
 const V3 = THREE.Vector3;
-const _a = new V3();
+const _a = new V3(), _o = new V3(), _f = new V3();
 
 export class SymbioteClone {
   constructor(game, owner, pos, o = {}) {
@@ -43,7 +43,8 @@ export class SymbioteClone {
       this.atkT -= dt;
       if (d < 3.2 && this.atkT <= 0) {
         this.atkT = 0.42; this.swing = 0.3;
-        g.combat?.melee?.({ origin: _a.set(this.pos.x, this.pos.y + 1, this.pos.z), forward: _a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), range: 3.2, arc: 140, damage: this.dmg, knockback: 6, up: 2, stun: 0.3, source: this.owner });
+        _o.set(this.pos.x, this.pos.y + 1, this.pos.z); _f.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+        g.combat?.melee?.({ origin: _o, forward: _f, range: 3.2, arc: 140, damage: this.dmg, knockback: 6, up: 2, stun: 0.3, source: this.owner });
         g.fx?.sparks?.(_a.set(this.pos.x + Math.sin(this.yaw) * 1.8, this.pos.y + 1.1, this.pos.z + Math.cos(this.yaw) * 1.8), _a, 0xff3040, 6, 7, 0.25, 0.1);
         g.audio?.play('slash', { volume: 0.35, pos: this.pos });
       }
