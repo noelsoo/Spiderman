@@ -38,7 +38,7 @@ export class SymbioteHero extends Hero {
     this.anchor = new V3(); this.anchorN = new V3(0, 1, 0); this.dest = new V3(); this.rope = null;
     this.launchT = 0; this.launchSp = 0; this.launchWall = false; this.launchTarget = null; this._stall = 0;
     this.wallN = new V3(0, 0, 1); this.wallLost = 0; this.wallLock = 0; this.stickWall = 0; this.wallBox = null;
-    this.jumpBoostT = 0; this.airT = 0; this.airJumps = 1; this.flipT = 0; this._glideT = 0;
+    this.jumpBoostT = 0; this.airT = 0; this.airJumps = 1; this.flipT = 0; this.driftT = 0; this.vaultT = 0; this.vaultY = 0;
     this.speedMul = 1; this.dmgOutMul = 1; this.dmgTakenMul = 1; this.stepT = 0;
     this._impactVy = 0; this.fovAdd = 0; this.punch = 0;
     this.wings = cfg.wings ? new Wings(this.model, cfg.wings) : null;
@@ -250,6 +250,13 @@ export class SymbioteHero extends Hero {
     const grounded = this.onGround;
     if (grounded) { this.airT = 0; this.airJumps = 1; } else this.airT += dt;
 
+    // --- roof vault: rise along the wall, then push over the edge
+    if (this.vaultT > 0) {
+      this.vaultT -= dt;
+      if (this.pos.y >= this.vaultY - 0.15) {
+        this.vel.x = -this.vaultN.x * 7; this.vel.z = -this.vaultN.z * 7; this.vaultT = 0; this.driftT = 0.55;
+      } else { this.vel.x = -this.vaultN.x * 1.5; this.vel.z = -this.vaultN.z * 1.5; this.driftT = 0.3; }
+    }
     // --- wall attach
     if (this.wallLock <= 0 && this.onWall) {
       _a.copy(this.wallNormal).setY(0);
@@ -303,8 +310,14 @@ export class SymbioteHero extends Hero {
     let speed = base * mag * this.speedMul;
     if (this.actionT > 0) speed *= this.actionMoveMul;
     const control = grounded ? 1 : (mv.airCtl ?? 0.45);
-    const accel = (grounded ? 55 : 24) * control;
-    if (this.flipT > 0) { /* keep the flip's momentum */ } else {
+    let accel = (grounded ? 55 : 24) * control;
+    const hs0 = Math.hypot(this.vel.x, this.vel.z);
+    if (this.driftT > 0) this.driftT -= dt;
+    if (this.flipT > 0 || this.driftT > 0) { /* keep launch / vault / flip momentum */ }
+    else if (!grounded && mag < 0.05) {
+      const k = Math.exp(-0.35 * dt); this.vel.x *= k; this.vel.z *= k;       // airborne momentum barely bleeds off
+    } else {
+      if (!grounded && hs0 > speed + 1) accel = 5;                              // going faster than we could run: steer, don't brake
       this.vel.x = approach(this.vel.x, wish.x * speed, accel * dt);
       this.vel.z = approach(this.vel.z, wish.z * speed, accel * dt);
     }
@@ -360,12 +373,12 @@ export class SymbioteHero extends Hero {
 
   /** A wall hit under a roof edge snaps to that edge, so the yank lands on the ledge. */
   _snapTop(hit, dist) {
-    const out = { point: hit.point.clone(), normal: hit.normal.clone(), dist, top: false };
+    const out = { point: hit.point.clone(), normal: hit.normal.clone(), dist, top: false, topY: 0 };
     const box = hit.box;
     if (this.mv.launch.snapTop !== false && box && Math.abs(hit.normal.y) < 0.5 && box.data?.type !== 'prop') {
       const rise = box.max.y - hit.point.y;
-      if (rise > 1.2 && rise < 46) { out.point.y = box.max.y - 0.5; out.top = true; }
-      else if (rise <= 1.2) out.top = true;
+      if (rise > 1.2 && rise < 46) { out.point.y = box.max.y - 0.5; out.top = true; out.topY = box.max.y; }
+      else if (rise <= 1.2) { out.top = true; out.topY = box.max.y; }
     }
     return out;
   }
@@ -392,7 +405,7 @@ export class SymbioteHero extends Hero {
     if (!a) { this.cooldowns.launch = 0.2; return false; }
     this.useCooldown('launch', L.cd);
     this.anchor.copy(a.point); this.anchorN.copy(a.normal);
-    this.launchWall = !a.free && Math.abs(a.normal.y) < 0.5 && !enemy; this.launchTop = !!a.top;
+    this.launchWall = !a.free && Math.abs(a.normal.y) < 0.5 && !enemy; this.launchTop = !!a.top; this.launchTopY = a.topY || 0;
     this.launchTarget = enemy;
     // pull destination = the point the hero's centre should reach
     if (enemy) this.dest.copy(a.point).addScaledVector(a.normal, 1.6);
@@ -418,8 +431,9 @@ export class SymbioteHero extends Hero {
     this.airT = 0.2; this.airJumps = 1;
     if (arrived && this.launchWall && !this.launchTarget && this.launchTop) {
       // landed on the roof edge: vault over it
-      this.vel.set(-this.anchorN.x * 7, 14, -this.anchorN.z * 7);
-      this.wallLock = 0.6; this.stickWall = 0; this.yaw = Math.atan2(-this.anchorN.x, -this.anchorN.z);
+      this.vel.set(-this.anchorN.x * 1.5, 14, -this.anchorN.z * 1.5);
+      this.vaultY = this.launchTopY; this.vaultT = 1.2; this.vaultN = this.vaultN || new V3(); this.vaultN.copy(this.anchorN);
+      this.wallLock = 0.8; this.stickWall = 0; this.driftT = 0.3; this.yaw = Math.atan2(-this.anchorN.x, -this.anchorN.z);
       this.game.audio?.play('whoosh', { volume: 0.6 });
     } else if (arrived && this.launchWall && !this.launchTarget) {
       this.vel.multiplyScalar(0.25); this.vel.addScaledVector(this.anchorN, -2);
@@ -526,7 +540,7 @@ export class SymbioteHero extends Hero {
     if (this.wallContact) this.wallBox = this.wallContact;
     // mantle over the roof edge
     if (box && box.data?.type !== 'prop' && this.vel.y > 1 && this.pos.y + 0.75 >= box.max.y && up > 0.15) {
-      this.vel.set(-n.x * 6, 7.5, -n.z * 6);
+      this.vel.set(-n.x * 6, 9.5, -n.z * 6); this.driftT = 0.5;
       this.state = 'free'; this.stateT = 0; this.wallLock = 0.5; this.gravityScale = 1;
       this.yaw = Math.atan2(-n.x, -n.z); this.setAnim('jump', 6); g.audio?.play('whoosh', { volume: 0.5 });
       return;
