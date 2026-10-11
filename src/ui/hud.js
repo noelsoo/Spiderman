@@ -5,9 +5,13 @@
 import './hud.css';
 import { installCampaignUI } from './campaign-ui.js';
 
-const ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet'];
+const ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'carnage', 'antivenom'];
 
 const S = (body, fill = 'none') => `<svg viewBox="0 0 24 24" fill="${fill}" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+// symbiote spider emblems: venom / anti-venom = the big classic spider, carnage = a spindly one with a tendril curl
+const SP = (c, big) => big
+  ? `<svg viewBox="0 0 24 24" fill="${c}" stroke="${c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.2 5.2L12 20.5 9.8 8.7z"/><path d="M9.6 9 3 4.5M9.4 11.8 2.5 12M9.8 14.5 4 20M14.4 9 21 4.5M14.6 11.8l6.9.2M14.2 14.5 20 20" fill="none"/></svg>`
+  : `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12.5" rx="2.4" ry="4.2" fill="${c}"/><path d="M10 10 4 3.5M10 13 3 15M10.4 15 6 21M14 10l6-6.5M14 13l7 2M13.6 15l4.4 6"/><path d="M12 8.3c0-3 4-3.5 4-1.2M12 16.8c0 3-4 3.5-4 1.2" stroke-width="1.2"/></svg>`;
 const EMBLEM = {
   spiderman: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><ellipse cx="12" cy="13" rx="3" ry="4.5" fill="#fff"/><circle cx="12" cy="7.5" r="2" fill="#fff"/><path d="M9.2 10 3 5M9 13l-6 1M9.4 15.5 4 21M14.8 10 21 5M15 13l6 1M14.6 15.5 20 21"/></svg>',
   ironman: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="2" fill="#fff"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/></svg>',
@@ -16,6 +20,9 @@ const EMBLEM = {
   wolverine: S('<path d="M5 3l3.5 18M11.5 2.5l2.5 19M18 3l1 18" stroke-width="2.6"/>'),
   captain: S('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6.2"/><polygon points="12,7.4 13.4,10.7 17,11 14.3,13.4 15.1,17 12,15.1 8.9,17 9.7,13.4 7,11 10.6,10.7" fill="#fff" stroke="none"/>'),
   hawkeye: S('<path d="M7 3.5c9 5 9 12 0 17"/><path d="M7 3.5v17M3.5 12H21M17.5 8.5 21 12l-3.5 3.5"/>'),
+  venom: SP('#fff', true),
+  carnage: SP('#fff', false),
+  antivenom: SP('#111', true),
   scarlet: S('<path d="M12 2.5 20 7.2v9.6L12 21.5 4 16.8V7.2z"/><path d="M12 7c3 0 4.5 3 2.5 5s-5 1-4.2-1.8" stroke-width="1.5"/><circle cx="12" cy="12" r="1.6" fill="#fff" stroke="none"/>'),
 };
 
@@ -25,9 +32,12 @@ const HERO_INFO = {
   hulk: { name: 'Hulk', color: '#4cc24b', powers: ['Super-jump & slam', 'Thunderclap, rock throw', 'Rage & Worldbreaker'] },
   thor: { name: 'Thor', color: '#5aa9ff', powers: ['Mjolnir throw & recall', 'Lightning & storm', 'Hammer flight, Bifrost'] },
   wolverine: { name: 'Wolverine', color: '#f2c230', powers: ['Adamantium claws', 'Lunge', 'Healing factor', 'Berserker rage'] },
-  captain: { name: 'Captain America', color: '#2f6bd8', powers: ['Shield throw (ricochet)', 'Block & parry', 'Charge'] },
+  captain: { name: 'Captain America', short: 'Captain', color: '#2f6bd8', powers: ['Shield throw (ricochet)', 'M1911 pistol (aim)', 'Block & parry, Charge'] },
   hawkeye: { name: 'Hawkeye', color: '#8a4fd1', powers: ['Trick arrows', 'Bow aim', 'Grapple arrow'] },
-  scarlet: { name: 'Scarlet Witch', color: '#e0254f', powers: ['Hex bolts', 'Telekinesis', 'Levitation', 'Reality warp'] },
+  scarlet: { name: 'Scarlet Witch', short: 'Scarlet', color: '#e0254f', powers: ['Hex bolts', 'Telekinesis', 'Levitation', 'Reality warp'] },
+  venom: { name: 'Venom', color: '#dfe3ee', short: 'Venom', powers: ['Symbiote tendrils', 'Wall-crawl & leaps', 'Brutal melee, Rampage'] },
+  carnage: { name: 'Carnage', color: '#ff2a3c', short: 'Carnage', powers: ['Blade & tendril strikes', 'Frenzied combos', 'Chaos burst'] },
+  antivenom: { name: 'Anti-Venom', color: '#f2f6ff', short: 'Anti-Venom', powers: ['Purging touch', 'Healing aura', 'Cleansing blast'] },
 };
 
 const HERO_CONTROLS = {
@@ -36,9 +46,12 @@ const HERO_CONTROLS = {
   hulk: 'Charge-jump, slam, clap, Rage, Worldbreaker',
   thor: 'Hammer, lightning, storm, Bifrost',
   wolverine: 'Claw combo, lunge, healing factor, Berserker',
-  captain: 'Shield throw + ricochet, block / parry, charge',
+  captain: 'Shield throw + ricochet, hold aim + fire = pistol, hold dodge = block / parry, charge',
   hawkeye: 'Trick arrows, bow aim, grapple',
   scarlet: 'Hex bolts, telekinesis, levitation, Reality Warp',
+  venom: 'Symbiote tendrils, wall-crawl, melee, Rampage',
+  carnage: 'Blades and tendrils, frenzied combos, chaos burst',
+  antivenom: 'Purging touch, healing aura, cleansing blast',
 };
 
 // action -> [keyboard label, PlayStation glyph, Xbox glyph]   (Controls v2)
@@ -56,7 +69,7 @@ const ON_FOOT = [
   ['Move / Look', 'W A S D / Mouse', 'L stick / R stick'], ['Jump / Web Wings', 'Space', '✕'],
   ['Swing / Fly (hold)', 'Shift', 'R2'], ['Attack', 'LMB / J', '□'], ['Special', 'RMB / K', 'R1'],
   ['Ability', 'E', 'L1'], ['Ability 2', 'R', 'L2'], ['Ultimate (full Focus)', 'Q', 'R3 (click R stick)'],
-  ['Dodge', 'C / Ctrl', '○'], ['Sprint', 'Alt', 'L3'], ['Interact: car, shop', 'F', '△'],
+  ['Dodge (Cap: hold = block)', 'C / Ctrl', '○'], ['Sprint', 'Alt', 'L3'], ['Interact: car, shop', 'F', '△'],
   ['Hero wheel (hold)', 'Tab', 'D-pad ↑'], ['Quick switch', '[ ]  /  1 - 8', 'D-pad ◀ ▶'],
   ['Recenter camera', 'V / MMB', '-'], ['Map', 'M', 'Touchpad / Share'], ['Pause', 'Esc / P', 'Options'],
 ];
@@ -233,9 +246,9 @@ export class HUD {
     this.wheelEls = ORDER.map((id, i) => {
       const a = (i / ORDER.length) * Math.PI * 2;
       const el = document.createElement('div');
-      el.className = 'wh-i'; el.style.setProperty('--c', HERO_INFO[id].color);
-      el.style.left = `${50 + Math.sin(a) * 38}%`; el.style.top = `${50 - Math.cos(a) * 38}%`;
-      el.innerHTML = `<div class="wh-p">${EMBLEM[id]}</div><div class="wh-n">${esc(HERO_INFO[id].name)}</div><div class="wh-b"><b></b></div>`;
+      el.className = 'wh-i'; el.dataset.id = id; el.style.setProperty('--c', HERO_INFO[id].color);
+      el.style.left = `${50 + Math.sin(a) * 39}%`; el.style.top = `${50 - Math.cos(a) * 39}%`;
+      el.innerHTML = `<div class="wh-p">${EMBLEM[id]}</div><div class="wh-n">${esc(HERO_INFO[id].short || HERO_INFO[id].name)}</div><div class="wh-b"><b></b></div>`;
       this.$.whring.appendChild(el);
       return el;
     });

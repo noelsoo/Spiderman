@@ -45,8 +45,9 @@ F11 or Alt+Enter toggles fullscreen.
 | **Fire while aiming** | LMB | R2 |
 | Ability | E | L1 |
 | Ability 2 (tap) | R | L2 |
+| Captain America sidearm | hold RMB to aim, LMB fires (12 rounds, auto reload) | hold L2 to aim, R2 fires |
 | Ultimate (full Focus) | Q | R3 |
-| Dodge / parry | C | ○ |
+| Dodge (tap) / Block + parry (hold, Captain America) | C | ○ |
 | **Interact**: steal / enter / exit car, shop | F | △ |
 | **Character wheel** (hold) | Tab | D-pad ↑ |
 | Quick switch hero | [ ] or 1–8 | D-pad ← → |
@@ -57,7 +58,7 @@ F11 or Alt+Enter toggles fullscreen.
 
 **Driving:** W / R2 throttle, S / L2 brake and reverse, A–D / L stick steer, Space / ✕ handbrake drift, H / L3 horn, F / △ get out. **Drive-by** (pistol / SMG / shotgun / rifle equipped): hold RMB / L1 to lean out and aim, LMB / R1 fires, X / Z / wheel / D-pad ↓ cycle weapons; throttle, brake and steering keep working.
 
-**Heroes:** Spider-Man (swinging, wall-crawl, six web-shooter gadgets while aiming, symbiote suit, parry), Iron Man (aimed repulsors, missile lock-on, Proton Cannon), Hulk (grab and throw, Hulk Out, Worldbreaker), Thor (aimed hammer throws, Bifrost, God Blast), Wolverine (claws, lunge, healing factor, Weapon X frenzy), Captain America (ricochet shield, block and parry, Avengers Assemble), Hawkeye (bow with draw-zoom, trick arrows, grapple), Scarlet Witch (hex bolts, telekinesis, levitation, Reality Warp).
+**Heroes:** Spider-Man (swinging, wall-crawl, six web-shooter gadgets while aiming, symbiote suit, parry), Iron Man (aimed repulsors, missile lock-on, Proton Cannon), Hulk (grab and throw, Hulk Out, Worldbreaker), Thor (aimed hammer throws, Bifrost, God Blast), Wolverine (claws, lunge, healing factor, Weapon X frenzy), Captain America (ricochet shield, M1911 sidearm, block and parry, Avengers Assemble), Hawkeye (bow with draw-zoom, trick arrows, grapple), Scarlet Witch (hex bolts, telekinesis, levitation, Reality Warp).
 
 **Weapons:** earn cash from fights, buy guns at the four armories (marked on the minimap). Every gun zooms when aimed; the sniper has a 4x/8x/12x scope with hold-breath (Alt / L3).
 

@@ -1,9 +1,12 @@
 // Captain America: shield-and-fist combo, ricochet SHIELD THROW (hold = charged, bounces off walls), Shield Charge,
 // hold-to-BLOCK with a 0.2 s PARRY window, Avengers Assemble (slam + rally buff for everyone).
-//   attack J/LMB/□   special K/RMB/R1 throw (hold to charge)   ability E/L1 Shield Charge   ability2 R/L2 hold = Block / Parry
-//   ultimate Q/R3 Avengers Assemble   dodge C/○ = combat roll   jump twice = shield-assisted double jump   walk into low ledges = auto-vault
+//   attack J/LMB/□   special K/R1 (or quick RMB tap) throw (hold to charge)   ability E/L1 Shield Charge
+//   aim RMB/L2 hold = shoulder-aim the M1911 sidearm, fire LMB/R2 (12 rounds, auto reload, headshots x2)
+//   dodge C/○: TAP = combat roll, HOLD = Block / Parry (0.2 s parry window)   ultimate Q/R3 Avengers Assemble
+//   jump twice = shield-assisted double jump   walk into low ledges = auto-vault
 import * as THREE from 'three';
 import { Hero, approach } from './Hero.js';
+import { buildPistol } from './squad/pistol.js';
 import { Timers, aimInfo, enemiesNear, enemyCenter, rumble, impactFx, clamp, damp, objPos, hurt, inFront, impact } from './squad/util.js';
 
 // ---- tuning ----------------------------------------------------------------
@@ -11,6 +14,8 @@ const WALK = 6.5, RUN = 12.5, SPRINT = 15, JUMP = 11.5, DJUMP = 12, GRAV = 27;
 const THROW_SPEED = 38, THROW_SPEED_CHARGED = 48, THROW_RANGE = 28, THROW_RANGE_CHARGED = 40, CHAIN_RANGE = 15, CHARGE_MIN = 0.3, CHARGE_FULL = 1.1;
 const CHARGE_CD = 4, CHARGE_DIST = 12, CHARGE_TIME = 0.32;
 const PARRY_WINDOW = 0.2, BLOCK_ARC = 120, BLOCK_SPEED = 3.4;
+const BLOCK_HOLD = 0.16;                       // hold dodge this long = block, release earlier = roll
+const MAG = 12, PISTOL_DMG = 24, PISTOL_RATE = 0.2, PISTOL_RANGE = 90, RELOAD_T = 1.05, DRAWN_T = 1.2, HOLSTER_REFILL = 3;
 const ULT_RADIUS = 15, ULT_DMG = 85, RALLY_TIME = 15, RALLY_MUL = 1.3;
 const BLUE = 0x2f6bd8, RED = 0xd8302f, WHITE = 0xffffff, GOLD = 0xffd060;
 
@@ -49,7 +54,7 @@ function buildShield() {
 
 export class CaptainAmerica extends Hero {
   constructor(game) {
-    super(game, { id: 'captain', name: 'Captain America', color: '#2f6bd8', maxHp: 190, walkSpeed: WALK, runSpeed: RUN, jumpSpeed: JUMP, gravity: GRAV, radius: 0.45, height: 1.88, airControl: 0.55, mass: 1.1 });
+    super(game, { id: 'captain', name: 'Captain America', color: '#2f6bd8', maxHp: 190, walkSpeed: WALK, runSpeed: RUN, jumpSpeed: JUMP, gravity: GRAV, radius: 0.45, height: 1.88, airControl: 0.55, mass: 1.1, usesAim: true, aimPreset: { fov: 52, distance: 2.6, shoulder: 0.85, height: 1.6 } });
     this.timers = new Timers();
     this.mode = 'normal';       // normal | charge | roll | ult
     this.modeT = 0;
@@ -64,6 +69,9 @@ export class CaptainAmerica extends Hero {
     this.thrownMesh = null; this.blockMesh = null;
     // block
     this.blocking = false; this.blockT = 0; this.blockCool = 1; this.parryFx = 0;
+    this.dodgeT = 0;            // >0 while a dodge press is pending (tap = roll, hold = block)
+    // sidearm
+    this.pistol = null; this.ammo = MAG; this.pCd = 0; this.reloadT = 0; this.drawnT = 0; this.holstered = true; this.idleT = 0; this._crimeAt = 0;
     this.stepT = 0; this.fov = 0; this._impactVy = 0; this.rallyFx = 0; this.ultT = 0; this.chargeFx = 0;
   }
 
@@ -71,6 +79,8 @@ export class CaptainAmerica extends Hero {
     this.mode = 'normal'; this.actionT = 0; this.gravityScale = 1; this.jumped2 = false;
     this.thrownMesh ??= buildShield();
     this.blockMesh ??= buildShield();
+    this.pistol ??= buildPistol();
+    this.ammo = MAG; this.reloadT = 0; this.pCd = 0; this.drawnT = 0; this.dodgeT = 0; this.holstered = null; this._holster(true);
     this.blockMesh.userData.tilt.rotation.x = Math.PI / 2;   // face forward (disc normal -> +Z)
     this.blockMesh.userData.tilt.rotation.z = 0;
     this.blockMesh.visible = false; this.thrownMesh.visible = false;
@@ -88,6 +98,7 @@ export class CaptainAmerica extends Hero {
     if (this.blockMesh) { this.blockMesh.visible = false; this.blockMesh.parent?.remove(this.blockMesh); }
     if (this.thrownMesh) this.thrownMesh.parent?.remove(this.thrownMesh);
     this.heldVisible = false; this._setHeld(true);
+    this.pistol?.parent?.remove(this.pistol); this.holstered = null; this.dodgeT = 0;
     g.cam.fovKick = 0;
   }
 
@@ -96,7 +107,8 @@ export class CaptainAmerica extends Hero {
     return [
       { action: 'special', label: 'Shield Throw', cooldown: this.shieldOut ? 1 : 0, active: this.shieldOut || this.holding },
       { action: 'ability', label: 'Shield Charge', cooldown: this.cooldownFrac('charge'), active: this.mode === 'charge' },
-      { action: 'ability2', label: 'Block / Parry', cooldown: 0, active: this.blocking },
+      { action: 'dodge', label: 'Roll / Block (hold)', cooldown: this.cooldownFrac('dodge'), active: this.blocking },
+      { action: 'aim', label: this.reloadT > 0 ? 'Reloading...' : `Pistol ${this.ammo}/${MAG}`, cooldown: this.reloadT > 0 ? this.reloadT / RELOAD_T : 0, active: this.aiming },
       { action: 'ultimate', label: 'Avengers Assemble', cooldown: 1 - this.focus / 100, active: rally || this.mode === 'ult' },
     ];
   }
@@ -193,10 +205,20 @@ export class CaptainAmerica extends Hero {
     const normal = this.mode === 'normal';
     const free = normal && this.actionT <= 0;
 
-    // --- block (hold ability2)
-    const wantBlock = input.down('ability2') && free && !this.shieldOut && !this.holding && this.mode === 'normal';
-    if (wantBlock && !this.blocking) { this.blocking = true; this.blockT = 0; this.parryOk = this.blockCool >= 0.3; this._setHeld(false); this.blockMesh.visible = true; g.audio?.play('whoosh', { volume: 0.4, pitch: 0.8 }); this.setAnim('idle'); }
-    else if (!wantBlock && this.blocking) { this.blocking = false; this.blockCool = 0; this.blockMesh.visible = false; if (!this.shieldOut) this._setHeld(true); }
+    // --- dodge button: tap = roll, hold = block / parry
+    const dn = input.down('dodge');
+    if (input.pressed('dodge') && normal && !this.blocking && (this.cooldowns.dodge || 0) <= 0) {
+      if (!free || this.shieldOut || this.holding || this.aiming) { this.dodgeT = 0; this._dodge(input); }
+      else this.dodgeT = 1e-4;
+    }
+    if (this.dodgeT > 0) {
+      if (!dn) { this.dodgeT = 0; if (normal) this._dodge(input); }
+      else {
+        this.dodgeT += dt;
+        if (this.dodgeT >= BLOCK_HOLD) { this.dodgeT = 0; if (free && !this.shieldOut && !this.holding) this._startBlock(); }
+      }
+    }
+    if (this.blocking && !(dn && free && !this.shieldOut && !this.holding)) this._stopBlock();
     if (this.blocking) {
       this.blockT += dt;
       if (this.blockT <= PARRY_WINDOW + dt) this._reflect(5);
@@ -205,7 +227,7 @@ export class CaptainAmerica extends Hero {
 
     // --- shield throw: tap = throw, hold = charge
     if (!this.shieldOut && free && !this.blocking) {
-      if (input.pressed('special')) { this.holding = true; this.throwHold = 0; }
+      if (this.pressedSpecial()) { this.holding = true; this.throwHold = 0; }
       if (this.holding) {
         this.throwHold += dt;
         if (this.throwHold > CHARGE_MIN) {
@@ -220,14 +242,13 @@ export class CaptainAmerica extends Hero {
       }
     } else if (this.holding && !free) { this.holding = false; this.throwHold = 0; }
 
-    if (!this.holding || this.throwHold <= CHARGE_MIN) this._xhair(g, null);
+    this._pistol(dt, input, normal);
     if (input.pressed('attack') && !this.blocking) {
       if (free && !this.holding) this._combo();
       else if (normal) this.bufferT = 0.3;
     }
     if (this.bufferT > 0) { this.bufferT -= dt; if (free && !this.holding && !this.blocking && normal) { this.bufferT = 0; this._combo(); } }
     if (input.pressed('ability') && normal && !this.blocking && (this.cooldowns.charge || 0) <= 0) this._charge(input);
-    if (input.pressed('dodge') && normal && (this.cooldowns.dodge || 0) <= 0) this._dodge(input);
     if (input.pressed('ultimate') && this.focus >= 100 && this.mode !== 'ult') this._startUlt();
 
     this._rally(dt);
@@ -241,6 +262,85 @@ export class CaptainAmerica extends Hero {
   }
 
   defaultMovement() {}
+
+  _startBlock() {
+    const g = this.game;
+    this.blocking = true; this.blockT = 0; this.parryOk = this.blockCool >= 0.3; this._setHeld(false); this.blockMesh.visible = true;
+    g.audio?.play('whoosh', { volume: 0.4, pitch: 0.8 }); this.setAnim('idle');
+  }
+  _stopBlock() {
+    this.blocking = false; this.blockCool = 0; this.blockMesh.visible = false;
+    if (!this.shieldOut) this._setHeld(true);
+  }
+
+  // ---- sidearm: hold aim -> M1911, fire = hitscan, 12 rounds, auto reload --------------------------------
+  _holster(on) {
+    if (this.holstered === on || !this.pistol) return;
+    this.holstered = on;
+    const m = this.model, p = this.pistol;
+    p.parent?.remove(p);
+    if (on) { (m.group).add(p); p.position.set(-0.26, m.height * 0.5, 0.04); p.rotation.set(Math.PI * 0.5, 0, 0.1); p.scale.setScalar(1); }
+    else { (m.handR ?? m.group).add(p); p.position.set(0, 0, 0); p.rotation.set(0, 0, 0); }
+  }
+  _startReload() {
+    if (this.reloadT > 0 || this.ammo >= MAG) return;
+    this.reloadT = RELOAD_T; this.game.audio?.play('clap', { volume: 0.25, pitch: 1.8 });
+  }
+  _pistol(dt, input, normal) {
+    const g = this.game;
+    this.pCd -= dt; this.drawnT -= dt;
+    if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) { this.ammo = MAG; g.audio?.play('clap', { volume: 0.3, pitch: 2.2 }); } }
+    const armed = this.aiming && normal && !this.blocking && !(this.holding && this.throwHold > CHARGE_MIN) && !g.weapons?.equipped && !this.dead;
+    const charging = this.holding && this.throwHold > CHARGE_MIN;
+    this._xhair(g, charging ? 'shield' : armed ? 'pistol' : null);
+    if (armed) {
+      this.drawnT = DRAWN_T; this.idleT = 0;
+      if (this.ammo <= 0) this._startReload();
+      else if (input.pressed('reload')) this._startReload();
+      if (this.firePressed() && this.pCd <= 0 && this.reloadT <= 0) { if (this.ammo > 0) this._shoot(); else this._startReload(); }
+    } else this.idleT += dt;
+    if (this.idleT > HOLSTER_REFILL && this.ammo < MAG) { this.ammo = MAG; this.reloadT = 0; }
+    this._holster(this.drawnT <= 0 || !!g.weapons?.equipped);
+    if (this.pistol) this.pistol.visible = this.mode !== 'ult';
+  }
+  _shoot() {
+    const g = this.game;
+    this.ammo--; this.pCd = PISTOL_RATE;
+    const p = this.pistol; p.updateWorldMatrix(true, true);
+    const muzzle = p.userData.muzzle.getWorldPosition(new THREE.Vector3());
+    aimInfo(this, PISTOL_RANGE, _aim);
+    const dir = _aim.point.clone().sub(muzzle);
+    if (dir.lengthSq() < 0.25) dir.copy(g.cam.forward);
+    dir.normalize();
+    // headshot test (same idea as the weapons system): head sphere along the ray, enemies only
+    let head = null, bt = PISTOL_RANGE;
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || e.untargetable) continue;
+      _c.set(e.pos.x - muzzle.x, e.pos.y + e.height * 0.92 - muzzle.y, e.pos.z - muzzle.z);
+      const proj = _c.dot(dir); if (proj < 0 || proj > bt) continue;
+      const r = Math.max(0.17, e.radius * 0.45);
+      if (_c.lengthSq() - proj * proj <= r * r) { bt = proj; head = e; }
+    }
+    const dmg = PISTOL_DMG * this.dm() * (head ? 2 : 1);
+    const hit = g.combat?.hitscan?.({ origin: muzzle, dir, range: PISTOL_RANGE, damage: dmg, team: 'player', source: this, tracer: 0xffe9a0, width: 0.45, knockback: 3, stun: 0.15, heavy: !!head });
+    if (hit) {
+      const hs = !!head && hit.target === head;
+      if (hs) g.fx?.text?.(_w.set(hit.target.pos.x, hit.target.pos.y + hit.target.height + 0.9, hit.target.pos.z), 'HEADSHOT', 0xff6a30, { size: 1.2 });
+      g.hud?.hitMarker?.(hs);
+      this.registerHit();
+    }
+    // feel: recoil, flash, audio, rumble
+    g.cam.pitch += 0.012 * (0.85 + Math.random() * 0.3); g.cam.yaw += (Math.random() - 0.5) * 0.008;
+    g.fx?.flash?.(muzzle, 0xffc060, 3, 0.07);
+    g.fx?.glow?.(muzzle, 0xffd890, 0.9, 0.06);
+    g.fx?.burst?.(muzzle, 0xffb050, 3, 4, 0.12, 0.12);
+    g.cam.shake(0.07); rumble(g, 0.3, 0.3, 55);
+    g.audio?.play('gunshot', { pos: muzzle });
+    this.anim.t = 0;
+    g.events?.emit?.('weapon:fired', { weapon: 'pistol', pos: muzzle.clone() });
+    const now = performance.now();
+    if (now - this._crimeAt > 3000) { this._crimeAt = now; g.events?.emit?.('crime', { severity: 1, pos: muzzle.clone(), kind: 'shots' }); }
+  }
   _xhair(g, k) { if (this._xh !== k) { this._xh = k; g.hud?.setCrosshair?.(k); } }
 
   _blockVisual() {
@@ -285,12 +385,13 @@ export class CaptainAmerica extends Hero {
     let speed = base * mag;
     if (this.blocking) speed = Math.min(speed, BLOCK_SPEED * mag);
     else if (this.holding) speed *= 0.4;
+    else if (this.aiming) speed = Math.min(speed, WALK * 0.7 * mag);
     else if (busy) speed *= 0.4;
     const air = !this.onGround;
     const accel = air ? 20 : 60;
     this.vel.x = approach(this.vel.x, wish.x * speed, accel * dt);
     this.vel.z = approach(this.vel.z, wish.z * speed, accel * dt);
-    if (this.blocking || this.holding) {
+    if (this.blocking || this.holding || this.aiming) {
       _a.copy(cam.forward).setY(0); if (_a.lengthSq() > 0.01) this.faceTowards(_a, dt, 14);
     } else if (mag > 0.01 && !busy) this.faceTowards(wish, dt, air ? 6 : 14);
 
@@ -318,6 +419,7 @@ export class CaptainAmerica extends Hero {
     if (busy) this.setAnim(this.actionAnim, hs);
     else if (this.holding && this.throwHold > CHARGE_MIN) this.setAnim('charge');
     else if (this.blocking) this.setAnim(hs > 0.5 ? 'run' : 'idle', hs * 0.5);
+    else if (this.aiming && this.onGround) this.setAnim('shoot', hs);
     else if (this.onGround) this.setAnim(hs > 0.5 ? (hs > RUN + 0.5 ? 'sprint' : 'run') : 'idle', hs);
     else this.setAnim(this.vel.y > 0 ? 'jump' : 'fall', hs);
   }

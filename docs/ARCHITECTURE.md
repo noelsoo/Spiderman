@@ -201,7 +201,7 @@ Every raw pad is translated to the W3C standard layout first (DS4 raw layouts fo
 |---|---|---|---|
 | move / look | WASD / mouse | L stick / R stick | |
 | jump | Space | ✕ | |
-| dodge | C, Left Ctrl | ○ | |
+| dodge | C, Left Ctrl | ○ | Captain America: tap = combat roll, hold (≥0.16 s) = Block / Parry |
 | attack | LMB, J | □ | when a gun is out, LMB fires instead (J still melees) |
 | special | RMB, K | R1 | when a gun is out, RMB aims instead (K still works) |
 | ability | E | L1 | |
@@ -326,3 +326,7 @@ Villain modules are imported from `src/enemies/villains/index.js` (one import li
 
 ## Boss fairness rule (all heroes must be able to win)
 Every boss must be hittable by melee-only heroes (Wolverine, Hulk, Captain America): flying/teleporting bosses must regularly land, dive, get stunned or be grounded (e.g. after a combo of damage, after an attack, or by web/hammer/shield hits) for windows of ≥ 3 s. Ranged heroes must also be able to damage them at range. Telegraph big attacks (enemy.windup) so Spider-Man's spider-sense / parry and dodges work. Use phases at 66% / 33% hp.
+
+## Captain America sidearm (src/heroes/CaptainAmerica.js, squad/pistol.js)
+Built-in M1911 (not a shop item). `usesAim: true`: hold aim (RMB / L2) → shoulder aim, crosshair `'pistol'`, pistol moves from the hip holster to `model.handR`; fire (LMB / R2) → `game.combat.hitscan` (24 dmg, headshot x2 → `HEADSHOT` + `hud.hitMarker(true)`), tracer, `fx.flash`, camera recoil, audio `gunshot`, emits `weapon:fired` / throttled `crime`. 12-round magazine, auto reload when empty (1.05 s), manual with R, silent top-up after 3 s holstered. Shield throw stays on special (K / R1, quick RMB tap, hold to charge) and the shield stays on his arm. Block/Parry moved off L2 to the dodge button: tap C/○ = roll, hold = block (0.2 s parry window). A shop gun (`game.weapons.equipped`) takes precedence and holsters the pistol.
+Hero UI (src/ui/hud.js): `ORDER` lists all 11 heroes; the character wheel is an 11-slice radial (short names), the hero strip scales down on narrow screens, the hero select grid is 4 columns x 3 rows with symbiote emblems (Venom black/white, Carnage red/black, Anti-Venom white/black).

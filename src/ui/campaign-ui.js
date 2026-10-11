@@ -177,7 +177,7 @@ export function installCampaignUI(HUD, H) {
       const info = HERO_INFO[id], h = g.heroes?.[id];
       const c = document.createElement('div');
       c.className = 'card'; c.dataset.id = id;
-      c.style.setProperty('--c', cssColor(h?.color, info.color));
+      c.style.setProperty('--c', info.color || cssColor(h?.color, '#fff'));
       c.innerHTML = `${id === rec ? '<em class="recb">RECOMMENDED</em>' : ''}<div class="pt">${EMBLEM[id]}</div><div class="ct"><h3>${esc(h?.name || info.name)}</h3><ul>${info.powers.slice(0, 3).map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>`;
       grid.appendChild(c);
       this._item(scr, c, { act: () => this._startFromSelect(id, data) });
@@ -186,18 +186,20 @@ export function installCampaignUI(HUD, H) {
     const idx = ORDER.indexOf(this.lastHero || 'spiderman');
     scr.index = idx >= 0 ? idx : 0;
     const N = ORDER.length;
+    const COLS = 4, ROWS = Math.ceil(N / COLS);
     scr.nav = (dir) => {
       const i = scr.index;
-      if (i === N) { // back button
-        if (dir === 'up') this._focus(N - 4 + (this._hcol ?? 0) % 4);
+      if (i === N) { // back button: up returns to the last row, same column (clamped)
+        if (dir === 'up') this._focus(Math.min(N - 1, (ROWS - 1) * COLS + (this._hcol ?? 0)));
         return true;
       }
-      const col = i % 4, row = (i / 4) | 0;
+      const col = i % COLS, row = (i / COLS) | 0;
       this._hcol = col;
-      if (dir === 'left') this._focus(row * 4 + (col + 3) % 4);
-      else if (dir === 'right') this._focus(row * 4 + (col + 1) % 4);
-      else if (dir === 'up') { if (row > 0) this._focus(i - 4); else this._focus(N); }
-      else if (dir === 'down') { if (row < 1) this._focus(i + 4); else this._focus(N); }
+      const rowLen = (r) => Math.min(COLS, N - r * COLS);
+      if (dir === 'left') this._focus(row * COLS + (col + rowLen(row) - 1) % rowLen(row));
+      else if (dir === 'right') this._focus(row * COLS + (col + 1) % rowLen(row));
+      else if (dir === 'up') { if (row > 0) this._focus(i - COLS); else this._focus(N); }
+      else if (dir === 'down') { if (row < ROWS - 1) this._focus(Math.min(N - 1, i + COLS)); else this._focus(N); }
       return true;
     };
   };
