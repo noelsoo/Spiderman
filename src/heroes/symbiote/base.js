@@ -398,7 +398,7 @@ export class SymbioteHero extends Hero {
     if (enemy) this.dest.copy(a.point).addScaledVector(a.normal, 1.6);
     else if (a.free) this.dest.copy(a.point);
     else if (a.normal.y > 0.5) this.dest.copy(a.point).y += this.height * 0.6;
-    else this.dest.copy(a.point).addScaledVector(a.normal, this.radius + 0.3);
+    else { this.dest.copy(a.point).addScaledVector(a.normal, this.radius + 0.3); if (a.top) this.dest.y += 1.1; }
     this.state = 'launch'; this.stateT = 0; this.launchT = 0; this._stall = 0;
     this.launchSp = Math.max(this.vel.length() * 0.8, L.startSp ?? 14);
     this.gravityScale = 0; this.jumpBoostT = 0; this.dashT = 0; this.onGround = false;
@@ -418,7 +418,7 @@ export class SymbioteHero extends Hero {
     this.airT = 0.2; this.airJumps = 1;
     if (arrived && this.launchWall && !this.launchTarget && this.launchTop) {
       // landed on the roof edge: vault over it
-      this.vel.set(-this.anchorN.x * 6, 10, -this.anchorN.z * 6);
+      this.vel.set(-this.anchorN.x * 7, 14, -this.anchorN.z * 7);
       this.wallLock = 0.6; this.stickWall = 0; this.yaw = Math.atan2(-this.anchorN.x, -this.anchorN.z);
       this.game.audio?.play('whoosh', { volume: 0.6 });
     } else if (arrived && this.launchWall && !this.launchTarget) {

@@ -380,6 +380,15 @@ function weaveInto(h, W, H, period, amp) {
     h[y * W + x] += (cell ? Math.sin(Math.PI * fu) : Math.sin(Math.PI * fv)) * amp;
   }
 }
+/** cheap in-place 3x3 box blur (no canvas filter: software canvases make ctx.filter very slow) */
+function blur3(h, W, n = 1) {
+  const t = new Float32Array(h.length);
+  for (let k = 0; k < n; k++) {
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) { const i = y * W + x; t[i] = (h[i] * 2 + h[y * W + ((x + 1) % W)] + h[y * W + ((x - 1 + W) % W)]) * 0.25; }
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) { const i = y * W + x; h[i] = (t[i] * 2 + t[((y + 1) % W) * W + x] + t[((y - 1 + W) % W) * W + x]) * 0.25; }
+  }
+  return h;
+}
 function noiseInto(h, W, H, r, amp) { for (let i = 0; i < W * H; i++) h[i] += (r() - 0.5) * amp; }
 
 /** normal map for the Spider-Man suit: raised web lines + fine knit. Same UV layout as webTexture(kind). */
@@ -483,14 +492,14 @@ export function skinMaps(base = '#4f9d3b', vein = '#2f6e2a', seed = 4) {
     cx.globalAlpha = 1;
   };
   veins(ctx, vein, 3.2, 0.7);
-  blurOn(hctx, 1.2 * s); hctx.strokeStyle = '#fff'; hctx.lineWidth = 3 * s; const rc = rng(seed + 2); // skin creases / knuckle folds
+  hctx.strokeStyle = '#fff'; hctx.lineWidth = 3 * s; const rc = rng(seed + 2); // skin creases / knuckle folds
   for (let i = 0; i < 40; i++) { const x = rc() * W, y = rc() * W, l = (14 + rc() * 40) * s; hctx.globalAlpha = 0.7; hctx.beginPath(); hctx.arc(x, y, l, 0.3, 1.9); hctx.stroke(); }
-  hctx.globalAlpha = 1; blurOff(hctx);
+  hctx.globalAlpha = 1;
   ctx.strokeStyle = 'rgba(20,60,20,0.35)'; ctx.lineWidth = 2 * s; const rc2 = rng(seed + 2); for (let i = 0; i < 40; i++) { const x = rc2() * W, y = rc2() * W, l = (14 + rc2() * 40) * s; ctx.beginPath(); ctx.arc(x, y, l, 0.3, 1.9); ctx.stroke(); }
-  blurOn(hctx, 1.4 * s); veins(hctx, '#fff', 4, 0.9); blurOff(hctx);
+  veins(hctx, '#fff', 4, 0.9);
   const rp = rng(seed + 9);
   ctx.fillStyle = 'rgba(15,50,15,0.35)';
-  const h = heightOf(hctx, W, W);
+  const h = blur3(heightOf(hctx, W, W), W, 1);
   for (let i = 0; i < W * W / 14; i++) { // pores
     const x = (rp() * W) | 0, y = (rp() * W) | 0; ctx.fillRect(x, y, 1, 1); h[y * W + x] -= 0.22; if (x + 1 < W) h[y * W + x + 1] -= 0.08;
   }
@@ -667,7 +676,6 @@ export function armorMaps(seed = 1) {
   const [hc, hx] = canvas(W, W); hx.fillStyle = '#808080'; hx.fillRect(0, 0, W, W);
   const [cc, cx] = canvas(W, W); cx.fillStyle = '#f0f0f0'; cx.fillRect(0, 0, W, W);
   const vs = [0, 0.25, 0.5, 0.75], hs = [0.14, 0.36, 0.6, 0.82];
-  blurOn(hx, 0.8 * s);
   // stepped plates
   for (let i = 0; i < 9; i++) {
     const x = r() * W * 0.8, y = r() * W * 0.85, w = (0.12 + r() * 0.16) * W, h = (0.07 + r() * 0.1) * W;
@@ -688,11 +696,10 @@ export function armorMaps(seed = 1) {
     hx.fillStyle = '#fff'; hx.beginPath(); hx.arc(u * W + o * s, v * W - 10 * s, 2.3 * s, 0, 6.3); hx.fill();
     cx.fillStyle = 'rgba(0,0,0,0.35)'; cx.beginPath(); cx.arc(u * W + o * s, v * W - 10 * s, 3 * s, 0, 6.3); cx.fill();
   }
-  blurOff(hx);
   // edge wear scratches
   cx.strokeStyle = 'rgba(255,255,255,0.7)'; cx.lineWidth = 1 * s;
   for (let i = 0; i < 70; i++) { const x = r() * W, y = r() * W, a = r() * 6.3, l = (4 + r() * 14) * s; cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); cx.stroke(); }
-  const h = heightOf(hx, W, W); noiseInto(h, W, W, r, 0.035);
+  const h = blur3(heightOf(hx, W, W), W); noiseInto(h, W, W, r, 0.035);
   const normal = ntex(heightToNormal(h, W, W, 2.6));
   const [rc, rx] = canvas(W, W); rx.fillStyle = '#9c9c9c'; rx.fillRect(0, 0, W, W);
   for (let i = 0; i < W * W / 50; i++) { const v = 100 + r() * 120; rx.fillStyle = `rgb(${v},${v},${v})`; rx.fillRect(r() * W, r() * W, 1.5, 1.5); }
@@ -773,16 +780,15 @@ export function veinNormal(seed = 3, strength = 3.0) {
   if (texCache.has(key)) return texCache.get(key);
   const W = Math.min(texRes(), 512), s = W / 512, r = rng(seed);
   const [c, ctx] = canvas(W, W); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W);
-  blurOn(ctx, 1.5 * s); ctx.lineCap = 'round'; ctx.strokeStyle = '#fff';
+  ctx.lineCap = 'round'; ctx.strokeStyle = '#fff';
   const branch = (x, y, a, len, w) => {
     if (len < 4 || w < 0.6) return;
     ctx.lineWidth = w * s; ctx.beginPath(); ctx.moveTo(x, y);
     for (let i = 0; i < 5; i++) { a += (r() - 0.5) * 0.8; x += Math.cos(a) * len * 0.2 * s; y += Math.sin(a) * len * 0.2 * s; ctx.lineTo(x, y); }
-    ctx.stroke(); branch(x, y, a + 0.2, len * 0.8, w * 0.8); if (r() < 0.8) branch(x, y, a + (r() - 0.5) * 2, len * 0.6, w * 0.65);
+    ctx.stroke(); branch(x, y, a + 0.2, len * 0.8, w * 0.8); if (r() < 0.5) branch(x, y, a + (r() - 0.5) * 2, len * 0.6, w * 0.65);
   };
-  for (let i = 0; i < 12; i++) branch(r() * W, r() * W, r() * 6.3, 90, 6);
-  blurOff(ctx);
-  const h = heightOf(ctx, W, W); noiseInto(h, W, W, r, 0.04);
+  for (let i = 0; i < 8; i++) branch(r() * W, r() * W, r() * 6.3, 90, 6);
+  const h = blur3(heightOf(ctx, W, W), W, 2); noiseInto(h, W, W, r, 0.04);
   const t = ntex(heightToNormal(h, W, W, strength)); texCache.set(key, t); return t;
 }
 /** spider emblem with tendril edges. style 'venom' (white on transparent) | 'anti' (black on transparent) */
