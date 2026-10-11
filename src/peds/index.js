@@ -55,6 +55,15 @@ export class Ped {
     this.game.scene.add(this.root);
   }
   get alive() { return this.active && !this.dead; }
+  get isPed() { return true; }
+  // Enemy-compatible no-op surface, so hero code that treats combat hits as enemies never crashes on a ped.
+  get isBoss() { return false; }
+  get stunned() { return this.state === 'down'; }
+  get webbed() { return (this._webT || 0) > 0; }
+  web(s = 2) { this._webT = s; this.takeDamage(1, { kind: 'web' }); }
+  launch(o = {}) { if (o.vel) this.vel.copy(o.vel); }
+  interrupt() {}
+  _stun() {}
   get center() { return _x.set(this.pos.x, this.pos.y + H * 0.55, this.pos.z); }
 
   setAnim(state, speed = 1) {
@@ -98,7 +107,7 @@ export class Peds {
       fx.explosion = (pos, radius = 4, color) => { orig(pos, radius, color); this.blast(pos, radius * 2.2); };
       fx._pedWrapped = true;
     }
-    g.events.on('weapon:fired', (e) => this._onGunshot(e));
+    // gunshots, melee, abilities and blasts reach peds through game.combat (combat._targets includes peds)
     this.built = true;
     this._setAnchor();
     this.reset();
@@ -338,7 +347,7 @@ export class Peds {
     const driving = g.vehicles?.driving;
     let spawns = 3;
     let activeCount = 0;
-    if (playing && !driving) this._playerMelee(dt);
+    // player melee now reaches peds through game.combat
 
     for (const p of this.list) {
       if (!p.active) continue;

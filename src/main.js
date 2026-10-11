@@ -46,11 +46,17 @@ import { Wolverine } from './heroes/Wolverine.js';
 import { CaptainAmerica } from './heroes/CaptainAmerica.js';
 import { Hawkeye } from './heroes/Hawkeye.js';
 import { ScarletWitch } from './heroes/ScarletWitch.js';
+import { VenomHero } from './heroes/VenomHero.js';
+import { CarnageHero } from './heroes/CarnageHero.js';
+import { AntiVenomHero } from './heroes/AntiVenomHero.js';
 
-export const HERO_ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet'];
+const _camA = new THREE.Vector3(), _camB = new THREE.Vector3();
+
+export const HERO_ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'carnage', 'antivenom'];
 const HERO_CLASSES = {
   spiderman: SpiderMan, ironman: IronMan, hulk: Hulk, thor: Thor,
   wolverine: Wolverine, captain: CaptainAmerica, hawkeye: Hawkeye, scarlet: ScarletWitch,
+  venom: VenomHero, carnage: CarnageHero, antivenom: AntiVenomHero,
 };
 
 class Game {
@@ -272,6 +278,7 @@ class Game {
         this.peds.update(dt);
         const focus = this.vehicles.driving ?? this.player;
         this.cam.update(rawDt, focus.pos, this.input.look, { speed: focus.vel?.length?.() ?? 0 });
+        this._cameraAvoidVehicles(focus);
         this.campaign.update?.(dt);
         this.enemies.update(dt);
         this.combat.update(dt);
@@ -289,8 +296,48 @@ class Game {
     this.world.update(dt);
     this.audio.update?.(rawDt);
     this.hud.update(rawDt);
+    this._hideNearCameraOccluders();
     this.post.render(rawDt);
+    this._restoreOccluders();
   }
+
+  /** Pull the camera in front of any car that sits between it and the hero (cars are not physics boxes). */
+  _cameraAvoidVehicles(focus) {
+    const cam = this.camera, ray = this.combat?._rayVehicle;
+    if (!ray) return;
+    const head = _camA.set(focus.pos.x, focus.pos.y + 1.5, focus.pos.z);
+    const dir = _camB.subVectors(cam.position, head);
+    const len = dir.length();
+    if (len < 0.5) return;
+    dir.divideScalar(len);
+    const hit = this.combat._rayVehicle(head, dir, len + 0.4);
+    if (hit && hit.v !== this.vehicles.driving) {
+      const d = Math.max(0.9, head.distanceTo(hit.point) - 0.35);
+      cam.position.copy(head).addScaledVector(dir, d);
+    }
+  }
+
+  /** Anything the camera is inside of or nearly touching (cars, people, the hero up close) is hidden for this frame,
+   *  so a passing car or a crowd can never fill the screen with the inside of a mesh (the black-screen bug). */
+  _hideNearCameraOccluders() {
+    const hidden = this._occluded || (this._occluded = []);
+    hidden.length = 0;
+    const cp = this.camera.position;
+    const hide = (obj) => { if (obj && obj.visible) { obj.visible = false; hidden.push(obj); } };
+    for (const v of this.vehicles.list ?? []) {
+      if (!v.active || !v.group?.visible || v === this.vehicles.driving) continue;
+      const hl = (v.spec?.L ?? 4.6) / 2 + 0.6, hw = (v.spec?.W ?? 2) / 2 + 0.6;
+      const dx = cp.x - v.pos.x, dz = cp.z - v.pos.z;
+      if (dx * dx + dz * dz > (hl + 1) * (hl + 1)) continue;
+      const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
+      const lon = dx * sy + dz * cy, lat = dx * cy - dz * sy;
+      if (Math.abs(lon) < hl && Math.abs(lat) < hw && cp.y < v.pos.y + 2.4) hide(v.group);
+    }
+    const near = (e, r) => { const dx = cp.x - e.pos.x, dz = cp.z - e.pos.z, dy = cp.y - (e.pos.y + 1); return dx * dx + dz * dz < r * r && Math.abs(dy) < 1.6; };
+    for (const p of this.peds.list ?? []) if (p.active && !p.dead && p.root && near(p, 0.75)) hide(p.root);
+    for (const e of this.enemies.list ?? []) if (e.alive && e.root && near(e, (e.radius ?? 0.5) + 0.5)) hide(e.root);
+  }
+  _restoreOccluders() { for (const o of this._occluded ?? []) o.visible = true; if (this._occluded) this._occluded.length = 0; }
 
   cycleHero(dir) {
     const i = HERO_ORDER.indexOf(this.player.id);

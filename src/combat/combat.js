@@ -84,7 +84,7 @@ export class Combat {
       g.cam?.shake?.(heavy ? 0.18 : 0.05);
       if (heavy && g._slowmo <= 0.05) g.slowmo?.(0.05, 0.05);
     }
-    g.player?.registerHit?.();
+    if (!e.isPed) g.player?.registerHit?.();
     return true;
   }
 
@@ -103,7 +103,13 @@ export class Combat {
 
   _targets(team) {
     if (team === 'enemy') { const p = this.game.player; return p && !p.dead ? [p] : []; }
-    return this.enemyList;
+    // player attacks hit enemies AND bystanders / police (peds), so every hero ability, projectile and blast affects them
+    const out = this._tgt || (this._tgt = []);
+    out.length = 0;
+    for (const e of this.enemyList) out.push(e);
+    const peds = this.game.peds?.list;
+    if (peds) for (const p of peds) if (p.active && !p.dead && !p.hidden) out.push(p);
+    return out;
   }
 
   // ===================================================================== melee
