@@ -588,6 +588,7 @@ export function buildBackdrop(ctx) {
   const SX = 110, SZ = 80;
   for (let x = -2500; x <= 2500; x += SX) for (let z = -2740; z <= 2740; z += SZ) {
     if (x > X0 && x < X1 && z > Z0 && z < Z1) continue;
+    if (x > L.FAR_X - 50 && x < L.RIVER_X + 50) continue; // the river keeps running past the map ends
     if (rng() < 0.2) continue;
     const dist = Math.hypot(x - 60, z - 0);
     const nb = 1 + ((rng() * 2) | 0);
@@ -595,6 +596,7 @@ export function buildBackdrop(ctx) {
       const w = snap3(rr(rng, 18, 38)), d = snap3(rr(rng, 18, 32));
       const bx = x + (nb === 1 ? 0 : (n ? 1 : -1) * 20) + rr(rng, -4, 4), bz = z + rr(rng, -8, 8);
       if (bx + w / 2 > X0 && bx - w / 2 < X1 && bz + d / 2 > Z0 && bz - d / 2 < Z1) continue;
+      if (bx + w / 2 > L.FAR_X - 12 && bx - w / 2 < L.RIVER_X + 12) continue;
       let h = (14 + 200 * Math.pow(rng(), 2.2)) * (0.45 + 0.55 * Math.exp(-Math.pow(dist / 2200, 2)));
       if (x < L.MINX - 60) h *= 0.6;
       h = Math.max(12, Math.round(h / 3.6) * 3.6);

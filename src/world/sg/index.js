@@ -1,6 +1,7 @@
 // SingaporeWorld: Marina Bay map. Same public API as src/world/index.js (World).
 import * as THREE from 'three';
 import { Bucket, ChunkSet, mulberry32 } from '../geo.js';
+import { SgChunks } from './chunks.js';
 import { makeTextures, SHOP_DEFS } from '../textures.js';
 import { makeMaterials } from '../materials.js';
 import { resolveQuality } from '../../render/quality.js';
@@ -80,7 +81,7 @@ export class SingaporeWorld {
     const reflect = !low;
     const ctx = {
       rng, rng2: mulberry32(4242), physics, quality, T, M, group: this.group, landmarks: this.landmarks,
-      chunks: new ChunkSet(500), refl: reflect ? new ChunkSet(1e7) : null, pool: null,
+      chunks: new SgChunks(800), refl: reflect ? new ChunkSet(1e7) : null, pool: null,
       specs: this.specs, minimapB: this.minimap.buildings, minimapPark: [], palmSpots: [], detail: !low,
       isWater: inWater,
     };
