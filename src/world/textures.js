@@ -532,6 +532,24 @@ function skylineStrip(rng) {
   return t;
 }
 
+
+/** Far-LOD window atlas: 8 x 8 windows (16 px cells). Pier texel (3, 3) is plain: roofs sample it with a constant uv. */
+function farAtlas() {
+  const S = 128, C = 16;
+  const [c, g] = cv(S, S), [ce, ge] = cv(S, S);
+  g.fillStyle = gray(225); g.fillRect(0, 0, S, S);
+  ge.fillStyle = '#000'; ge.fillRect(0, 0, S, S);
+  let seed = 1234567;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+    const px = x * C + 4, py = y * C + 4;
+    g.fillStyle = gray(70 + rnd() * 30); g.fillRect(px, py, 9, 10);
+    if (rnd() < 0.16) { ge.fillStyle = rgb(255, 180 + rnd() * 40, 100 + rnd() * 40); ge.fillRect(px, py, 9, 10); }
+  }
+  const t = mk(c, 4), e = mk(ce, 4);
+  return { map: t, emissive: e };
+}
+
 export function makeTextures(renderer, rng, quality = 'high') {
   const low = quality === 'low';
   const aniso = Math.min(quality === 'ultra' ? 16 : 8, renderer.capabilities.getMaxAnisotropy?.() ?? 4);
@@ -565,6 +583,7 @@ export function makeTextures(renderer, rng, quality = 'high') {
     dot: dot(),
     pool: pool(),
     skyline: skylineStrip(rng),
+    far: farAtlas(),
     NEON_COUNT: NEON_WORDS.length,
   };
 }

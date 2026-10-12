@@ -3,7 +3,8 @@
 // billboard plaza. Everything is merged into per-chunk buckets (a handful of draw calls).
 import * as THREE from 'three';
 import { Bucket } from './geo.js';
-import { L, addBox, avenueX, streetZ, colX, rowZ, isPark } from './city.js';
+import { addBox } from './city.js';
+import { L, avenueX, streetZ, colX, rowZ, isPark, BLOCKS, hasAve, hasSt, nearestAve, nearestSt, pmod } from './grid.js';
 import { sidewalkFaces, faceFrame } from './shops.js';
 
 const SW = 0.15; // sidewalk top
@@ -27,23 +28,28 @@ const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vect
 
 // ------------------------------------------------------------------ lamps + traffic lights
 export function buildLamps(ctx, group, quality) {
-  const lampPoles = [];
   const heads = ctx.chunks; // glow chunk buckets are keyed by position
-  for (const [x, z, dx, dz] of ctx.lamps) {
+  for (const [x, z, dx, dz, core = true] of ctx.lamps) {
     const st = heads.bucket(x, z, 'street'), lg = heads.bucket(x, z, 'lamp');
-    st.cylV(x, SW, z, 0.2, 0.5, 6, STEEL, 0.14);
-    st.cylV(x, SW + 0.5, z, 0.12, 7.8, 6, [0.13, 0.14, 0.16], 0.075);
     const yaw = Math.atan2(dx, dz), k = 0.7071;
     const hx = x + dx * k * 1.35, hz = z + dz * k * 1.35;
-    st.boxXf(x + dx * k * 0.7, 8.35, z + dz * k * 0.7, 0.09, 0.09, 1.5, yaw, [0.13, 0.14, 0.16]);
-    st.boxXf(hx, 8.42, hz, 0.62, 0.1, 1.0, yaw, [0.1, 0.1, 0.11]);
+    if (core) {
+      st.cylV(x, SW, z, 0.2, 0.5, 6, STEEL, 0.14);
+      st.cylV(x, SW + 0.5, z, 0.12, 7.8, 6, [0.13, 0.14, 0.16], 0.075);
+      st.boxXf(x + dx * k * 0.7, 8.35, z + dz * k * 0.7, 0.09, 0.09, 1.5, yaw, [0.13, 0.14, 0.16]);
+      st.boxXf(hx, 8.42, hz, 0.62, 0.1, 1.0, yaw, [0.1, 0.1, 0.11]);
+    } else { // outer districts: a leaner pole (fewer vertices to build and keep in memory)
+      st.cylV(x, SW, z, 0.14, 8.2, 4, [0.13, 0.14, 0.16], 0.08);
+      st.boxXf(x + dx * k * 0.7, 8.35, z + dz * k * 0.7, 0.09, 0.09, 1.5, yaw, [0.13, 0.14, 0.16]);
+    }
     lg.boxXf(hx, 8.33, hz, 0.5, 0.07, 0.86, yaw, [1.0, 0.74, 0.4]);
     ctx.pools.push([hx, hz, quality === 'low' ? 8 : 10, [1.0, 0.7, 0.36], 1]);
-    lampPoles.push([x, z, dx, dz]);
   }
 }
 
 const CYCLE = 26;
+const ikey = (a, s) => (a + 16) * 64 + (s + 20);
+const offOf = (a, s) => pmod(a * 37 + s * 53, 17) / 17 * CYCLE;
 export class TrafficLights {
   constructor(ctx, group, quality) {
     this.t = 0;
@@ -51,42 +57,49 @@ export class TrafficLights {
     const poles = [];
     for (const [x, z, dx, dz] of ctx.lamps) {
       const a = Math.round((x - avenueX(0)) / 100), s = Math.round((z - streetZ(0)) / 70);
-      if (a < 0 || a > 10 || s < 0 || s > 17) continue;
-      const key = a * 18 + s;
+      if (!hasAve(a) || !hasSt(s)) continue;
+      const key = ikey(a, s);
       let it = this.inter.get(key);
-      if (!it) { it = { a, s, x: avenueX(a), z: streetZ(s), off: ((a * 37 + s * 53) % 17) / 17 * CYCLE, ns: -1, ew: -1, zIdx: [], xIdx: [] }; this.inter.set(key, it); }
+      if (!it) { it = { a, s, x: avenueX(a), z: streetZ(s), off: offOf(a, s), ns: -1, ew: -1, zIdx: [], xIdx: [] }; this.inter.set(key, it); }
       poles.push([x, z, dx, dz, it]);
     }
-    const n = poles.length;
-    this.mesh = null;
-    if (!n) return;
+    this.meshes = [];
+    this.dirty = new Set();
+    if (!poles.length) { this.list = []; return; }
+    // one instanced mesh per 400 m tile (frustum culled, hidden by the tile LOD when far)
+    const byTile = new Map();
+    for (const p of poles) { const k = ctx.chunks.keyOf(p[0], p[1]); (byTile.get(k) || byTile.set(k, []).get(k)).push(p); }
     const g = new THREE.CircleGeometry(0.105, 8);
-    this.mesh = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), n * 6);
-    this.mesh.frustumCulled = false;
+    const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
     const col = new THREE.Color(0.02, 0.02, 0.02);
-    let idx = 0;
-    for (const [x, z, dx, dz, it] of poles) {
-      const st = ctx.chunks.bucket(x, z, 'street');
-      // head facing along z (seen by traffic on the avenue) and head facing along x (traffic on the street)
-      for (const faceZ of [true, false]) {
-        const fx = faceZ ? 0 : dx, fz = faceZ ? dz : 0;
-        const cx = x + fx * 0.42 + (faceZ ? 0 : 0), cz = z + fz * 0.42;
-        st.boxXf(cx, 5.1, cz, faceZ ? 0.42 : 0.34, 1.1, faceZ ? 0.34 : 0.42, 0, [0.04, 0.045, 0.05]);
-        st.boxXf(x + fx * 0.2, 5.1, z + fz * 0.2, faceZ ? 0.12 : 0.3, 0.12, faceZ ? 0.3 : 0.12, 0, STEEL);
-        const lx = cx + fx * 0.19, lz = cz + fz * 0.19;
-        for (let k = 0; k < 3; k++) {
-          _e.set(0, faceZ ? (dz > 0 ? 0 : Math.PI) : (dx > 0 ? Math.PI / 2 : -Math.PI / 2), 0);
-          _q.setFromEuler(_e); _p.set(lx, 5.1 + 0.34 - k * 0.34, lz); _s.set(1, 1, 1);
-          _m.compose(_p, _q, _s);
-          this.mesh.setMatrixAt(idx, _m); this.mesh.setColorAt(idx, col);
-          (faceZ ? it.zIdx : it.xIdx).push(idx);
-          idx++;
+    for (const [key, list] of byTile) {
+      const mesh = new THREE.InstancedMesh(g, mat, list.length * 6);
+      let idx = 0;
+      for (const [x, z, dx, dz, it] of list) {
+        const st = ctx.chunks.bucket(x, z, 'street');
+        // head facing along z (seen by traffic on the avenue) and head facing along x (traffic on the street)
+        for (const faceZ of [true, false]) {
+          const fx = faceZ ? 0 : dx, fz = faceZ ? dz : 0;
+          const cx = x + fx * 0.42, cz = z + fz * 0.42;
+          st.boxXf(cx, 5.1, cz, faceZ ? 0.42 : 0.34, 1.1, faceZ ? 0.34 : 0.42, 0, [0.04, 0.045, 0.05]);
+          st.boxXf(x + fx * 0.2, 5.1, z + fz * 0.2, faceZ ? 0.12 : 0.3, 0.12, faceZ ? 0.3 : 0.12, 0, STEEL);
+          const lx = cx + fx * 0.19, lz = cz + fz * 0.19;
+          for (let k = 0; k < 3; k++) {
+            _e.set(0, faceZ ? (dz > 0 ? 0 : Math.PI) : (dx > 0 ? Math.PI / 2 : -Math.PI / 2), 0);
+            _q.setFromEuler(_e); _p.set(lx, 5.1 + 0.34 - k * 0.34, lz); _s.set(1, 1, 1);
+            _m.compose(_p, _q, _s);
+            mesh.setMatrixAt(idx, _m); mesh.setColorAt(idx, col);
+            (faceZ ? it.zIdx : it.xIdx).push([mesh, idx]);
+            idx++;
+          }
         }
       }
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      group.add(mesh);
+      this.meshes.push(mesh);
+      (ctx.lodExtra ||= []).push({ x: list[0][0], z: list[0][1], mesh });
     }
-    _m.makeScale(0, 0, 0); for (let k = idx; k < n * 6; k++) { this.mesh.setMatrixAt(k, _m); this.mesh.setColorAt(k, col); }
-    this.mesh.instanceMatrix.needsUpdate = true;
-    group.add(this.mesh);
     this.colors = [new THREE.Color(3.2, 0.22, 0.18), new THREE.Color(3.2, 2.2, 0.2), new THREE.Color(0.25, 3.0, 0.9), new THREE.Color(0.03, 0.03, 0.035)];
     this.list = [...this.inter.values()];
   }
@@ -101,7 +114,7 @@ export class TrafficLights {
 
   update(dt) {
     this.t += dt;
-    if (!this.mesh) return;
+    if (!this.meshes.length) return;
     let dirty = false;
     for (const it of this.list) {
       const u = (this.t + it.off) % CYCLE;
@@ -109,7 +122,7 @@ export class TrafficLights {
       if (ns !== it.ns) { this._set(it.zIdx, ns); it.ns = ns; dirty = true; }
       if (ew !== it.ew) { this._set(it.xIdx, ew); it.ew = ew; dirty = true; }
     }
-    if (dirty) this.mesh.instanceColor.needsUpdate = true;
+    if (dirty) { for (const m of this.dirty) m.instanceColor.needsUpdate = true; this.dirty.clear(); }
   }
 
   _set(idxs, state) {
@@ -117,15 +130,17 @@ export class TrafficLights {
     for (let h = 0; h < idxs.length; h += 3) {
       for (let k = 0; k < 3; k++) {
         const lit = state === 0 ? k === 0 : state === 1 ? k === 1 : k === 2;
-        this.mesh.setColorAt(idxs[h + k], lit ? this.colors[k === 0 ? 0 : k === 1 ? 1 : 2] : this.colors[3]);
+        const [mesh, i] = idxs[h + k];
+        mesh.setColorAt(i, lit ? this.colors[k === 0 ? 0 : k === 1 ? 1 : 2] : this.colors[3]);
+        this.dirty.add(mesh);
       }
     }
   }
 
   /** state of the intersection nearest to (x, z); out = { ns, ew, x, z } where ns/ew are 'red' | 'yellow' | 'green' */
   state(x, z, out = {}, t = this.t) {
-    const a = Math.min(10, Math.max(0, Math.round((x - avenueX(0)) / 100))), s = Math.min(17, Math.max(0, Math.round((z - streetZ(0)) / 70)));
-    const it = this.inter.get(a * 18 + s) || { off: ((a * 37 + s * 53) % 17) / 17 * CYCLE };
+    const a = nearestAve(x), s = nearestSt(z);
+    const it = this.inter.get(ikey(a, s)) || { off: offOf(a, s) };
     const [ns, ew] = TrafficLights.phase(it, t);
     out.ns = NAMES[ns]; out.ew = NAMES[ew]; out.x = avenueX(a); out.z = streetZ(s);
     return out;
@@ -239,12 +254,15 @@ function kiosk(ctx, rng, px, pz, yaw, nx) {
 }
 
 export function buildStreetProps(ctx, shops, quality) {
-  const rng = ctx.rng2;
   const q = quality === 'low' ? 0.4 : quality === 'medium' ? 0.75 : 1;
   const nearShop = (x, z) => shops.some((s) => Math.hypot(s.pos.x - x, s.pos.z - z) < 7);
-  for (let i = 0; i < L.COLS; i++) for (let j = 0; j < L.ROWS; j++) {
-    const cx = colX(i), cz = rowZ(j), x0 = cx - L.BW / 2, x1 = cx + L.BW / 2, z0 = cz - L.BD / 2, z1 = cz + L.BD / 2;
+  const rngN = ctx.rng2N;
+  for (const blk of BLOCKS) {
+    const { i, j, cx, cz } = blk;
+    const x0 = cx - L.BW / 2, x1 = cx + L.BW / 2, z0 = cz - L.BD / 2, z1 = cz + L.BD / 2;
     const park = isPark(i, j);
+    const rng = blk.core ? ctx.rng2 : rngN;
+    const qd = blk.core ? q : q * 0.5;
     // edges: curb coordinate, outward normal, tangent range
     const edges = [
       { nx: -1, nz: 0, c: x0, a: z0 + 8, b: z1 - 8, avenue: true }, { nx: 1, nz: 0, c: x1, a: z0 + 8, b: z1 - 8, avenue: true },
@@ -255,7 +273,7 @@ export function buildStreetProps(ctx, shops, quality) {
       const at = (t, inset) => e.nx !== 0 ? [e.c - e.nx * inset, t] : [t, e.c - e.nz * inset];
       const rand = () => e.a + rng() * (e.b - e.a);
       const place = (inset, fn, p) => {
-        if (rng() > p * q) return;
+        if (rng() > p * qd) return;
         const t = rand();
         const [px, pz] = at(t, inset);
         if (nearShop(px, pz)) return;
@@ -269,7 +287,7 @@ export function buildStreetProps(ctx, shops, quality) {
         place(3.0, (l, b, px, pz) => bags(l, rng, b, px, pz, yaw), 0.4);
         place(0.75, (l) => newsBoxes(l, rng), 0.35);
         place(0.75, (l) => mailbox(l), 0.2);
-        if (!e.avenue && rng() < 0.7 * q) {
+        if (!e.avenue && rng() < 0.7 * qd) {
           const t0 = e.a + rng() * (e.b - e.a - 14);
           for (let k = 0; k < 3; k++) { const [px, pz] = at(t0 + k * 5, 0.42); if (!nearShop(px, pz)) meter(Loc(ctx.chunks.bucket(px, pz, 'street'), px, pz, yaw)); }
         }
@@ -361,10 +379,11 @@ const PLAZA = { x: 100, z: -245 }; // avenueX(5), streetZ(5): the Times-Square-s
 export const PLAZA_POS = PLAZA;
 
 export function buildSigns(ctx, specs, group, quality) {
-  const rng = ctx.rng2;
   const screens = []; // { f, y0, y1, w, group }
   let nSign = 0;
   for (const s of specs) {
+    const rng = s.core ? ctx.rng2 : ctx.rng2N;
+    if (!s.core && (quality === 'low' || rng() > 0.2)) continue; // outer districts: a few neon signs only
     const faces = sidewalkFaces(ctx, s, 10);
     if (!faces.length) continue;
     // Times Square screens
@@ -378,7 +397,7 @@ export function buildSigns(ctx, specs, group, quality) {
       }
     }
     // neon signs above the shopfronts: street-facing, ~45% of buildings
-    if (quality === 'low' || rng() > 0.5) continue;
+    if (s.core && (quality === 'low' || rng() > 0.5)) continue;
     const c = faces[(rng() * faces.length) | 0];
     if (c.cornerGap < 6) continue;
     const F = faceFrame(c.f, 0.18), word = (rng() * ctx.T.NEON_COUNT) | 0;

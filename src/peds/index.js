@@ -7,10 +7,15 @@
 //       spawnCops(car, n)   dismissCops()   copsSee(pos, r)
 import * as THREE from 'three';
 import { buildCharacter } from '../models/index.js';
+import { L, nearestAve } from '../world/grid.js';
 
 const PZ0 = -595, PZP = 70, PX0 = -400, PXP = 100;
 const ZA = 9.6, ZB = 60.4, XA = 12.6, XB = 87.4;
-const Z_MIN = -598, Z_MAX = 598, X_MIN = -412.8, X_MAX = 512.8;
+// Sidewalk lines follow the world grid (PX0/PXP = avenueX, PZ0/PZP = streetZ). Walkable x spans are the two islands:
+// Manhattan (avenue 0 .. 17) and Brooklyn (avenue -9 .. -7); z spans every street (-14 .. 31).
+const Z_MIN = -1578, Z_MAX = 1578, X_MIN = -412.8, X_MAX = 1312.8, BK_MIN = -1312.8, BK_MAX = -1087.2;
+const RIVER_MID = (L.RIVER_X + L.FAR_X) / 2;
+const xClamp = (v, ref) => (ref < RIVER_MID ? clamp(v, BK_MIN + 6, BK_MAX - 6) : clamp(v, X_MIN + 6, X_MAX - 6));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -24,7 +29,7 @@ function nextCorner(c, dir, zAxis) {
   if (dir > 0) { if (loc < A - e) return base + k * per + A; if (loc < B - e) return base + k * per + B; return base + (k + 1) * per + A; }
   if (loc > B + e) return base + k * per + B; if (loc > A + e) return base + k * per + A; return base + (k - 1) * per + B;
 }
-const inRange = (c, zAxis) => (zAxis ? c > Z_MIN && c < Z_MAX : c > X_MIN && c < X_MAX);
+const inRange = (c, zAxis) => (zAxis ? c > Z_MIN && c < Z_MAX : (c > X_MIN && c < X_MAX) || (c > BK_MIN && c < BK_MAX));
 function onBlock(c, zAxis) {
   const base = zAxis ? PZ0 : PX0, per = zAxis ? PZP : PXP, A = zAxis ? ZA : XA, B = zAxis ? ZB : XB;
   const loc = ((c - base) % per + per) % per;
@@ -146,14 +151,14 @@ export class Peds {
       const zAxis = Math.random() < 0.5;
       let fixed, c;
       if (zAxis) {
-        const a = clamp(Math.round((ax + rnd(-maxR, maxR) - PX0) / PXP), 0, 9);
+        const a = nearestAve(ax + rnd(-maxR, maxR));
         fixed = PX0 + a * PXP + (Math.random() < 0.5 ? -XA : XA);
         c = clamp(az + rnd(-maxR, maxR), Z_MIN + 6, Z_MAX - 6);
         if (!inRange(fixed, false)) continue;
       } else {
-        const s = clamp(Math.round((az + rnd(-maxR, maxR) - PZ0) / PZP), 0, 17);
+        const s = clamp(Math.round((az + rnd(-maxR, maxR) - PZ0) / PZP), -14, 31);
         fixed = PZ0 + s * PZP + (Math.random() < 0.5 ? -ZA : ZA);
-        c = clamp(ax + rnd(-maxR, maxR), X_MIN + 6, X_MAX - 6);
+        c = xClamp(ax + rnd(-maxR, maxR), ax);
         if (!inRange(fixed, true)) continue;
       }
       const x = zAxis ? fixed : c, z = zAxis ? c : fixed;
@@ -488,9 +493,9 @@ export class Peds {
   _snapToLine(p) {
     // choose the closest of the two line families
     const x = p.pos.x, z = p.pos.z;
-    const a = clamp(Math.round((x - PX0) / PXP), 0, 9);
+    const a = nearestAve(x);
     const lx = [PX0 + a * PXP - XA, PX0 + a * PXP + XA];
-    const s = clamp(Math.round((z - PZ0) / PZP), 0, 17);
+    const s = clamp(Math.round((z - PZ0) / PZP), -14, 31);
     const lz = [PZ0 + s * PZP - ZA, PZ0 + s * PZP + ZA];
     let bestD = 1e9, bz = true, bf = 0;
     for (const f of lx) { const d = Math.abs(x - f); if (d < bestD && inRange(f, false)) { bestD = d; bz = true; bf = f; } }

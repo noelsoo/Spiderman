@@ -5,7 +5,7 @@
 // Nothing here ever requires a specific hero.
 import * as THREE from 'three';
 import { ENEMY_KINDS } from '../enemies/index.js';
-import { avenueX, streetZ, L as CITY } from '../world/city.js';
+import { avenueX, streetZ, inWater, L as CITY } from '../world/city.js';
 
 const _v = new THREE.Vector3();
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -70,7 +70,7 @@ export function groundPoint(c, center, r0, r1, out = new THREE.Vector3()) {
     if (b) { x = clamp(x, b.minX + 6, b.maxX - 6); z = clamp(z, b.minZ + 6, b.maxZ - 6); }
     const y = phys.heightAt(x, z, center.y + 2.5);
     if (Math.abs(y - center.y) > 3.2) continue;
-    if (x < CITY.RIVER_X + 10 && y < 5) continue;
+    if (inWater(x - 10) && y < 5) continue;
     _v.set(x, y + 0.9, z);
     if (phys.inside(_v)) continue;
     return out.set(x, y, z);

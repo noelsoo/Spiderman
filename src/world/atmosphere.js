@@ -130,7 +130,7 @@ export class Atmosphere {
     this.moon = new THREE.DirectionalLight(0x86a6ff, 0);
     scene.add(this.moon, this.moon.target);
     this.night = 0;
-    scene.fog = new THREE.FogExp2(0xcc8855, 0.00072);
+    scene.fog = new THREE.FogExp2(0xcc8855, 0.00064);
 
     // reflection environment rendered from a tiny copy of the sky
     this.envScene = new THREE.Scene();
@@ -164,7 +164,7 @@ export class Atmosphere {
     this.moon.intensity = 0.55 * THREE.MathUtils.smoothstep(-e, -0.02, 0.2);
     const fog = this.game.scene.fog;
     fog.color.copy(p.fog);
-    fog.density = 0.00072 * (e < 0.05 ? 1.15 : 1);
+    fog.density = 0.00064 * (e < 0.05 ? 1.15 : 1);
     this.game.scene.background = null;
     for (const m of this.wallMats) m.emissiveIntensity = p.glow;
     if (this.waterUniforms) this.updateWater();

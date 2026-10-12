@@ -38,6 +38,7 @@ export function makeMaterials(T, quality = 'high') {
     redbrick: wall(F.redbrick, { roughness: 1, metalness: 0.6, envMapIntensity: 1.0 }),
     limestone: wall(F.limestone, { roughness: 1, metalness: 0.7, envMapIntensity: 1.0 }),
     concrete: wall(F.concrete, { roughness: 1, metalness: 0.6, envMapIntensity: 1.0 }),
+    // far LOD: one flat-shaded window atlas for every distant tile (tinted per vertex)
     storefront: wall(T.storefront, { roughness: 0.55, envMapIntensity: 0.8 }),
     roof: Mat({ map: T.roof, vertexColors: true, roughness: 0.95 }),
     sidewalk: Mat({ map: T.sidewalk, normalMap: T.sidewalkN, vertexColors: true, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
@@ -52,6 +53,8 @@ export function makeMaterials(T, quality = 'high') {
     neon: new THREE.MeshBasicMaterial({ map: T.neon, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, color: new THREE.Color(1, 1, 1) }),
     ad: new THREE.MeshBasicMaterial({ map: T.screens, vertexColors: true, color: new THREE.Color(1.2, 1.2, 1.2) }),
   };
+  M.far = new THREE.MeshLambertMaterial({ map: T.far.map, emissiveMap: T.far.emissive, emissive: 0xffffff, emissiveIntensity: 1, vertexColors: true });
+  wallMats.push(M.far);
   M.sidewalk.userData.keep = true;
   // the asphalt ground plane is huge: sharpen its tiling response
   if (M.asphalt.normalMap) M.asphalt.normalMap.anisotropy = M.asphalt.map.anisotropy;

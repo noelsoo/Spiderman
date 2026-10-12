@@ -7,7 +7,7 @@
 //   exit = interact (F / triangle, handled by main.js -> tryInteract)
 //   Drive-by shooting lives in weapons.updateDriving() (RMB/L1 aim, LMB/R1 fire; this file only suppresses cam auto-recenter while aiming).
 import * as THREE from 'three';
-import { L } from '../world/city.js';
+import { L, inWater } from '../world/city.js';
 import { KINDS, SPECS, PAINTS, VAN_PAINTS, TAXI_YELLOW, POLICE_WHITE, CarModel, CarInstancer, initCarAssets } from './models.js';
 import { Vehicle } from './Vehicle.js';
 import { initAI, driveAI, randomLanePlacement, randomCurbPlacement, snapToLane, axisZ } from './traffic.js';
@@ -313,7 +313,7 @@ export class Vehicles {
     if (forced) cands.unshift([-hw - 1, -1.5], [hw + 1, -1.5]);
     for (const [lat, lon] of cands) {
       const x = v.pos.x + rx * lat + sy * lon, z = v.pos.z + rz * lat + cy * lon;
-      if (x < L.RIVER_X + 3) continue;
+      if (inWater(x - 3) || inWater(x + 3)) continue;
       let ok = true;
       for (const y of [v.pos.y + 0.3, v.pos.y + 1.0, v.pos.y + 1.7]) { if (phys.inside(_v.set(x, y, z))) { ok = false; break; } }
       if (!ok) continue;
@@ -479,7 +479,7 @@ export class Vehicles {
     const landed = v.vertical(dt, gF, gR, gC);
     if (landed > 5) { maxImpact = Math.max(maxImpact, landed * 0.6); this._crashFx(v, landed * 0.7, 0); }
     // river
-    if (v.pos.x < L.RIVER_X - 1 && v.pos.y < 0.6 && gC < 0.2 && !v.airborne && v.sinking === 0) {
+    if (inWater(v.pos.x + 1) && v.pos.y < 0.6 && gC < 0.2 && !v.airborne && v.sinking === 0) {
       v.sinking = 0.001; v.invuln = 99;
       this.game.fx?.burst?.(v.pos, 0xcfe8ff, 24, 6, 0.8, 0.5);
       this.game.fx?.ring?.(_v.set(v.pos.x, 0.2, v.pos.z), 5, 0xcfe8ff);
@@ -593,7 +593,8 @@ export class Vehicles {
       if (v === this.driving) {
         this._exit(true);
         const p = this.game.player;
-        p.pos.set(L.RIVER_X + 9, 0.3, v.pos.z); p.vel.set(3, 7, 0);
+        const east = v.pos.x > (L.RIVER_X + L.FAR_X) / 2;
+        p.pos.set(east ? L.RIVER_X + 9 : L.FAR_X - 9, 0.3, v.pos.z); p.vel.set(east ? 3 : -3, 7, 0);
         this.game.hud?.toast?.('Car sunk! Swam to the quay');
       }
       v.sinking = 0; v.invuln = 0; v.pitch = v.roll = 0; v.vel.set(0, 0, 0);

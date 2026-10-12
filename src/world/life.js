@@ -8,12 +8,23 @@ const _c = new THREE.Color();
 
 export function makeTrees(ctx, group) {
   const all = ctx.trees;
-  const makeSet = (trees, detail) => {
-    if (!trees.length) return;
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3322 }), canMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const geos = {};
+  const geo = (detail) => geos[detail] ||= (() => {
     const trunkG = new THREE.CylinderGeometry(0.22, 0.34, 3.4, 5); trunkG.translate(0, 1.7, 0);
     const canG = new THREE.IcosahedronGeometry(2.6, detail); canG.scale(1, 1.15, 1); canG.translate(0, 5.4, 0);
-    const trunk = new THREE.InstancedMesh(trunkG, new THREE.MeshLambertMaterial({ color: 0x4a3322 }), trees.length);
-    const can = new THREE.InstancedMesh(canG, new THREE.MeshLambertMaterial({ color: 0xffffff }), trees.length);
+    return { trunkG, canG };
+  })();
+  // one instanced pair per 400 m tile and detail level: frustum culled, and hidden by the tile LOD when the tile is far away
+  const groups = new Map();
+  for (const t of all) {
+    const k = ctx.chunks.keyOf(t[0], t[1]) * 2 + (t[4] ? 1 : 0);
+    (groups.get(k) || groups.set(k, []).get(k)).push(t);
+  }
+  for (const [k, trees] of groups) {
+    const { trunkG, canG } = geo(k & 1 ? 1 : 0);
+    const trunk = new THREE.InstancedMesh(trunkG, trunkMat, trees.length);
+    const can = new THREE.InstancedMesh(canG, canMat, trees.length);
     trees.forEach((t, i) => {
       _o.position.set(t[0], 0, t[1]); _o.rotation.set(0, t[3] * 6.28, 0); _o.scale.setScalar(t[2]); _o.updateMatrix();
       trunk.setMatrixAt(i, _o.matrix); can.setMatrixAt(i, _o.matrix);
@@ -23,10 +34,10 @@ export function makeTrees(ctx, group) {
       can.setColorAt(i, _c);
     });
     can.castShadow = true; can.receiveShadow = true; trunk.receiveShadow = true;
+    trunk.computeBoundingSphere(); can.computeBoundingSphere();
     group.add(trunk, can);
-  };
-  makeSet(all.filter((t) => t[4]), 1);
-  makeSet(all.filter((t) => !t[4]), 0);
+    (ctx.lodExtra ||= []).push({ x: trees[0][0], z: trees[0][1], mesh: trunk }, { x: trees[0][0], z: trees[0][1], mesh: can });
+  }
 }
 
 export class Clouds {
@@ -58,12 +69,14 @@ export class Clouds {
 
 export class Steam {
   constructor(rng, group, tex, quality) {
-    const vents = quality === 'low' ? 5 : 12, per = 16;
+    const v0 = quality === 'low' ? 5 : 12, vents = v0 + (quality === 'low' ? 5 : 14), per = 16;
     this.n = vents * per;
     this.pos = new Float32Array(this.n * 3); this.col = new Float32Array(this.n * 3);
     this.base = []; this.age = new Float32Array(this.n);
     for (let v = 0; v < vents; v++) {
-      const x = avenueX(1 + ((rng() * 8) | 0)) + (rng() < 0.5 ? -9.5 : 9.5), z = streetZ(2 + ((rng() * 14) | 0)) + (rng() < 0.5 ? -4 : 4);
+      // the first v0 vents are the original Midtown ones; the rest are scattered over the outer districts
+      const x = v < v0 ? avenueX(1 + ((rng() * 8) | 0)) + (rng() < 0.5 ? -9.5 : 9.5) : avenueX(1 + ((rng() * 16) | 0)) + (rng() < 0.5 ? -9.5 : 9.5);
+      const z = v < v0 ? streetZ(2 + ((rng() * 14) | 0)) + (rng() < 0.5 ? -4 : 4) : streetZ(-12 + ((rng() * 42) | 0)) + (rng() < 0.5 ? -4 : 4);
       for (let k = 0; k < per; k++) { this.base.push(x, z); this.age[v * per + k] = rng() * 4; }
     }
     const g = new THREE.BufferGeometry();

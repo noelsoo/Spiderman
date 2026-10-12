@@ -8,7 +8,7 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3
 const BLACK = 0x07070c, PURPLE = 0x7a3cff;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
-const alive = (h, range, from = null) => {
+export const alive = (h, range, from = null) => {
   const f = from || h.pos, out = [];
   for (const e of h.game.enemies?.list ?? []) {
     if (!e.alive || e.untargetable) continue;
@@ -26,7 +26,7 @@ export function symImpact(h, p, size = 1) {
   fx.flash(p, PURPLE, 2.5 * size, 0.12);
 }
 
-function tendrilTo(h, target, o = {}) {
+export function tendrilTo(h, target, o = {}) {
   const getTo = typeof target === 'function' ? target : (out) => out.copy(target.center ?? target.pos);
   const side = o.side ?? (Math.random() < 0.5 ? -1 : 1);
   return h.tendrils.spawn({
@@ -34,7 +34,7 @@ function tendrilTo(h, target, o = {}) {
     to: getTo, life: o.life ?? 0.7, grow: o.grow ?? 0.12, width: o.width ?? 0.13, wiggle: o.wiggle ?? 0.7, delay: o.delay ?? 0, arc: o.arc ?? 0.1,
   });
 }
-function tendrilBurst(h, n, len = 9, life = 0.4, from = null) {
+export function tendrilBurst(h, n, len = 9, life = 0.4, from = null) {
   const c = (from || h._center(new THREE.Vector3())).clone();
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + Math.random() * 0.4, el = rnd(-0.1, 0.8);
@@ -45,8 +45,8 @@ function tendrilBurst(h, n, len = 9, life = 0.4, from = null) {
 
 // =============================================================================== SYMBIOTE
 /** Symbiote Strike: tendrils impale the target, launch it, then slam it back down. */
-export function symbioteStrike(h, e) {
-  if (!h.useCooldown('special', 2.4)) return false;
+export function symbioteStrike(h, e, key = 'special', cd = 2.4) {
+  if (!h.useCooldown(key, cd)) return false;
   const mul = h._dmgMul();
   const dir = new THREE.Vector3(e.pos.x - h.pos.x, 0, e.pos.z - h.pos.z).normalize();
   h.yaw = Math.atan2(dir.x, dir.z);
@@ -83,10 +83,10 @@ export function symbioteStrike(h, e) {
 }
 
 /** Tendril Tear: yank every enemy in range into a ring, then explode outward. */
-export function tendrilTear(h) {
+export function tendrilTear(h, key = 'tear', cd = 7) {
   const list = alive(h, 15).sort((x, y) => Math.hypot(x.pos.x - h.pos.x, x.pos.z - h.pos.z) - Math.hypot(y.pos.x - h.pos.x, y.pos.z - h.pos.z)).slice(0, 7);
   if (!list.length) return false;
-  if (!h.useCooldown('tear', 7)) return false;
+  if (!h.useCooldown(key, cd)) return false;
   const mul = h._dmgMul();
   h.lash = { kind: 'tear', t: 0, dir: h.forward, dur: 1.15, pulse: 99 };
   h.setAnim('cast', 1.2); h._play('symbiote'); h._play('venom', { volume: 0.5 });
@@ -208,7 +208,7 @@ export function landSlam(h) {
   h._fx('shockwave', h.pos.clone().setY(h.pos.y + 0.1), r, sym ? BLACK : 0xffffff);
   h._fx('ring', h.pos.clone().setY(h.pos.y + 0.2), r * 0.7, sym ? PURPLE : 0xffd080, 0.4);
   h._fx('dust', h.pos.clone(), 14, r * 0.5);
-  if (sym) tendrilBurst(h, big ? 10 : 5, r * 0.9, 0.35, h.pos.clone().setY(h.pos.y + 0.4));
+  if (sym) { tendrilBurst(h, big ? 10 : 5, r * 0.9, 0.35, h.pos.clone().setY(h.pos.y + 0.4)); h.bs?.slamPin?.(h.pos, r * 0.7); }
   h._impact(big ? 0.9 : 0.6, sym); h.game.cam.shake(big ? 0.55 : 0.4); h._rumble(0.9, 0.5, 170); h._play('heavyhit');
 }
 

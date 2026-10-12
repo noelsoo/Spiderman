@@ -1,10 +1,21 @@
 // Road grid helpers + traffic AI (lane following, turns at intersections, signals, following distance, pedestrians).
 // Avenues run along Z at x = avenueX(a); streets run along X at z = streetZ(s). Drive on the right.
 import * as THREE from 'three';
-import { L, avenueX, streetZ } from '../world/city.js';
+import { L, avenueX, streetZ, hasDriveAve, hasSt, ST_RANGE } from '../world/city.js';
 
-export const NA = 10;           // avenues 0..9 are drivable (avenue 10 sits on the world edge)
-export const NS = 18;
+// Node indices are the real avenue / street indices (avenueX(a), streetZ(s)): Manhattan avenues 0..17 (18 is on the map edge),
+// Brooklyn avenues -9..-7 (a separate island across the river), streets -14..31.
+export const AVE_MIN = -9, AVE_MAX = 17, ST_MIN = ST_RANGE[0], ST_MAX = ST_RANGE[1];
+const MAIN_X0 = () => nodeX(0), MAIN_X1 = () => nodeX(17), BK_X0 = () => nodeX(-9), BK_X1 = () => nodeX(-7);
+const RIVER_MID = (L.RIVER_X + L.FAR_X) / 2;
+/** nearest drivable avenue index to a coordinate */
+const nearAve = (x) => {
+  const a = Math.round((x - nodeX(0)) / 100);
+  if (hasDriveAve(a)) return a;
+  if (a < AVE_MIN) return AVE_MIN;
+  if (a > AVE_MAX) return AVE_MAX;
+  return a < -3.5 ? -7 : 0;
+};
 export const AVE_HALF = L.AVE_W / 2, ST_HALF = L.ST_W / 2;
 export const AVE_LANES = [2.9, 6.3];
 export const ST_LANES = [2.7];
@@ -23,7 +34,7 @@ const laneOff = (dir, lane) => (axisZ(dir) ? AVE_LANES[Math.min(lane, 1)] : ST_L
 const entryDist = (dir) => (axisZ(dir) ? ST_HALF + 2.5 : AVE_HALF + 2.5);
 export function nodeNeighbor(A, S, dir) {
   const a = A + DIRS[dir][0], s = S + DIRS[dir][1];
-  return a < 0 || a >= NA || s < 0 || s >= NS ? null : [a, s];
+  return !hasDriveAve(a) || !hasSt(s) ? null : [a, s];
 }
 /** Fixed coordinate of the lane centre line for a car travelling in `dir` on road (A for avenues, S for streets). */
 export function laneFixed(A, S, dir, lane) {
@@ -34,7 +45,7 @@ export function laneFixed(A, S, dir, lane) {
 // ------------------------------------------------------------------ traffic signals (global clock, per-intersection offset)
 const CYCLE = 26.4;
 export function signal(A, S, dir, t) {
-  const u = (t + ((A * 7 + S * 13) % 11) * 2.1) % CYCLE;
+  const u = (t + ((((A * 7 + S * 13) % 11) + 11) % 11) * 2.1) % CYCLE;
   const zAxis = axisZ(dir);
   const ph = u < 10 ? 0 : u < 11.8 ? 1 : u < 15.2 ? 2 : u < 21.2 ? 3 : u < 23 ? 4 : 5; // 0 avenue green,1 avenue yellow,2 all red,3 street green,4 street yellow,5 all red
   if (zAxis) return ph === 0 ? 'g' : ph === 1 ? 'y' : 'r';
@@ -47,11 +58,12 @@ export function randomLanePlacement(ax, az, minR, maxR, out = {}) {
   for (let tries = 0; tries < 18; tries++) {
     const onAve = Math.random() < 0.5;
     if (onAve) {
-      const lo = Math.max(0, Math.ceil((ax - maxR + 400) / 100)), hi = Math.min(NA - 1, Math.floor((ax + maxR + 400) / 100));
+      const lo = Math.ceil((ax - maxR + 400) / 100), hi = Math.floor((ax + maxR + 400) / 100);
       if (hi < lo) continue;
       const A = lo + ((Math.random() * (hi - lo + 1)) | 0);
-      const z = clamp(az + rnd(-maxR, maxR), nodeZ(0) + 16, nodeZ(NS - 1) - 16);
-      const s0 = Math.min(NS - 2, Math.max(0, Math.floor((z - nodeZ(0)) / 70)));
+      if (!hasDriveAve(A)) continue;
+      const z = clamp(az + rnd(-maxR, maxR), nodeZ(ST_MIN) + 16, nodeZ(ST_MAX) - 16);
+      const s0 = Math.min(ST_MAX - 1, Math.max(ST_MIN, ST_MIN + Math.floor((z - nodeZ(ST_MIN)) / 70)));
       const loc = z - nodeZ(s0);
       if (loc < 15 || loc > 55) continue;
       const dir = Math.random() < 0.5 ? 0 : 2, lane = Math.random() < 0.5 ? 0 : 1;
@@ -61,11 +73,13 @@ export function randomLanePlacement(ax, az, minR, maxR, out = {}) {
       out.x = x; out.z = z; out.dir = dir; out.lane = lane; out.A = A; out.S = dir === 0 ? s0 + 1 : s0; out.yaw = dir === 0 ? 0 : Math.PI;
       return out;
     } else {
-      const lo = Math.max(0, Math.floor((az - maxR + 595) / 70)), hi = Math.min(NS - 1, Math.ceil((az + maxR + 595) / 70));
+      const lo = Math.max(ST_MIN, Math.floor((az - maxR + 595) / 70)), hi = Math.min(ST_MAX, Math.ceil((az + maxR + 595) / 70));
       if (hi < lo) continue;
       const S = lo + ((Math.random() * (hi - lo + 1)) | 0);
-      const x = clamp(ax + rnd(-maxR, maxR), nodeX(0) + 20, nodeX(NA - 1) - 20);
-      const a0 = Math.min(NA - 2, Math.max(0, Math.floor((x - nodeX(0)) / 100)));
+      const xr = ax + rnd(-maxR, maxR), brook = xr < RIVER_MID;
+      const x = brook ? clamp(xr, BK_X0() + 20, BK_X1() - 20) : clamp(xr, MAIN_X0() + 20, MAIN_X1() - 20);
+      const a0 = Math.floor((x - nodeX(0)) / 100);
+      if (!hasDriveAve(a0) || !hasDriveAve(a0 + 1)) continue;
       const loc = x - nodeX(a0);
       if (loc < 19 || loc > 81) continue;
       const dir = Math.random() < 0.5 ? 1 : 3;
@@ -83,11 +97,12 @@ export function randomLanePlacement(ax, az, minR, maxR, out = {}) {
 export function randomCurbPlacement(ax, az, minR, maxR, out = {}) {
   for (let tries = 0; tries < 18; tries++) {
     if (Math.random() < 0.5) {
-      const lo = Math.max(0, Math.ceil((ax - maxR + 400) / 100)), hi = Math.min(NA - 1, Math.floor((ax + maxR + 400) / 100));
+      const lo = Math.ceil((ax - maxR + 400) / 100), hi = Math.floor((ax + maxR + 400) / 100);
       if (hi < lo) continue;
       const A = lo + ((Math.random() * (hi - lo + 1)) | 0);
-      const z = clamp(az + rnd(-maxR, maxR), nodeZ(0) + 20, nodeZ(NS - 1) - 20);
-      const s0 = Math.min(NS - 2, Math.max(0, Math.floor((z - nodeZ(0)) / 70)));
+      if (!hasDriveAve(A)) continue;
+      const z = clamp(az + rnd(-maxR, maxR), nodeZ(ST_MIN) + 20, nodeZ(ST_MAX) - 20);
+      const s0 = Math.min(ST_MAX - 1, Math.max(ST_MIN, ST_MIN + Math.floor((z - nodeZ(ST_MIN)) / 70)));
       const loc = z - nodeZ(s0);
       if (loc < 17 || loc > 53) continue;
       const side = Math.random() < 0.5 ? 1 : -1;
@@ -97,11 +112,13 @@ export function randomCurbPlacement(ax, az, minR, maxR, out = {}) {
       out.x = x; out.z = z; out.yaw = side > 0 ? Math.PI : 0;
       return out;
     } else {
-      const lo = Math.max(0, Math.floor((az - maxR + 595) / 70)), hi = Math.min(NS - 1, Math.ceil((az + maxR + 595) / 70));
+      const lo = Math.max(ST_MIN, Math.floor((az - maxR + 595) / 70)), hi = Math.min(ST_MAX, Math.ceil((az + maxR + 595) / 70));
       if (hi < lo) continue;
       const S = lo + ((Math.random() * (hi - lo + 1)) | 0);
-      const x = clamp(ax + rnd(-maxR, maxR), nodeX(0) + 24, nodeX(NA - 1) - 24);
-      const a0 = Math.min(NA - 2, Math.max(0, Math.floor((x - nodeX(0)) / 100)));
+      const xr = ax + rnd(-maxR, maxR), brook = xr < RIVER_MID;
+      const x = brook ? clamp(xr, BK_X0() + 24, BK_X1() - 24) : clamp(xr, MAIN_X0() + 24, MAIN_X1() - 24);
+      const a0 = Math.floor((x - nodeX(0)) / 100);
+      if (!hasDriveAve(a0) || !hasDriveAve(a0 + 1)) continue;
       const loc = x - nodeX(a0);
       if (loc < 23 || loc > 77) continue;
       const side = Math.random() < 0.5 ? 1 : -1;
@@ -123,13 +140,13 @@ export function snapToLane(x, z, yaw, lane = 0) {
   if (Math.abs(fz) >= Math.abs(fx)) dir = fz >= 0 ? 0 : 2; else dir = fx >= 0 ? 1 : 3;
   let A, S;
   if (axisZ(dir)) {
-    A = clamp(Math.round((x - nodeX(0)) / 100), 0, NA - 1);
+    A = nearAve(x);
     const sf = (z - nodeZ(0)) / 70;
-    S = clamp(dir === 0 ? Math.ceil(sf) : Math.floor(sf), 0, NS - 1);
+    S = clamp(dir === 0 ? Math.ceil(sf) : Math.floor(sf), ST_MIN, ST_MAX);
   } else {
-    S = clamp(Math.round((z - nodeZ(0)) / 70), 0, NS - 1);
+    S = clamp(Math.round((z - nodeZ(0)) / 70), ST_MIN, ST_MAX);
     const af = (x - nodeX(0)) / 100;
-    A = clamp(dir === 1 ? Math.ceil(af) : Math.floor(af), 0, NA - 1);
+    A = nearAve(dir === 1 ? Math.ceil(af) * 100 + nodeX(0) : Math.floor(af) * 100 + nodeX(0));
   }
   return { A, S, dir, lane };
 }

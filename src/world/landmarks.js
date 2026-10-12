@@ -1,9 +1,10 @@
 // Hand-built landmarks: Avengers Tower, Empire-State-style spire, suspension bridge.
 import * as THREE from 'three';
 import { STYLES } from './materials.js';
-import { emitTier, addBox, L, colX, rowZ, streetZ } from './city.js';
+import { emitTier, addBox, farBox, L, colX, rowZ, streetZ } from './city.js';
 
 const snapTo = (v, m) => Math.round(v / m) * m;
+const STONET = [0.9, 0.8, 0.64];
 
 function glowRing(ctx, x0, z0, x1, z1, y, h, col) {
   const g = ctx.glow;
@@ -100,6 +101,7 @@ export function buildBridge(ctx) {
   for (let x = xa; x > xb; x -= 100) {
     const x2 = Math.max(x - 100, xb), mx = (x + x2) / 2;
     prop(mx, zc).boxClosed(x2, y0, zc - hw, x, y1 - 0.05, zc + hw, 4, STEEL);
+    farBox(ctx, x2, y0, zc - hw, x, y1, zc + hw, [0.34, 0.38, 0.36]);
     ctx.chunks.bucket(mx, zc, 'asphalt').top(x2, zc - hw + 0.4, x, zc + hw - 0.4, y1, 8, [1, 1, 1]);
     for (const s of [-1, 1]) {
       prop(mx, zc).boxAll(x2, y1, zc + s * (hw - 0.4) - 0.2, x, y1 + 1.1, zc + s * (hw - 0.4) + 0.2, 2, RAIL);
@@ -113,6 +115,8 @@ export function buildBridge(ctx) {
   addBox(ctx, xb, y0, zc - hw, xa, y1, zc + hw, 'bridge', 'bridge_deck');
 
   // near abutment + far anchorage
+  farBox(ctx, xa - 12, 0, zc - 17, xa - 1, y0, zc + 17, STONET);
+  farBox(ctx, xb - 34, 0, zc - 22, xb - 2, 34, zc + 22, STONET);
   roofB(xa, zc).boxAll(xa - 12, 0, zc - 17, xa - 1, y0, zc + 17, 4, STONE);
   addBox(ctx, xa - 12, 0, zc - 17, xa - 1, y0, zc + 17, 'bridge', 'bridge_abut');
   roofB(xb, zc).boxAll(xb - 34, 0, zc - 22, xb - 2, 34, zc + 22, 4, STONE);
@@ -124,6 +128,7 @@ export function buildBridge(ctx) {
     for (const s of [-1, 1]) {
       const z0 = zc + s * 18 - 3.5, z1 = zc + s * 18 + 3.5;
       roofB(tx, zc).boxAll(tx - 5, -6, z0, tx + 5, topY, z1, 4, STONE);
+      farBox(ctx, tx - 5, 0, z0, tx + 5, topY, z1, STONET);
       addBox(ctx, tx - 5, -6, z0, tx + 5, topY, z1, 'bridge', 'bridge_tower');
       // flared footing
       roofB(tx, zc).boxAll(tx - 7, -6, z0 - 1.5, tx + 7, 4, z1 + 1.5, 4, STONE);
@@ -137,6 +142,7 @@ export function buildBridge(ctx) {
     }
     roofB(tx, zc).boxAll(tx - 4.5, 66, zc - 14.5, tx + 4.5, 74, zc + 14.5, 4, STONE);
     roofB(tx, zc).boxAll(tx - 4.5, 84, zc - 14.5, tx + 4.5, topY, zc + 14.5, 4, STONE);
+    farBox(ctx, tx - 4.5, 66, zc - 14.5, tx + 4.5, topY, zc + 14.5, STONET);
     addBox(ctx, tx - 4.5, 66, zc - 14.5, tx + 4.5, 74, zc + 14.5, 'bridge', 'bridge_beam');
     addBox(ctx, tx - 4.5, 84, zc - 14.5, tx + 4.5, topY, zc + 14.5, 'bridge', 'bridge_beam');
   }
@@ -189,4 +195,52 @@ export function buildBridge(ctx) {
 
   ctx.landmarks['Bridge Tower'] = new THREE.Vector3(t1, topY, zc);
   ctx.landmarks['Bridge Deck'] = new THREE.Vector3(-650, y1 + 0.05, zc);
+}
+
+/** Second crossing, further south (street 21): a steel through-truss on three stone piers. Frames are swing anchors over open water. */
+export function buildBridge2(ctx) {
+  const zc = streetZ(21), hw = 8.5, y0 = 13.5, y1 = 16.8;
+  const xa = -425, xb = -1000;
+  const STEEL = [0.16, 0.2, 0.2], STONE = [0.7, 0.6, 0.48], RED = [0.55, 0.14, 0.1], RAIL = [0.3, 0.32, 0.3];
+  const prop = (x, z) => ctx.chunks.bucket(x, z, 'prop');
+  for (let x = xa; x > xb; x -= 100) {
+    const x2 = Math.max(x - 100, xb), mx = (x + x2) / 2;
+    prop(mx, zc).boxClosed(x2, y0, zc - hw, x, y1 - 0.05, zc + hw, 4, STEEL);
+    ctx.chunks.bucket(mx, zc, 'asphalt').top(x2, zc - hw + 0.4, x, zc + hw - 0.4, y1, 8, [1, 1, 1]);
+    const mk = ctx.chunks.bucket(mx, zc, 'markings');
+    mk.top(x2, zc - 0.12, x, zc + 0.12, y1 + 0.04, 4, [0.95, 0.72, 0.12]);
+    farBox(ctx, x2, y0, zc - hw, x, y1, zc + hw, [0.3, 0.34, 0.34]);
+  }
+  addBox(ctx, xb, y0, zc - hw, xa, y1, zc + hw, 'bridge', 'bridge2_deck');
+  // abutments
+  prop(xa, zc).boxAll(xa - 14, 0, zc - hw, xa - 1, y0, zc + hw, 4, STONE); addBox(ctx, xa - 14, 0, zc - hw, xa - 1, y0, zc + hw, 'bridge', 'bridge2_abut');
+  prop(xb, zc).boxAll(xb - 30, 0, zc - hw, xb - 1, y0, zc + hw, 4, STONE); addBox(ctx, xb - 30, 0, zc - hw, xb - 1, y0, zc + hw, 'bridge', 'bridge2_abut');
+  farBox(ctx, xa - 14, 0, zc - hw, xa - 1, y0, zc + hw, [0.9, 0.8, 0.64]);
+  farBox(ctx, xb - 30, 0, zc - hw, xb - 1, y0, zc + hw, [0.9, 0.8, 0.64]);
+  // river piers
+  for (const px of [-575, -712, -850]) {
+    prop(px, zc).boxAll(px - 7, -6, zc - hw, px + 7, y0, zc + hw, 4, STONE);
+    addBox(ctx, px - 7, -6, zc - hw, px + 7, y0, zc + hw, 'bridge', 'bridge2_pier');
+    farBox(ctx, px - 7, 0, zc - hw, px + 7, y0, zc + hw, [0.9, 0.8, 0.64]);
+  }
+  // through-truss frames every 46 m: two posts + portal beam + knee braces
+  const H = 34;
+  for (let x = xa - 60; x > xb + 40; x -= 46) {
+    for (const s of [-1, 1]) {
+      const pz = zc + s * (hw + 0.6);
+      prop(x, zc).boxAll(x - 0.7, y1, pz - 0.7, x + 0.7, y1 + H, pz + 0.7, 2, RED);
+      addBox(ctx, x - 0.7, y1, pz - 0.7, x + 0.7, y1 + H, pz + 0.7, 'bridge', 'bridge2_post');
+      prop(x, zc).cylBetween([x, y1 + H - 9, pz - s * 0.7], [x, y1 + H, zc + s * (hw - 7)], 0.4, RED);
+    }
+    prop(x, zc).boxAll(x - 0.8, y1 + H, zc - hw - 1.4, x + 0.8, y1 + H + 1.6, zc + hw + 1.4, 2, RED);
+    addBox(ctx, x - 0.8, y1 + H, zc - hw - 1.4, x + 0.8, y1 + H + 1.6, zc + hw + 1.4, 'bridge', 'bridge2_beam');
+    farBox(ctx, x - 0.8, y1, zc - hw - 1.4, x + 0.8, y1 + H + 1.6, zc + hw + 1.4, [0.55, 0.2, 0.15]);
+    ctx.glow.boxAll(x - 0.4, y1 + H + 1.6, zc - 0.4, x + 0.4, y1 + H + 2.4, zc + 0.4, 1, [5, 0.3, 0.2]);
+  }
+  // long chords along the top of the frames (visual only)
+  for (const s of [-1, 1]) prop(-700, zc).boxAll(xb + 40, y1 + H - 0.3, zc + s * (hw + 0.6) - 0.35, xa - 60, y1 + H + 0.3, zc + s * (hw + 0.6) + 0.35, 2, RED);
+  for (let x = xa - 20; x > xb + 10; x -= 40) for (const s of [-1, 1]) {
+    prop(x, zc).boxAll(x - 0.1, y1, zc + s * (hw - 0.4) - 0.2, x + 0.1, y1 + 1.1, zc + s * (hw - 0.4) + 0.2, 1, RAIL);
+  }
+  ctx.landmarks['South Bridge'] = new THREE.Vector3(-712, y1 + 0.05, zc);
 }

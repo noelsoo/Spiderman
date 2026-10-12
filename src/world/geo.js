@@ -50,6 +50,11 @@ export class Bucket {
     this.quad([x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], 0, 1, 0, x0 / s, z1 / s, x1 / s, z0 / s, col);
   }
 
+  /** roof quad whose uv is a single texel (u, v): lets a windowed far-LOD atlas paint a plain roof */
+  topC(x0, z0, x1, z1, y, u, v, col = WHITE) {
+    this.quad([x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], 0, 1, 0, u, v, u, v, col);
+  }
+
   bottom(x0, z0, x1, z1, y, s = 8, col = WHITE) {
     this.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], 0, -1, 0, x0 / s, z0 / s, x1 / s, z1 / s, col);
   }
@@ -140,20 +145,23 @@ export class Bucket {
   }
 }
 
-/** Spatially chunked buckets: one merged Mesh per (chunk, material). */
+/** Spatially chunked buckets: one merged Mesh per (chunk, material). Tiles are `size` m squares. */
 export class ChunkSet {
-  constructor(size = 300) { this.size = size; this.map = new Map(); }
+  constructor(size = 400) { this.size = size; this.map = new Map(); }
+  keyOf(x, z) { return Math.floor((x + 3000) / this.size) * 1000 + Math.floor((z + 3000) / this.size); }
   bucket(x, z, name) {
     if (name === 'prop') name = 'roof';
-    const k = Math.floor((x + 3000) / this.size) * 1000 + Math.floor((z + 3000) / this.size);
+    const k = this.keyOf(x, z);
     let e = this.map.get(k);
     if (!e) { e = {}; this.map.set(k, e); }
     return (e[name] ||= new Bucket());
   }
-  /** returns meshes added to group */
+  /** Builds the meshes. Returns one record per tile: { key, x0, x1, z0, z1, meshes } (bounds in metres) for LOD switching. */
   build(group, mats, { cast = true, receive = true, skipCast = [] } = {}) {
-    let n = 0;
-    for (const e of this.map.values()) {
+    const tiles = [];
+    for (const [key, e] of this.map) {
+      const ix = Math.floor(key / 1000), iz = key % 1000, S = this.size;
+      const tile = { key, x0: ix * S - 3000, x1: (ix + 1) * S - 3000, z0: iz * S - 3000, z1: (iz + 1) * S - 3000, meshes: [] };
       for (const [name, b] of Object.entries(e)) {
         if (b.empty) continue;
         const m = new THREE.Mesh(b.toGeometry(), mats[name]);
@@ -162,9 +170,10 @@ export class ChunkSet {
         m.matrixAutoUpdate = false;
         m.updateMatrix();
         group.add(m);
-        n++;
+        tile.meshes.push(m);
       }
+      tiles.push(tile);
     }
-    return n;
+    return tiles;
   }
 }

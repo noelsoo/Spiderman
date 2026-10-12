@@ -8,7 +8,8 @@ const _d = new THREE.Vector3(), _u = new THREE.Vector3(), _v = new THREE.Vector3
 const SHOOT_TIME = 0.075;
 
 export class RopeLine {
-  constructor(scene, { radius = 0.032, tip = 0.012, segs = 16, sides = 4, color = 0xffffff, opacity = 0.95 } = {}) {
+  constructor(scene, { radius = 0.032, tip = 0.012, segs = 16, sides = 4, color = 0xffffff, opacity = 0.95, glossy = false } = {}) {
+    this.glossy = glossy;
     this.segs = segs; this.sides = sides; this.radius = radius; this.tip = tip;
     const nV = (segs + 1) * sides;
     this.pos = new Float32Array(nV * 3);
@@ -21,7 +22,11 @@ export class RopeLine {
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     geo.setIndex(idx);
     this.geo = geo;
-    this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, toneMapped: false, depthWrite: false }));
+    // glossy = the black symbiote web-line: lit, wet-looking, violet-tinted, fully opaque
+    const mat = glossy
+      ? new THREE.MeshStandardMaterial({ color, roughness: 0.14, metalness: 0.45, emissive: 0x2a0a55, emissiveIntensity: 0.55, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, toneMapped: false, depthWrite: false });
+    this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false; this.mesh.visible = false; this.mesh.renderOrder = 5;
     scene.add(this.mesh);
     this.shootT = SHOOT_TIME; this.slack = 0; this.t = 0; this.phase = Math.random() * 6;
@@ -66,6 +71,7 @@ export class RopeLine {
       }
     }
     this.geo.attributes.position.needsUpdate = true;
+    if (this.glossy) this.geo.computeVertexNormals();
     this.mesh.visible = true;
   }
 }
