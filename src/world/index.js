@@ -54,8 +54,7 @@ export class World {
     const T = makeTextures(renderer, rng, quality);
     const { M, wallMats } = makeMaterials(T, quality);
     this.mats = M;
-    const PT = performance.now(); const lap = (n) => globalThis.__PROF && console.log('[prof]', n, Math.round(performance.now() - PT));
-    onProgress(0.1); await tick(); lap('textures');
+    onProgress(0.1); await tick();
 
     this.atmo = new Atmosphere(this.game, quality);
     this.atmo.registerWalls(wallMats);
@@ -77,7 +76,7 @@ export class World {
     this.specs = city.specs;
     this.spawnPoint = city.spawn;
     this.minimap.buildings = city.buildings;
-    onProgress(0.55); await tick(); lap('city');
+    onProgress(0.55); await tick();
 
     buildBridge(ctx);
     buildBridge2(ctx);
@@ -85,7 +84,7 @@ export class World {
 
     // far skyline filler outside the playable area (far-LOD boxes only, no physics)
     buildBackdrop(ctx);
-    onProgress(0.7); await tick(); lap('bridge+backdrop');
+    onProgress(0.7); await tick();
 
     // meshes
     const skipCast = ['markings', 'sidewalk', 'grass', 'pond', 'storefront', 'asphalt', 'street', 'glow', 'lamp', 'neon', 'ad'];
@@ -111,7 +110,7 @@ export class World {
     this.group.add(water.mesh);
     this.waterU = water.uniforms;
     this.atmo.attachWater(water.uniforms);
-    onProgress(0.8); await tick(); lap('meshes');
+    onProgress(0.8); await tick();
 
     makeTrees(ctx, this.group);
     // per-tile LOD: detailed meshes near the camera, one merged far mesh per tile beyond (instanced street details join the near set)
@@ -133,7 +132,7 @@ export class World {
     this.skyline = globalThis.__NOSKY ? null : makeSkylineBand(this.group, T, this.atmo);
     this.clouds = quality === 'low' ? new Clouds(rng, this.group, T.cloud, quality) : { step() {} };
     this.steam = new Steam(rng, this.group, T.dot, quality);
-    onProgress(0.9); await tick(); lap('trees+misc');
+    onProgress(0.9); await tick();
 
     // landmarks reported to other modules
     this.landmarks['Central Park'] = new THREE.Vector3(colX(4.5), 0, rowZ(8));
@@ -153,7 +152,7 @@ export class World {
     onProgress(0.96); await tick();
     // pre-compile every shader now (loading screen) instead of hitching on the first frame
     try { if (!globalThis.__NOCOMPILE) renderer.compile(scene, this.game.camera); } catch (e) { console.warn('shader precompile failed', e); }
-    lap('compile'); onProgress(1);
+    onProgress(1);
   }
 
   /** Traffic light phase of the intersection nearest (x, z): { ns, ew, x, z } with 'red' | 'yellow' | 'green'.

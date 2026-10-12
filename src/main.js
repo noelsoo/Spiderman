@@ -118,18 +118,17 @@ class Game {
   }
 
   async init() {
-    const P0 = performance.now(), lp = (n) => globalThis.__PROF && console.log('[prof] main', n, Math.round(performance.now() - P0));
     this.hud.setLoading(0.05, 'Loading assets');
     await preloadModels((p) => this.hud.setLoading(0.05 + p * 0.3, 'Loading models'));
-    lp('models'); this.hud.setLoading(0.4, 'Building New York');
+    this.hud.setLoading(0.4, 'Building New York');
     await this.world.build((p) => this.hud.setLoading(0.4 + p * 0.4, 'Building New York'));
-    lp('world'); this.hud.setLoading(0.82, 'Filling the streets');
+    this.hud.setLoading(0.82, 'Filling the streets');
     await this.vehicles.build?.();
     await this.peds.build?.();
     await this.weapons.build?.();
-    lp('vehicles+peds+weapons'); this.hud.setLoading(0.9, 'Suiting up');
+    this.hud.setLoading(0.9, 'Suiting up');
     for (const id of HERO_ORDER) this.heroes[id] = new HERO_CLASSES[id](this);
-    lp('heroes'); this.hud.setLoading(1, 'Ready');
+    this.hud.setLoading(1, 'Ready');
     this.state = 'menu';
     this.hud.showTitle();
     this.renderer.setAnimationLoop(() => this.frame());
