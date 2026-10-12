@@ -183,15 +183,16 @@ export function buildHelix(ctx) {
   // flat deck
   dk.boxClosed(X - W, DECK - 0.7, za, X + W, DECK, zb, 3, [0.78, 0.76, 0.74]);
   shiftBox(X - W, DECK - 0.7, za, X + W, DECK, zb);
-  // stepped ramps
-  const steps = 20;
+  // ramps: one sloped visual slab + fine 0.08 m steps for collision (the hero cannot step up more than a few cm)
+  const slope = Math.atan2(DECK, rampLen), slen = Math.hypot(DECK, rampLen);
+  dk.boxXf(X, DECK / 2 - 0.35, z0 + rampLen / 2, W * 2, 0.7, slen, 0, [0.78, 0.76, 0.74], -slope);
+  dk.boxXf(X, DECK / 2 - 0.35, z1 - rampLen / 2, W * 2, 0.7, slen, 0, [0.78, 0.76, 0.74], slope);
+  const steps = 76;
   for (let i = 0; i < steps; i++) {
-    const t = (i + 1) / steps, y = DECK * t;
+    const y = DECK * (i + 1) / steps;
     const n0 = z0 + rampLen * i / steps, n1 = z0 + rampLen * (i + 1) / steps;
-    dk.boxClosed(X - W, 0, n0, X + W, y, n1, 3, [0.78, 0.76, 0.74]);
     shiftBox(X - W, 0, n0, X + W, y, n1);
     const s0 = z1 - rampLen * (i + 1) / steps, s1 = z1 - rampLen * i / steps;
-    dk.boxClosed(X - W, 0, s0, X + W, y, s1, 3, [0.78, 0.76, 0.74]);
     shiftBox(X - W, 0, s0, X + W, y, s1);
   }
   // piers
