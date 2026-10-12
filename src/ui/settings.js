@@ -57,6 +57,7 @@ function tabRows(g, tab) {
   switch (tab) {
     case 'gameplay': return [
       { t: 'choice', key: 'difficulty', label: 'Difficulty', opts: [['story', 'Story'], ['normal', 'Normal'], ['hard', 'Hard']], desc: 'Story takes half damage, Normal is the intended challenge, Hard enemies hit 50% harder. Changes apply instantly.' },
+      { t: 'choice', key: 'map', label: 'Free Roam map', opts: [['nyc', 'NEW YORK'], ['singapore', 'SINGAPORE']], desc: 'Which city to roam. The campaign is New York only. Changing this reloads the game (current progress is lost).', onSet: (v) => { if (v !== (g.world?.id === 'singapore' ? 'singapore' : 'nyc')) g.switchMap(v); } },
       { t: 'toggle', key: 'autoSprint', label: 'Auto-sprint', desc: 'Run automatically when the stick is fully pushed or a movement key is held. Off: hold the sprint key.' },
       { t: 'slider', key: 'aimAssist', label: 'Aim assist', min: 0, max: 1.5, step: 0.1, fmt: pct, desc: 'How strongly guns snap to enemies near the crosshair. 0% is raw aim; 100% is the default.' },
       { t: 'slider', key: 'shake', label: 'Camera shake', min: 0, max: 1.5, step: 0.1, fmt: pct, desc: 'Intensity of explosions, impacts and recoil shake. 0% disables it.' },

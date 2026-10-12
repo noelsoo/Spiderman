@@ -281,6 +281,11 @@ export class HUD {
     this._closeWheel(false);
     this._open('title');
     this.game.audio?.music?.('roam');
+    // after a map-switch reload, jump straight to where the player was heading
+    let flag = null;
+    try { flag = sessionStorage.getItem('sm-open'); sessionStorage.removeItem('sm-open'); } catch { /* ignore */ }
+    if (flag === 'freeroam') { this.stack = ['title']; this._open('heroselect', { mode: 'freeroam' }); }
+    else if (flag === 'campaign' && this.game.world?.id !== 'singapore') this.openCampaignMenu();
   }
 
   showPause() { this.stack = []; this._closeWheel(false); this._open('pause'); }
@@ -485,8 +490,8 @@ export class HUD {
       <div class="foot">Fan-made tribute &middot; not affiliated with Marvel or Insomniac</div>`;
     const menu = scr.el.querySelector('.menu');
     const mk = (label, act, cls) => { const b = this._btn(scr, label, act, cls); menu.appendChild(b); return b; };
-    mk('Campaign', () => this._push('campaign'), 'big');
-    mk('Free Roam', () => this._push('heroselect', { mode: 'freeroam' }));
+    mk('Campaign', () => this._push(this.game.world?.id === 'singapore' ? 'campaignmap' : 'campaign'), 'big');
+    mk('Free Roam', () => this._push('mapselect'));
     mk('Controls', () => this._push('controls'));
     mk('Settings', () => this._push('settings'));
     scr.padind = scr.el.querySelector('[data-r="padind"]');
@@ -1169,6 +1174,20 @@ export class HUD {
     const X = (x, z) => ox + a * (x - cx) + b * (z - cz);
     const Y = (x, z) => oy + cc * (x - cx) + d * (z - cz);
     const inside = (x, y, m = 4) => big || Math.hypot(x - W / 2, y - W / 2) < W / 2 - m;
+    const wt = mm?.water;
+    if (wt && Array.isArray(wt.polygon)) { // Singapore: bay polygon + open sea to the east
+      ctx.fillStyle = 'rgba(40,110,170,0.55)';
+      ctx.beginPath();
+      wt.polygon.forEach(([wx, wz], i) => { if (i) ctx.lineTo(X(wx, wz), Y(wx, wz)); else ctx.moveTo(X(wx, wz), Y(wx, wz)); });
+      ctx.closePath(); ctx.fill();
+      if (wt.seaMinX !== undefined && mm.maxX !== undefined) {
+        const e = mm.maxX + 800, zs = [mm.minZ - 800, mm.maxZ + 800];
+        ctx.beginPath();
+        ctx.moveTo(X(wt.seaMinX, zs[0]), Y(wt.seaMinX, zs[0])); ctx.lineTo(X(e, zs[0]), Y(e, zs[0]));
+        ctx.lineTo(X(e, zs[1]), Y(e, zs[1])); ctx.lineTo(X(wt.seaMinX, zs[1]), Y(wt.seaMinX, zs[1]));
+        ctx.closePath(); ctx.fill();
+      }
+    }
     ctx.fillStyle = 'rgba(70,90,150,0.55)';
     if (mm?.buildings) {
       const bl = mm.buildings;

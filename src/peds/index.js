@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { buildCharacter } from '../models/index.js';
 import { L, nearestAve } from '../world/grid.js';
+import { inWater as sgInWater } from '../world/sg/layout.js';
 
 const PZ0 = -595, PZP = 70, PX0 = -400, PXP = 100;
 const ZA = 9.6, ZB = 60.4, XA = 12.6, XB = 87.4;
@@ -35,6 +36,38 @@ function onBlock(c, zAxis) {
   const loc = ((c - base) % per + per) % per;
   return loc > A - 0.3 && loc < B + 0.3;
 }
+
+// ---- Singapore: sidewalk lines derived from world.roads (each avenue / street has a line on both sides)
+const SGW = 5, SGMID = 2.5; // sidewalk width, centre offset from the kerb
+let SGP = null;
+function buildSgLines(roads) {
+  const lines = [];
+  const mk = (z, f, a0, a1, cross) => {
+    const stops = [a0 + 3, a1 - 3], cuts = [];
+    for (const [c, w] of cross) { stops.push(c - w / 2 - SGMID, c + w / 2 + SGMID); cuts.push([c - w / 2, c + w / 2]); }
+    stops.sort((x, y) => x - y);
+    lines.push({ z, f, a0, a1, stops: stops.filter((v, i) => i === 0 || v - stops[i - 1] > 0.01 ), cuts });
+  };
+  for (const a of roads.avenues) {
+    if (a.highway) continue;
+    const cross = roads.intersections.filter((i) => i.x === a.x && !i.highway).map((i) => [i.z, i.sw]);
+    for (const sd of [-1, 1]) mk(true, a.x + sd * (a.width / 2 + SGMID), a.zMin, a.zMax, cross);
+  }
+  for (const st of roads.streets) {
+    const cross = roads.intersections.filter((i) => i.z === st.z && !i.highway).map((i) => [i.x, i.aw]);
+    for (const sd of [-1, 1]) mk(false, st.z + sd * (st.width / 2 + SGMID), st.xMin, st.xMax, cross);
+  }
+  return lines;
+}
+/** next stop on a Singapore sidewalk line strictly beyond c in direction dir (NaN when none) */
+function sgNext(ln, c, dir) {
+  const st = ln.stops;
+  if (dir > 0) { for (let i = 0; i < st.length; i++) if (st[i] > c + 0.05) return st[i]; return NaN; }
+  for (let i = st.length - 1; i >= 0; i--) if (st[i] < c - 0.05) return st[i];
+  return NaN;
+}
+const sgOnWalk = (ln, c) => { for (const [lo, hi] of ln.cuts) if (c > lo && c < hi) return false; return true; };
+const sgLineAt = (lines, z, f, c) => { for (const ln of lines) if (ln.z === z && Math.abs(ln.f - f) < 0.02 && c >= ln.a0 - 0.5 && c <= ln.a1 + 0.5) return ln; return null; };
 
 export class Ped {
   constructor(mgr, cop, idx) {
@@ -113,6 +146,7 @@ export class Peds {
       fx._pedWrapped = true;
     }
     // gunshots, melee, abilities and blasts reach peds through game.combat (combat._targets includes peds)
+    SGP = g.world?.id === 'singapore' && g.world.roads ? { lines: buildSgLines(g.world.roads) } : null;
     this.built = true;
     this._setAnchor();
     this.reset();
@@ -147,6 +181,7 @@ export class Peds {
   _spawnWalker(p, initial = false) {
     const ax = this.anchor.x, az = this.anchor.z;
     const minR = initial ? 8 : 38, maxR = 135;
+    if (SGP) return this._spawnWalkerSg(p, initial, ax, az, minR, maxR);
     for (let tries = 0; tries < 10; tries++) {
       const zAxis = Math.random() < 0.5;
       let fixed, c;
@@ -179,6 +214,34 @@ export class Peds {
     }
     return false;
   }
+
+  _spawnWalkerSg(p, initial, ax, az, minR, maxR) {
+    const near = SGP.lines.filter((ln) => Math.abs(ln.f - (ln.z ? ax : az)) < maxR && (ln.z ? az : ax) > ln.a0 - maxR && (ln.z ? az : ax) < ln.a1 + maxR);
+    if (!near.length) return false;
+    for (let tries = 0; tries < 14; tries++) {
+      const ln = near[(Math.random() * near.length) | 0], zAxis = ln.z;
+      const c = clamp((zAxis ? az : ax) + rnd(-maxR, maxR), ln.a0 + 6, ln.a1 - 6);
+      const x = zAxis ? ln.f : c, z = zAxis ? c : ln.f;
+      const d = Math.hypot(x - ax, z - az);
+      if (d < minR || d > maxR || sgInWater(x, z)) continue;
+      if (!initial && d < 75 && this.game.vehicles?._visible?.(x, 1, z, 1.5)) continue;
+      p.line = ln; p.axisZ = zAxis; p.fixed = ln.f; p.dir = Math.random() < 0.5 ? 1 : -1;
+      p.corner = sgNext(ln, c, p.dir);
+      if (!Number.isFinite(p.corner)) { p.dir = -p.dir; p.corner = sgNext(ln, c, p.dir); if (!Number.isFinite(p.corner)) continue; }
+      p.pos.set(x, sgOnWalk(ln, c) ? 0.15 : 0, z);
+      p.vel.set(0, 0, 0); p.hp = p.maxHp = 40; p.dead = false; p.deadT = 0; p.active = true; p.hidden = false;
+      p.state = Math.random() < 0.12 ? 'idle' : 'walk'; p.stateT = rnd(1, 4);
+      p.speedWalk = rnd(1.25, 1.8); p.tumble = 0; p.airTime = 0; p.carCd = 0; p.yaw = Math.atan2(zAxis ? 0 : p.dir, zAxis ? p.dir : 0);
+      p.model.setTint?.(0xffffff, 0);
+      p.setAnim('idle', 0);
+      p.root.visible = true;
+      return true;
+    }
+    return false;
+  }
+
+  _nc(p, c, dir) { return SGP && p.line ? sgNext(p.line, c, dir) : nextCorner(c, dir, p.axisZ); }
+  _cornerOk(p, c) { return SGP ? Number.isFinite(c) : inRange(c, p.axisZ); }
 
   /** Pull a pooled civilian (or steal the farthest one) for scripted events. */
   _grab() {
@@ -253,7 +316,7 @@ export class Peds {
     // run along the line, away from the threat
     const along = p.axisZ ? p.pos.z - from.z : p.pos.x - from.x;
     const ndir = along >= 0 ? 1 : -1;
-    if (ndir !== p.dir) { p.dir = ndir; p.corner = nextCorner(p.axisZ ? p.pos.z : p.pos.x, p.dir, p.axisZ); }
+    if (ndir !== p.dir) { p.dir = ndir; p.corner = this._nc(p, p.axisZ ? p.pos.z : p.pos.x, p.dir); if (!this._cornerOk(p, p.corner)) p.corner = p.axisZ ? p.pos.z : p.pos.x; }
   }
 
   blast(pos, radius) {
@@ -428,7 +491,7 @@ export class Peds {
     p.yaw += wrapPi(heading - p.yaw) * Math.min(1, 10 * dt);
     p.setAnim('run', fleeing ? 6.2 : 1.7);
     // sidewalk height
-    const hy = onBlock(p.axisZ ? p.pos.z : p.pos.x, p.axisZ) ? 0.15 : 0;
+    const hy = SGP ? (p.line && sgOnWalk(p.line, p.axisZ ? p.pos.z : p.pos.x) ? 0.15 : 0) : (onBlock(p.axisZ ? p.pos.z : p.pos.x, p.axisZ) ? 0.15 : 0);
     p.pos.y += (hy - p.pos.y) * Math.min(1, 12 * dt);
   }
   _setCoord(p, c) { if (p.axisZ) p.pos.z = c; else p.pos.x = c; }
@@ -441,6 +504,7 @@ export class Peds {
   _atCorner(p, fleeing) {
     // options: straight, turn left, turn right, (rare) reverse
     const c = p.axisZ ? p.pos.z : p.pos.x;
+    if (SGP) return this._atCornerSg(p, fleeing, c);
     const opts = [];
     const straightC = nextCorner(c, p.dir, p.axisZ);
     if (inRange(straightC, p.axisZ)) opts.push({ t: 's', w: fleeing ? 2 : 4 });
@@ -463,6 +527,30 @@ export class Peds {
       const oldFixed = p.fixed;
       p.axisZ = !p.axisZ; p.fixed = c; p.dir = ch.nd;
       p.corner = nextCorner(oldFixed, p.dir, p.axisZ);
+      if (p.axisZ) { p.pos.z = oldFixed; p.pos.x = p.fixed; } else { p.pos.x = oldFixed; p.pos.z = p.fixed; }
+    }
+    if (!fleeing && Math.random() < 0.17) { p.state = 'idle'; p.stateT = rnd(1.5, 5); }
+  }
+
+  _atCornerSg(p, fleeing, c) {
+    const ln = p.line, opts = [];
+    const straightC = sgNext(ln, c, p.dir);
+    if (Number.isFinite(straightC)) opts.push({ t: 's', w: fleeing ? 2 : 4 });
+    for (const nd of [-1, 1]) {
+      const ln2 = sgLineAt(SGP.lines, !ln.z, c, ln.f);
+      if (!ln2) continue;
+      if (!Number.isFinite(sgNext(ln2, ln.f, nd))) continue;
+      opts.push({ t: 'turn', nd, w: 2.2, ln2 });
+    }
+    if (!opts.length || Math.random() < 0.03) { p.dir = -p.dir; p.corner = sgNext(ln, c, p.dir); if (!Number.isFinite(p.corner)) p.corner = c; return; }
+    let sum = 0; for (const o of opts) sum += o.w;
+    let r = Math.random() * sum, ch = opts[0];
+    for (const o of opts) { r -= o.w; if (r <= 0) { ch = o; break; } }
+    if (ch.t === 's') p.corner = straightC;
+    else {
+      const oldFixed = p.fixed;
+      p.line = ch.ln2; p.axisZ = ch.ln2.z; p.fixed = ch.ln2.f; p.dir = ch.nd;
+      p.corner = sgNext(ch.ln2, oldFixed, p.dir);
       if (p.axisZ) { p.pos.z = oldFixed; p.pos.x = p.fixed; } else { p.pos.x = oldFixed; p.pos.z = p.fixed; }
     }
     if (!fleeing && Math.random() < 0.17) { p.state = 'idle'; p.stateT = rnd(1.5, 5); }
@@ -493,6 +581,23 @@ export class Peds {
   _snapToLine(p) {
     // choose the closest of the two line families
     const x = p.pos.x, z = p.pos.z;
+    if (SGP) {
+      let best = null, bd = 1e9;
+      for (const ln of SGP.lines) {
+        const c = ln.z ? z : x;
+        if (c < ln.a0 - 4 || c > ln.a1 + 4) continue;
+        const d = Math.abs((ln.z ? x : z) - ln.f);
+        if (d < bd) { bd = d; best = ln; }
+      }
+      if (!best) { this._deactivate(p); return; }
+      const c = best.z ? z : x;
+      p.line = best; p.axisZ = best.z; p.fixed = best.f;
+      const away = c - (best.z ? p.threat.z : p.threat.x);
+      p.dir = away >= 0 ? 1 : -1;
+      p.corner = sgNext(best, c, p.dir);
+      if (!Number.isFinite(p.corner)) { p.dir = -p.dir; p.corner = sgNext(best, c, p.dir); if (!Number.isFinite(p.corner)) p.corner = c; }
+      return;
+    }
     const a = nearestAve(x);
     const lx = [PX0 + a * PXP - XA, PX0 + a * PXP + XA];
     const s = clamp(Math.round((z - PZ0) / PZP), -14, 31);

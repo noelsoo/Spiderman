@@ -67,6 +67,7 @@ F11 or Alt+Enter toggles fullscreen.
 ## What's in it
 
 * **City:** procedural Manhattan-style grid with glass towers, brownstones, art-deco setbacks, rooftop water towers, a park, an Avengers-style tower, a river and a suspension bridge. Sunset sky, warm haze, glowing windows and bloom.
+* **Singapore (Free Roam):** a second map, Marina Bay, with Marina Bay Sands, the Merlion, the Helix Bridge, Gardens by the Bay, a day/night cycle and tropical rain. Pick it under Free Roam (or Settings -> Gameplay -> Free Roam map); traffic drives on the left. Maps load at startup, so switching reloads the game. The campaign is New York only.
 * **Traversal:** pendulum web-swinging against real building geometry, release boosts, point launch, wall crawl and wall run, web-zip to ledges, Web Wings gliding. Iron Man and Thor fly, Hulk super-jumps and climbs.
 * **Combat:** combos with auto-lunge, perfect dodge into slow-mo, Spider-Sense warnings, Focus meter ultimates, health orbs, controller rumble.
 * **Enemies:** symbiote-infected goons, Kraven's hunters with laser-sighted rifles on rooftops, and a three-phase Venom boss fight.

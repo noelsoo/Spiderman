@@ -16,6 +16,8 @@ export const DEFAULTS = {
   volume: 0.8, music: 0.5, sfx: 1, voice: 1, muteUnfocused: true,
   // accessibility
   colorBlind: 'off', highContrast: false, hudScale: 1, reduceFlash: false,
+  // world (applied on reload)
+  map: 'nyc',
 };
 
 export function loadSettings() {

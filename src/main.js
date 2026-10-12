@@ -26,6 +26,7 @@ import { Input } from './core/input.js';
 import { ThirdPersonCamera } from './core/camera.js';
 import { createPost } from './render/post.js';
 import { World } from './world/index.js';
+import { SingaporeWorld } from './world/sg/index.js';
 import { FX } from './combat/fx.js';
 import { Combat } from './combat/combat.js';
 import { EnemyManager } from './enemies/index.js';
@@ -86,7 +87,8 @@ class Game {
     if (this.settings.padRemap) this.input.padRemap = { ...this.settings.padRemap };
     this.cam = new ThirdPersonCamera(this.camera, this.physics);
 
-    this.world = new World(this);
+    if (this.settings.map !== 'singapore') this.settings.map = 'nyc';
+    this.world = this.settings.map === 'singapore' ? new SingaporeWorld(this) : new World(this);
     this.fx = new FX(this);
     this.combat = new Combat(this);
     this.enemies = new EnemyManager(this);
@@ -120,8 +122,9 @@ class Game {
   async init() {
     this.hud.setLoading(0.05, 'Loading assets');
     await preloadModels((p) => this.hud.setLoading(0.05 + p * 0.3, 'Loading models'));
-    this.hud.setLoading(0.4, 'Building New York');
-    await this.world.build((p) => this.hud.setLoading(0.4 + p * 0.4, 'Building New York'));
+    const mapName = this.world.id === 'singapore' ? 'Building Singapore' : 'Building New York';
+    this.hud.setLoading(0.4, mapName);
+    await this.world.build((p) => this.hud.setLoading(0.4 + p * 0.4, mapName));
     this.hud.setLoading(0.82, 'Filling the streets');
     await this.vehicles.build?.();
     await this.peds.build?.();
@@ -386,6 +389,15 @@ class Game {
     this.post.setSize(innerWidth, innerHeight);
   }
 
+  /** Maps are chosen at load time: save the choice and reload. `openFreeRoam` re-opens the Free Roam hero select afterwards. */
+  switchMap(map, openFreeRoam = false) {
+    this.settings.map = map === 'singapore' ? 'singapore' : 'nyc';
+    this.saveSettings();
+    try { if (openFreeRoam) sessionStorage.setItem('sm-open', 'freeroam'); } catch { /* ignore */ }
+    this.hud?.toast?.('Loading map...');
+    location.reload();
+  }
+
   saveSettings() { try { localStorage.setItem('sm-settings', JSON.stringify(this.settings)); } catch { /* private mode */ } }
 }
 
@@ -394,6 +406,7 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem('sm-settings') || '{}');
     const o = { ...def, ...saved };
+    o.map = o.map === 'singapore' ? 'singapore' : 'nyc';
     if (saved.shadows === undefined) o.shadows = o.quality !== 'low';   // untouched: follow the preset
     if (saved.ao === undefined) o.ao = o.quality === 'high' || o.quality === 'ultra';
     return o;

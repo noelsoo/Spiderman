@@ -162,6 +162,37 @@ export function installCampaignUI(HUD, H) {
     };
   };
 
+  // ------------------------------------------------------------------ map choice (maps load at boot: switching reloads the page)
+  P._build_mapselect = function (scr) {
+    const g = this.game, cur = g.world?.id === 'singapore' ? 'singapore' : 'nyc';
+    scr.el.innerHTML = `<div class="panel" style="text-align:center"><h2>Free Roam</h2>
+      <div class="note" style="font-size:14px">Choose a map. Switching maps reloads the game.</div>
+      <div class="menu" style="margin:0 auto"></div></div>`;
+    const menu = scr.el.querySelector('.menu');
+    const add = (label, map) => {
+      const here = map === cur;
+      menu.appendChild(this._btn(scr, here ? `${label} (current)` : label, () => {
+        if (here) this._push('heroselect', { mode: 'freeroam' });
+        else g.switchMap(map, true);
+      }, here ? 'big' : ''));
+    };
+    add('New York', 'nyc');
+    add('Singapore \u2013 Marina Bay', 'singapore');
+    menu.appendChild(this._btn(scr, 'Back', () => this._back()));
+    scr.index = cur === 'singapore' ? 1 : 0;
+  };
+
+  /** Campaign is New York only: explain and offer to switch maps. */
+  P._build_campaignmap = function (scr) {
+    const g = this.game;
+    scr.el.innerHTML = `<div class="panel" style="text-align:center"><h2>Campaign</h2>
+      <div class="note" style="font-size:15px">The campaign takes place in New York. Switch to the New York map to play it (the game reloads).</div>
+      <div class="menu" style="margin:0 auto"></div></div>`;
+    const menu = scr.el.querySelector('.menu');
+    menu.appendChild(this._btn(scr, 'Switch to New York', () => { try { sessionStorage.setItem('sm-open', 'campaign'); } catch { /* ignore */ } g.switchMap('nyc'); }, 'big'));
+    menu.appendChild(this._btn(scr, 'Back', () => this._back()));
+  };
+
   // ------------------------------------------------------------------ hero select
   P._build_heroselect = function (scr) {
     const g = this.game, data = scr.data || { mode: 'freeroam' };
