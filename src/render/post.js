@@ -115,7 +115,7 @@ void main(){
 const FINAL_FRAG = /* glsl */`
 uniform sampler2D tColor, tOcc;
 uniform vec2 uRes, uSunUV;
-uniform float uAspect, uTime, uSpeed, uSunVis, uGrain, uVig, uContrast;
+uniform float uAspect, uTime, uSpeed, uSunVis, uGrain, uVig, uContrast, uCA;
 uniform vec3 uSunCol, uTint;
 uniform float uTintAmt;
 varying vec2 vUv;
@@ -123,11 +123,11 @@ float hash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx
 void main(){
   vec2 uv = vUv;
   vec2 d = uv - 0.5;
-  vec3 col;
+  vec3 col = vec3(0.0);
+  bool fast = false;
   #ifdef FX_SPEED
   if (uSpeed > 0.02) {
-    float blur = uSpeed * 0.07, ca = uSpeed * 0.06;
-    col = vec3(0.0);
+    float blur = uSpeed * 0.07, ca = uSpeed * 0.06 * uCA;
     for (int i = 0; i < 7; i++) {
       vec2 o = d * (float(i) / 6.0) * blur;
       col.r += texture2D(tColor, uv - o * (1.0 + ca)).r;
@@ -135,9 +135,15 @@ void main(){
       col.b += texture2D(tColor, uv - o * (1.0 - ca)).b;
     }
     col /= 7.0;
-  } else
+    fast = true;
+  }
   #endif
-  col = texture2D(tColor, uv).rgb;
+  if (!fast) {
+    if (uCA > 1.01) { // lens fringing towards the corners (settings: chromatic aberration above 100%)
+      vec2 bo = d * length(d) * 0.025 * (uCA - 1.0);
+      col = vec3(texture2D(tColor, uv - bo).r, texture2D(tColor, uv).g, texture2D(tColor, uv + bo).b);
+    } else col = texture2D(tColor, uv).rgb;
+  }
 
   #ifdef FX_SUN
   if (uSunVis > 0.001) {
@@ -209,6 +215,9 @@ export function createPost(game) {
   const tint = new THREE.Color(1, 1, 1);
   let speedSm = 0, time = 0, frame = 0, occFlip = 0;
   const size = new THREE.Vector2();
+  // user options from the settings menu (all multipliers; 1 = the stock look). Only visible when the post chain runs (medium+).
+  const opts = { speed: 1, bloom: 1, grain: 1, vignette: 1, chroma: 1, ao: true };
+  let bloomBase = 0.3;
 
   renderer.info.autoReset = false; // one frame = several renders; we reset once per frame in render()
 
@@ -225,7 +234,7 @@ export function createPost(game) {
     vertexShader: VERT, fragmentShader: FINAL_FRAG, depthTest: false, depthWrite: false,
     uniforms: {
       tColor: { value: null }, tOcc: { value: null }, uRes: { value: new THREE.Vector2() }, uSunUV: { value: new THREE.Vector2(0.5, 0.5) },
-      uAspect: { value: 1 }, uTime: { value: 0 }, uSpeed: { value: 0 }, uSunVis: { value: 0 }, uGrain: { value: 0.016 }, uVig: { value: 0.3 }, uContrast: { value: 0.32 },
+      uAspect: { value: 1 }, uTime: { value: 0 }, uSpeed: { value: 0 }, uSunVis: { value: 0 }, uGrain: { value: 0.016 }, uVig: { value: 0.3 }, uContrast: { value: 0.32 }, uCA: { value: 1 },
       uSunCol: { value: new THREE.Color(1, 0.7, 0.4) }, uTint: { value: new THREE.Color(1, 1, 1) }, uTintAmt: { value: 0 },
     },
   });
@@ -263,7 +272,8 @@ export function createPost(game) {
       occA = new THREE.WebGLRenderTarget(1, 1, o); occB = new THREE.WebGLRenderTarget(1, 1, o);
     }
     if (T >= 1) {
-      bloom = new UnrealBloomPass(new THREE.Vector2(w, h), T >= 3 ? 0.42 : T >= 2 ? 0.36 : 0.3, 0.72, 1.05);
+      bloomBase = T >= 3 ? 0.42 : T >= 2 ? 0.36 : 0.3;
+      bloom = new UnrealBloomPass(new THREE.Vector2(w, h), bloomBase, 0.72, 1.05);
       bloom.setSize(w, h);
     }
     finalMat.defines.FX_SPEED = 1;
@@ -325,7 +335,7 @@ export function createPost(game) {
     let base = sceneRT;
 
     // 2. ambient occlusion
-    if (aoRT1) {
+    if (aoRT1 && opts.ao) {
       aoMat.uniforms.tDepth.value = sceneRT.depthTexture;
       aoMat.uniforms.uAspect.value = camera.aspect;
       quad.material = aoMat; renderer.setRenderTarget(aoRT1); quad.render(renderer);
@@ -338,7 +348,7 @@ export function createPost(game) {
     }
 
     // 3. bloom (adds onto `base`)
-    if (bloom) bloom.render(renderer, null, base, dt, false);
+    if (bloom && opts.bloom > 0.01) { bloom.strength = bloomBase * opts.bloom; bloom.render(renderer, null, base, dt, false); }
 
     // 4. sun visibility
     const U = finalMat.uniforms;
@@ -359,7 +369,10 @@ export function createPost(game) {
     // 5. final grade to the canvas
     U.tColor.value = base.texture;
     U.uTime.value = time % 100;
-    U.uSpeed.value = updateSpeed(dt);
+    U.uSpeed.value = updateSpeed(dt) * opts.speed;
+    U.uCA.value = opts.chroma;
+    U.uGrain.value = 0.014 * opts.grain;
+    U.uVig.value = (T >= 2 ? 0.3 : 0.24) * opts.vignette;
     U.uSunVis.value = sunVis;
     if (tintAmt > 0.002) { U.uTint.value.copy(tint); U.uTintAmt.value = tintAmt; } else U.uTintAmt.value = 0;
     quad.material = finalMat;
@@ -371,6 +384,7 @@ export function createPost(game) {
 
   return {
     get quality() { return quality; },
+    opts,
     render,
     setSize() { build(); },
     /** Full-screen colour tint (e.g. Scarlet Witch ultimate): color = THREE.Color | hex, amount 0..1. */

@@ -37,6 +37,7 @@ import { Weapons } from './weapons/index.js';
 import { Campaign } from './campaign/index.js';
 import { AudioEngine } from './audio/audio.js';
 import { HUD } from './ui/hud.js';
+import { DEFAULTS, installSettings, skipFrame } from './ui/settings-core.js';
 import { preloadModels } from './models/index.js';
 import { SpiderMan } from './heroes/SpiderMan.js';
 import { IronMan } from './heroes/IronMan.js';
@@ -97,6 +98,7 @@ class Game {
     this.peds = new Peds(this);
     this.audio = new AudioEngine(this);
     this.hud = new HUD(this);
+    installSettings(this);   // applies game.settings to every subsystem (src/ui/settings-core.js)
 
     this.heroes = {};
     this.player = null;
@@ -116,17 +118,18 @@ class Game {
   }
 
   async init() {
+    const P0 = performance.now(), lp = (n) => globalThis.__PROF && console.log('[prof] main', n, Math.round(performance.now() - P0));
     this.hud.setLoading(0.05, 'Loading assets');
     await preloadModels((p) => this.hud.setLoading(0.05 + p * 0.3, 'Loading models'));
-    this.hud.setLoading(0.4, 'Building New York');
+    lp('models'); this.hud.setLoading(0.4, 'Building New York');
     await this.world.build((p) => this.hud.setLoading(0.4 + p * 0.4, 'Building New York'));
-    this.hud.setLoading(0.82, 'Filling the streets');
+    lp('world'); this.hud.setLoading(0.82, 'Filling the streets');
     await this.vehicles.build?.();
     await this.peds.build?.();
     await this.weapons.build?.();
-    this.hud.setLoading(0.9, 'Suiting up');
+    lp('vehicles+peds+weapons'); this.hud.setLoading(0.9, 'Suiting up');
     for (const id of HERO_ORDER) this.heroes[id] = new HERO_CLASSES[id](this);
-    this.hud.setLoading(1, 'Ready');
+    lp('heroes'); this.hud.setLoading(1, 'Ready');
     this.state = 'menu';
     this.hud.showTitle();
     this.renderer.setAnimationLoop(() => this.frame());
@@ -242,6 +245,7 @@ class Game {
   slowmo(seconds = 0.4, scale = 0.25) { this._slowmo = seconds; this.timeScale = scale; }
 
   frame() {
+    if (skipFrame(this, performance.now())) return;   // frame-rate cap (settings)
     const rawDt = Math.min(this.clock.getDelta(), 1 / 20);
     if (this._slowmo > 0) { this._slowmo -= rawDt; if (this._slowmo <= 0) this.timeScale = 1; }
     this.input.update(rawDt);
@@ -277,7 +281,7 @@ class Game {
         this.vehicles.update(dt);                        // traffic + the car being driven (reads input itself)
         this.peds.update(dt);
         const focus = this.vehicles.driving ?? this.player;
-        this.cam.update(rawDt, focus.pos, this.input.look, { speed: focus.vel?.length?.() ?? 0 });
+        this.cam.update(rawDt, focus.pos, this.input.look, { speed: focus.vel?.length?.() ?? 0, yaw: focus.yaw });
         this._cameraAvoidVehicles(focus);
         this.campaign.update?.(dt);
         this.enemies.update(dt);
@@ -286,6 +290,9 @@ class Game {
     } else if (this.state === 'overlay') {
       if (this.overlay && this.overlay.update?.(rawDt) === false) this.closeOverlay();
       dt = 0;
+    } else if (this.state === 'paused' && this.player && this.hud.screen?.name === 'settings') {
+      // live camera preview while tweaking camera options from the pause menu
+      this.cam.update(rawDt, this.player.pos, { x: 0, y: 0 }, { speed: 0 });
     } else if (this.state === 'menu') {
       // slow orbit over the city behind the title screen
       this.cam.update(rawDt, this.world.menuFocus ?? new THREE.Vector3(0, 60, 0), { x: rawDt * 0.05, y: 0 });
@@ -371,8 +378,14 @@ class Game {
 }
 
 function loadSettings() {
-  const def = { quality: 'high', invertY: false, autoSprint: true, volume: 0.8, music: 0.5, sensitivity: 1, padRemap: null };
-  try { return { ...def, ...JSON.parse(localStorage.getItem('sm-settings') || '{}') }; } catch { return def; }
+  const def = { ...DEFAULTS };
+  try {
+    const saved = JSON.parse(localStorage.getItem('sm-settings') || '{}');
+    const o = { ...def, ...saved };
+    if (saved.shadows === undefined) o.shadows = o.quality !== 'low';   // untouched: follow the preset
+    if (saved.ao === undefined) o.ao = o.quality === 'high' || o.quality === 'ultra';
+    return o;
+  } catch { return def; }
 }
 
 function prettyPad(id) {

@@ -80,6 +80,8 @@ export class AudioEngine {
       comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
       this.sfxBus = ctx.createGain();
       this.musicBus = ctx.createGain();
+      this.voiceBus = ctx.createGain();   // dialogue / radio blips (play(name, { bus: 'voice' }))
+      this.voiceBus.connect(this.master);
       this.sfxBus.connect(this.master);
       this.musicBus.connect(this.master);
       this.master.connect(comp); comp.connect(ctx.destination);
@@ -125,13 +127,15 @@ export class AudioEngine {
   _applyVolumes(immediate = false) {
     if (!this.ok) return;
     const s = this.game.settings || {};
-    const vol = s.volume ?? 0.8, mus = s.music ?? 0.5;
+    const vol = s.volume ?? 0.8, mus = s.music ?? 0.5, sfx = s.sfx ?? 1, voi = s.voice ?? 1;
     const t = this.ctx.currentTime;
-    const m = vol, mb = mus * 0.9 * (this._ducked ? 0.3 : 1);
-    if (immediate) { this.master.gain.value = m; this.musicBus.gain.value = mb; this.sfxBus.gain.value = 0.9; }
+    const m = this._blurMute && s.muteUnfocused ? 0 : vol, mb = mus * 0.9 * (this._ducked ? 0.3 : 1);
+    if (immediate) { this.master.gain.value = m; this.musicBus.gain.value = mb; this.sfxBus.gain.value = 0.9 * sfx; this.voiceBus.gain.value = 0.9 * voi; }
     else {
       this.master.gain.setTargetAtTime(m, t, 0.05);
       this.musicBus.gain.setTargetAtTime(mb, t, 0.15);
+      this.sfxBus.gain.setTargetAtTime(0.9 * sfx, t, 0.05);
+      this.voiceBus.gain.setTargetAtTime(0.9 * voi, t, 0.05);
     }
   }
 
@@ -167,7 +171,7 @@ export class AudioEngine {
         out.connect(lp); tail = lp; nodes.push(lp);
       }
       if (ctx.createStereoPanner && pan !== 0) { const sp = ctx.createStereoPanner(); sp.pan.value = pan; tail.connect(sp); tail = sp; nodes.push(sp); }
-      tail.connect(this.sfxBus);
+      tail.connect(opts.bus === 'voice' && this.voiceBus ? this.voiceBus : this.sfxBus);
       const rv = REVERB[name], sl = SLAP[name];
       if (rv && this.verbIn) { const sg = ctx.createGain(); sg.gain.value = rv; tail.connect(sg); sg.connect(this.verbIn); nodes.push(sg); }
       if (sl && this.slapIn) { const sg = ctx.createGain(); sg.gain.value = sl; tail.connect(sg); sg.connect(this.slapIn); nodes.push(sg); }

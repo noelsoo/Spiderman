@@ -43,6 +43,8 @@ export const BINDINGS = {
   hero5: { k: ['Digit5'] }, hero6: { k: ['Digit6'] }, hero7: { k: ['Digit7'] }, hero8: { k: ['Digit8'] },
 };
 export const ACTIONS = Object.keys(BINDINGS);
+/** Factory keyboard bindings, kept so the settings menu can reset a rebind. */
+export const DEFAULT_KEYS = Object.fromEntries(Object.entries(BINDINGS).map(([a, b]) => [a, b.k ? [...b.k] : []]));
 
 // Raw-layout -> standard translation tables. b[std] = raw button index (or ['axis', i] for analog triggers),
 // a[std] = raw axis index, hat = raw axis index of a POV hat used for the D-pad.
@@ -81,9 +83,12 @@ export class Input {
     this.state = {}; this.prev = {}; this.raw = {}; this.values = {}; this.sources = {};
     for (const a of ACTIONS) { this.state[a] = false; this.prev[a] = false; this.raw[a] = false; this.values[a] = 0; this.sources[a] = []; }
     this.consumed = new Set();
+    this.toggleActions = {};         // { swing: true, aim: true } -> press to switch on, press again to switch off
+    this._tog = {}; this._togPhys = {};
     this.mouseSensitivity = 0.0022;
     this.stickSensitivity = 3.2; // rad/s at full deflection
     this.invertY = false;
+    this.invertX = false;
     this.deadzone = 0.15;
     this.pad = null; this.padIndex = -1;
     this.gamepadName = ''; this.padProfile = 'none';
@@ -246,7 +251,7 @@ export class Input {
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.move.x += 1;
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.move.x -= 1;
     if (this.move.lengthSq() > 1) this.move.normalize();
-    this.look.x = -this.mouseDX * this.mouseSensitivity;
+    this.look.x = -this.mouseDX * this.mouseSensitivity * (this.invertX ? -1 : 1);
     this.look.y = -this.mouseDY * this.mouseSensitivity * (this.invertY ? -1 : 1);
     this.mouseDX = this.mouseDY = 0;
 
@@ -266,14 +271,43 @@ export class Input {
       if (rx || ry) {
         this.rightStick.set(rx, ry);
         const cx = Math.sign(rx) * rx * rx, cy = Math.sign(ry) * ry * ry; // gentle curve for precise aim
-        this.look.x += -cx * this.stickSensitivity * dt;
+        this.look.x += -cx * this.stickSensitivity * dt * (this.invertX ? -1 : 1);
         this.look.y += -cy * this.stickSensitivity * dt * 0.75 * (this.invertY ? -1 : 1);
         used = true;
       }
       if (used) this.lastDevice = 'gamepad';
     }
+    for (const a in this.toggleActions) {
+      if (!this.toggleActions[a] || !this.sources[a]) continue;
+      const phys = this.sources[a].some(([, v]) => v > 0.25);
+      if (phys && !this._togPhys[a]) this._tog[a] = !this._tog[a];
+      this._togPhys[a] = phys;
+      this.sources[a].length = 0;
+      if (this._tog[a]) this.sources[a].push(['t:' + a, 1]);
+    }
     for (const a of ACTIONS) this.raw[a] = this.sources[a].some(([, v]) => v > 0.25);
     this._recompute();
+  }
+
+  /** Forget latched toggle states (menus open, game restarts). */
+  clearToggles() { this._tog = {}; this._togPhys = {}; }
+
+  // ---- keyboard rebinding (settings menu) ----------------------------------------------------
+  /** Replace an action's keyboard keys. codes = KeyboardEvent.code[]; mouse / pad bindings are kept. */
+  setKeyBinding(action, codes) {
+    const b = BINDINGS[action]; if (!b) return false;
+    b.k = [...codes];
+    return true;
+  }
+  getKeyBinding(action) { return [...(BINDINGS[action]?.k || [])]; }
+  /** Restore one action (or all when action is omitted) to the factory keys. */
+  resetKeyBindings(action) {
+    for (const a of action ? [action] : Object.keys(DEFAULT_KEYS)) if (BINDINGS[a]) { if (DEFAULT_KEYS[a].length) BINDINGS[a].k = [...DEFAULT_KEYS[a]]; else delete BINDINGS[a].k; }
+  }
+  /** Apply a saved { action: codes[] } map (game.settings.keys). */
+  applyKeyBindings(map) {
+    this.resetKeyBindings();
+    if (map) for (const [a, codes] of Object.entries(map)) if (BINDINGS[a] && Array.isArray(codes)) this.setKeyBinding(a, codes.filter((c) => typeof c === 'string'));
   }
 
   _recompute() {

@@ -119,7 +119,7 @@ export class Campaign {
       d.cur = l; d.t = this._lineTime(l);
       const sp = SPEAKERS[l.who] ?? { name: l.who === 'HERO' ? (this.game.player?.name ?? 'Hero') : l.who, color: '#ffffff' };
       hud?.showSubtitle?.(sp.name, l.text, sp.color);
-      this.game.audio?.play?.('ui_move', { volume: 0.5 });
+      this.game.audio?.play?.('ui_move', { volume: 0.5, bus: 'voice' });
     }
   }
 

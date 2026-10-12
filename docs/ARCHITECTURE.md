@@ -175,6 +175,12 @@ randomStreetPoint(), randomRooftopPoint(), landmarks: { name: Vector3 }
 anchorsNear(pos, radius) → optional helper list of swing points (building edges)
 ```
 
+**Map v3 (bigger city, ~2.7 km x 3.2 km).** `bounds` = x -1330..1400, z -1580..1580 (north is -z). The original Midtown blocks (avenues 0..9, streets 0..17: spawn, Avengers Tower, Empire spire, Central Park, plaza, depot, shops, bridge 1) keep their exact coordinates. Added around it: Upper West / East Side (north, brownstones + Riverside Park / Harlem Meer), Financial District (south, supertall glass), Hell's Kitchen (east, warehouses, water tanks, tower cranes) and Brooklyn (west bank, low-rise) behind the river (x -1000..-440) reached by two bridges (`landmarks['Bridge Deck']` at street 9, `landmarks['South Bridge']` at street 21).
+* Grid constants live in `src/world/grid.js` (re-exported by `city.js`): `avenueX(k)` k = -9..-7 (Brooklyn) and 0..18, `streetZ(k)` k = -14..31, `hasAve/hasDriveAve/hasSt`, `inWater(x)` (use it instead of `x < L.RIVER_X`), `BLOCKS`, `PARKS`, `districtOf(i, j)`, `DISTRICT_POINTS`. `L.FAR_X` = Brooklyn quay. Avenue 18 is on the map edge (not drivable).
+* `world.roads` lists every avenue (`drive` flag), street (one entry per island), intersection (`a`, `s` indices) and block sidewalk (`district`). `world.minimap` keeps `{size, buildings, ...}` and adds `parks[]`; `world.landmarks` adds `Financial District`, `Upper West Side`, `Upper East Side`, `Hell's Kitchen`, `Brooklyn`, `Bridge Park`, `South Bridge`.
+* Rendering is tiled: the city is merged per 400 m tile and material (`ChunkSet`), and `world.lod` (`TileLOD`) shows the detailed meshes only within ~560 m of the camera; beyond that each tile is a single merged "far" mesh (vertex-coloured boxes on a 128 px window atlas, one draw call per tile). The skyline backdrop outside the bounds is far-LOD only. Shadows follow the player (+-75 m), so far tiles never cast.
+* `randomStreetPoint()` samples near the player 70% of the time so spawn rings work anywhere on the map.
+
 ### audio — `game.audio`
 `unlock()` (call on first user gesture), `play(name, { volume, pitch, pos })`, `music(track)` ('roam'|'combat'|'boss'|'victory'|null), `duck(bool)`, `update(dt)`.
 Sound names: `jump thwip web swing zip punch hit heavyhit kick whoosh land dodge perfect repulsor missile unibeam thruster smash roar clap throw hammer catch thunder lightning explosion hurt switch venom symbiote goon_die hunter_shot boss_roar ui_move ui_select ui_back pickup`.
@@ -330,3 +336,18 @@ Every boss must be hittable by melee-only heroes (Wolverine, Hulk, Captain Ameri
 ## Captain America sidearm (src/heroes/CaptainAmerica.js, squad/pistol.js)
 Built-in M1911 (not a shop item). `usesAim: true`: hold aim (RMB / L2) → shoulder aim, crosshair `'pistol'`, pistol moves from the hip holster to `model.handR`; fire (LMB / R2) → `game.combat.hitscan` (24 dmg, headshot x2 → `HEADSHOT` + `hud.hitMarker(true)`), tracer, `fx.flash`, camera recoil, audio `gunshot`, emits `weapon:fired` / throttled `crime`. 12-round magazine, auto reload when empty (1.05 s), manual with R, silent top-up after 3 s holstered. Shield throw stays on special (K / R1, quick RMB tap, hold to charge) and the shield stays on his arm. Block/Parry moved off L2 to the dodge button: tap C/○ = roll, hold = block (0.2 s parry window). A shop gun (`game.weapons.equipped`) takes precedence and holsters the pistol.
 Hero UI (src/ui/hud.js): `ORDER` lists all 11 heroes; the character wheel is an 11-slice radial (short names), the hero strip scales down on narrow screens, the hero select grid is 4 columns x 3 rows with symbiote emblems (Venom black/white, Carnage red/black, Anti-Venom white/black).
+
+# v4: Settings menu (src/ui/settings.js, src/ui/settings-core.js)
+
+- `game.settings` (persisted as `sm-settings` by `game.saveSettings()`) holds every option; defaults are `DEFAULTS` in settings-core.js and
+  `installSettings(game)` (called from main.js after the HUD exists) applies all of them via `applyAll(game)`; `applyKey(game, key)` applies one live.
+- Tabs: Gameplay, Controls, Camera, Graphics, Audio, Access. Opened from the title and pause menus. Keyboard (arrows, Enter, Q/E tabs, R reset tab, Esc),
+  mouse (tabs, drag sliders, scroll) and gamepad (D-pad, L1/R1 tabs, ✕ select, △ reset tab, ○ back). Keyboard rebinding uses
+  `input.setKeyBinding(action, codes)` / `resetKeyBindings()` / `applyKeyBindings(map)`; saved as `settings.keys`.
+- Hooks: `combat._hurtPlayer` is scaled by difficulty (story 0.5, normal 1, hard 1.5); `input.rumble` honours vibration on/off + strength;
+  `fx.flash` is dimmed by "reduce flashing"; `cam.pref` ({dist, height, shoulder, autoRecenter, aimSens, shakeScale}) are player preferences layered
+  on top of whatever heroes/vehicles set for `targetDistance` / `heightOffset` / `shoulder`; `cam.baseFov` = FOV setting.
+- `game.post.opts` ({speed, bloom, grain, vignette, chroma, ao}) are multipliers for the post chain (only visible on medium+ tiers).
+- Audio buses: master, music, sfx (`sfxBus`), voice (`voiceBus`, use `audio.play(name, { bus: 'voice' })`), mute-when-unfocused.
+- Colour-blind mode is an SVG colour-matrix filter on `#app` and `#hud` (`html.cb-on`); HUD scale = CSS `zoom` on `.hud-game` (`--hs`).
+- Frame-rate cap: `skipFrame()` at the top of `Game.frame()`. Render scale = `renderer.setPixelRatio(min(dpr, tierCap) * scale)`.

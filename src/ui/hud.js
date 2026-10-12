@@ -4,6 +4,7 @@
 // through raw navigator.getGamepads() buttons, so they work for every controller profile.
 import './hud.css';
 import { installCampaignUI } from './campaign-ui.js';
+import { installSettingsUI } from './settings.js';
 
 const ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'carnage', 'antivenom'];
 
@@ -618,24 +619,6 @@ export class HUD {
     return it;
   }
 
-  // ---- settings
-  _build_settings(scr) {
-    const g = this.game, s = g.settings, inp = g.input;
-    scr.el.innerHTML = '<div class="panel"><h2>Settings</h2><div class="rows"></div><div class="btnrow"></div><div class="note" data-r="note"></div></div>';
-    const rows = scr.el.querySelector('.rows');
-    const note = scr.el.querySelector('[data-r="note"]');
-    const save = () => { g.saveSettings?.(); };
-    this._rowCycle(scr, rows, 'Graphics quality', () => s.quality, (v) => { s.quality = v; save(); note.textContent = 'Quality changes apply after reloading the game (F5).'; this.toast('Reload to apply quality'); }, ['low', 'medium', 'high', 'ultra']);
-    this._rowToggle(scr, rows, 'Invert Y (camera)', () => !!s.invertY, (v) => { s.invertY = v; inp.invertY = v; save(); });
-    this._rowSlider(scr, rows, 'Mouse sensitivity', () => s.sensitivity ?? 1, (v) => { s.sensitivity = v; inp.mouseSensitivity = 0.0022 * v; save(); }, 0.2, 3, (v) => `${v.toFixed(2)}x`);
-    this._rowSlider(scr, rows, 'Stick sensitivity', () => s.stickSensitivity ?? 1, (v) => { s.stickSensitivity = v; inp.stickSensitivity = 3.2 * v; save(); }, 0.3, 2.5, (v) => `${v.toFixed(2)}x`);
-    this._rowSlider(scr, rows, 'Master volume', () => s.volume ?? 0.8, (v) => { s.volume = v; save(); g.audio?._applyVolumes?.(); }, 0, 1);
-    this._rowSlider(scr, rows, 'Music volume', () => s.music ?? 0.5, (v) => { s.music = v; save(); g.audio?._applyVolumes?.(); }, 0, 1);
-    const br = scr.el.querySelector('.btnrow');
-    br.appendChild(this._btn(scr, 'Controller', () => this._push('controller')));
-    br.appendChild(this._btn(scr, 'Back', () => this._back()));
-  }
-
   // ---- controller settings: diagnostics + tuning + remap
   _build_controller(scr) {
     const g = this.game, s = g.settings, inp = g.input;
@@ -776,6 +759,7 @@ export class HUD {
     if (e.repeat && ['Enter', 'Escape', 'Space', 'KeyP'].includes(e.code)) return;
     const k = e.code;
     let handled = true;
+    if (scr.onKey && scr.onKey(e)) { e.preventDefault(); e.stopPropagation(); return; }   // screen-specific keys (settings tabs, rebinding)
     if (performance.now() < this.lockUntil && (k === 'Escape' || k === 'KeyP')) return;
     if (scr.listen) { // remapping: Esc cancels, everything else belongs to the pad
       if (k === 'Escape') { this._remapCancel(scr); e.preventDefault(); e.stopPropagation(); }
@@ -799,7 +783,7 @@ export class HUD {
     // edge detection on the virtual standard pad (works for every controller profile)
     const cur = {
       up: inp.padButton(12), down: inp.padButton(13), left: inp.padButton(14), right: inp.padButton(15),
-      ok: inp.padButton(0), back: inp.padButton(1), opt: inp.padButton(9),
+      ok: inp.padButton(0), back: inp.padButton(1), opt: inp.padButton(9), l1: inp.padButton(4), r1: inp.padButton(5), tri: inp.padButton(3),
     };
     const pr = this._pp; this._pp = cur;
     const any = inp.padButton(0) || inp.padButton(1) || inp.padButton(2) || inp.padButton(3) || cur.opt;
@@ -808,6 +792,7 @@ export class HUD {
     if (!scr || scr.name === 'loading') { this._navDir = ''; return; }
     if (performance.now() < this.lockUntil) return;
     if (scr.listen) return;                       // remap flow owns the pad
+    if (scr.capture) { if (cur.back && !pr.back) scr.capture.cancel(); return; }   // settings: waiting for a key press
     const padActive = inp.lastDevice === 'gamepad' && !!inp.pad;
     let dir = '';
     const mx = padActive ? inp.move.x : 0, my = padActive ? inp.move.y : 0;
@@ -819,6 +804,7 @@ export class HUD {
     else if (dir !== this._navDir) { this._navDir = dir; this._navT = 0.38; this._nav(dir); }
     else { this._navT -= dt; if (this._navT <= 0) { this._navT = 0.11; this._nav(dir); } }
 
+    if (scr.padBtn) for (const b of ['l1', 'r1', 'tri']) if (cur[b] && !pr[b]) scr.padBtn(b);
     if (cur.ok && !pr.ok) this._activate();
     else if (cur.back && !pr.back) this._back();
     else if (cur.opt && !pr.opt) {
@@ -1330,3 +1316,4 @@ function ds4Svg() {
 }
 
 installCampaignUI(HUD, { ORDER, HERO_INFO, EMBLEM, esc, fmtTime, cssColor });
+installSettingsUI(HUD, { esc });

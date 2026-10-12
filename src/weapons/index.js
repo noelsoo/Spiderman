@@ -611,7 +611,7 @@ export class Weapons {
     const wall = g.physics.raycast(_u, dir, range);
     const maxT = wall ? wall.distance : range;
     let bestSc = 1, best = null;
-    const assist = this._aimBlend > 0.5 ? 0.014 : 0.03;
+    const assist = (this._aimBlend > 0.5 ? 0.014 : 0.03) * (g.settings?.aimAssist ?? 1);
     const list = g.enemies?.list ?? [];
     for (let i = 0; i < list.length; i++) {
       const e = list[i];
