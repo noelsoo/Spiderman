@@ -1,6 +1,9 @@
 // Third-person orbit camera with collision, speed-based FOV and screen shake.
 import * as THREE from 'three';
 
+const _cu = new THREE.Vector3(), _cs = new THREE.Vector3(), _co = new THREE.Vector3();
+const RAYS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]];
+
 export class ThirdPersonCamera {
   constructor(camera, physics) {
     this.camera = camera;
@@ -22,6 +25,8 @@ export class ThirdPersonCamera {
     this._aimReq = null;
     this.aimT = 0;             // 0 = hip, 1 = fully aimed (read-only for others)
     this.aimParams = { fov: 45, distance: 2.6, shoulder: 0.85, height: 1.55, sensitivity: null, blend: 12, scope: false };
+    this.minDistance = 1.6;    // never closer than this to the hero's head (prevents clipping into the hero model)
+    this.pivot = new THREE.Vector3();
     this.forward = new THREE.Vector3(0, 0, -1); // flattened, for movement
     this.right = new THREE.Vector3(1, 0, 0);
   }
@@ -72,12 +77,20 @@ export class ThirdPersonCamera {
     this.right.set(-this.forward.z, 0, this.forward.x);
     const pivot = this._smoothTarget.clone().addScaledVector(this.right, this.shoulder + (ap.shoulder - this.shoulder) * a);
 
-    // collision: pull the camera in front of walls
+    // collision: a small "sphere cast" (centre ray + 4 offset rays) so the camera never clips into walls or corners.
     let dist = this.distance;
-    const hit = this.physics.raycast(pivot, back, dist + 0.3);
-    if (hit) dist = Math.max(0.8, hit.distance - 0.3);
-    const pos = pivot.clone().addScaledVector(back, dist);
+    const r = 0.35;
+    const up = _cu.set(0, 1, 0), side = _cs.crossVectors(back, up).normalize();
+    for (const [ox, oy] of RAYS) {
+      const o = _co.copy(pivot).addScaledVector(side, ox * r).addScaledVector(up, oy * r);
+      const hit = this.physics.raycast(o, back, dist + r);
+      if (hit && hit.distance - r < dist) dist = Math.max(Math.min(0.8, this.distance), hit.distance - r);
+    }
+    // smooth the pull-in/out so the view doesn't pop when brushing past corners
+    this._colDist = this._colDist === undefined ? dist : (dist < this._colDist ? dist : THREE.MathUtils.damp(this._colDist, dist, 6, dt));
+    const pos = pivot.clone().addScaledVector(back, this._colDist);
     if (pos.y < 0.3) pos.y = 0.3;
+    this.pivot.copy(pivot);
 
     if (this._shake > 0) {
       const s = this._shake * 0.35 * (1 - a * 0.8);

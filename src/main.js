@@ -297,24 +297,37 @@ class Game {
     this.audio.update?.(rawDt);
     this.hud.update(rawDt);
     this._hideNearCameraOccluders();
+    if (this.state === 'playing' && this.player) this._heroCloseFade(this.player);
     this.post.render(rawDt);
     this._restoreOccluders();
   }
 
   /** Pull the camera in front of any car that sits between it and the hero (cars are not physics boxes). */
   _cameraAvoidVehicles(focus) {
-    const cam = this.camera, ray = this.combat?._rayVehicle;
-    if (!ray) return;
+    const cam = this.camera;
+    if (!this.combat?._rayVehicle) return;
     const head = _camA.set(focus.pos.x, focus.pos.y + 1.5, focus.pos.z);
     const dir = _camB.subVectors(cam.position, head);
     const len = dir.length();
     if (len < 0.5) return;
     dir.divideScalar(len);
     const hit = this.combat._rayVehicle(head, dir, len + 0.4);
-    if (hit && hit.v !== this.vehicles.driving) {
-      const d = Math.max(0.9, head.distanceTo(hit.point) - 0.35);
-      cam.position.copy(head).addScaledVector(dir, d);
+    if (!hit || hit.v === this.vehicles.driving) { this._carLift = Math.max(0, (this._carLift || 0) - 0.08); }
+    else {
+      // cars are short: rise over the roof instead of zooming into the hero's back
+      const roof = hit.v.pos.y + 1.9;
+      this._carLift = Math.min(3.5, Math.max(this._carLift || 0, roof + 0.9 - cam.position.y));
     }
+    if (this._carLift > 0.01) { cam.position.y += this._carLift; cam.lookAt(this.cam.pivot); }
+  }
+
+  /** Fade the active hero out when the camera is very close (tight corners), so the view never clips inside the model. */
+  _heroCloseFade(focus) {
+    const g = focus?.model?.group;
+    if (!g || this.vehicles.driving) return;
+    const head = _camA.set(focus.pos.x, focus.pos.y + (focus.height ?? 1.8) * 0.75, focus.pos.z);
+    const d = this.camera.position.distanceTo(head);
+    if (d < 0.9 && g.visible) { g.visible = false; (this._occluded || (this._occluded = [])).push(g); }
   }
 
   /** Anything the camera is inside of or nearly touching (cars, people, the hero up close) is hidden for this frame,
