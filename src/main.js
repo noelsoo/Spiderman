@@ -352,6 +352,19 @@ class Game {
       const lon = dx * sy + dz * cy, lat = dx * cy - dz * sy;
       if (Math.abs(lon) < hl && Math.abs(lat) < hw && cp.y < v.pos.y + 2.4) hide(v.group);
     }
+    // view-frustum culling for people and cars (each is many meshes; off-screen ones still cost draw calls + shadow passes)
+    const fr = this._frustum || (this._frustum = new THREE.Frustum()), sph = this._sph || (this._sph = new THREE.Sphere());
+    const pm = this._pm || (this._pm = new THREE.Matrix4());
+    this.camera.updateMatrixWorld(); pm.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse); fr.setFromProjectionMatrix(pm);
+    const cullOut = (obj, pos, r, far) => {
+      if (!obj || !obj.visible) return;
+      const dx = pos.x - cp.x, dz = pos.z - cp.z;
+      sph.center.set(pos.x, pos.y + r * 0.5, pos.z); sph.radius = r;
+      if (dx * dx + dz * dz > far * far || !fr.intersectsSphere(sph)) hide(obj);
+    };
+    for (const v of this.vehicles.list ?? []) if (v.active && v !== this.vehicles.driving) cullOut(v.group, v.pos, 4, 400);
+    for (const p of this.peds.list ?? []) if (p.active && p.root) cullOut(p.root, p.pos, 1.6, 160);
+    for (const e of this.enemies.list ?? []) if (e.root) cullOut(e.root, e.pos, (e.height ?? 2) + 1, 600);
     const near = (e, r) => { const dx = cp.x - e.pos.x, dz = cp.z - e.pos.z, dy = cp.y - (e.pos.y + 1); return dx * dx + dz * dz < r * r && Math.abs(dy) < 1.6; };
     for (const p of this.peds.list ?? []) if (p.active && !p.dead && p.root && near(p, 0.75)) hide(p.root);
     for (const e of this.enemies.list ?? []) if (e.alive && e.root && near(e, (e.radius ?? 0.5) + 0.5)) hide(e.root);
