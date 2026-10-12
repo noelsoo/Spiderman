@@ -397,8 +397,8 @@ export function buildCity(ctx) {
   specs.forEach((s, idx) => {
     if (s.core) emitBuilding(ctx, rng, s, idx);
     else {
-      // outer districts: own random streams, cheaper roofs (cornices only where the buildings are seen up close)
-      ctx.rng2 = ctx.rng2N; ctx.detail = detail0 && s.district !== 'hells';
+      // outer districts: own random streams, cheaper roofs (cornices only on the Financial District supertalls)
+      ctx.rng2 = ctx.rng2N; ctx.detail = detail0 && s.district === 'fidi';
       emitBuilding(ctx, ctx.rngN, s, idx);
       ctx.rng2 = rng2; ctx.detail = detail0;
     }
@@ -449,7 +449,7 @@ function buildBlockBase(ctx, rng, blk) {
     sw.boxAll(x0, 0, z0, x1, 0.15, z1, 6, WHITE);
   }
   // lighter curb lip along the road edge
-  if (ctx.detail) {
+  if (ctx.detail && (blk.core || blk.district === 'fidi')) {
     const lip = [1.25, 1.24, 1.2], t = 0.32;
     sw.top(x0, z0, x1, z0 + t, 0.165, 6, lip); sw.top(x0, z1 - t, x1, z1, 0.165, 6, lip);
     sw.top(x0, z0 + t, x0 + t, z1 - t, 0.165, 6, lip); sw.top(x1 - t, z0 + t, x1, z1 - t, 0.165, 6, lip);
