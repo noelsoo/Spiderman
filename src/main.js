@@ -297,7 +297,7 @@ class Game {
       this.cam.update(rawDt, this.player.pos, { x: 0, y: 0 }, { speed: 0 });
     } else if (this.state === 'menu') {
       // slow orbit over the city behind the title screen
-      this.cam.update(rawDt, this.world.menuFocus ?? new THREE.Vector3(0, 60, 0), { x: rawDt * 0.05, y: 0 });
+      this.cam.update(rawDt, this.world.menuFocus ?? new THREE.Vector3(0, 60, 0), { x: rawDt * 0.045, y: Math.cos(performance.now() * 0.00017) * rawDt * 0.006 });   // slow cinematic drift
       this.vehicles.update?.(rawDt);
       this.peds.update?.(rawDt);
     }

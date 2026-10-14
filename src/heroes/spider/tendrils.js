@@ -21,7 +21,14 @@ class Tendril {
       idx.push(a, c, b, b, c, d);
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.P, 3)); g.setIndex(idx);
+    // Normals are REQUIRED: without a normal attribute the standard shader sees (0,0,0), normalises it to NaN and the
+    // tube renders as black pixels that bloom smears across the swing. Updated every frame in update().
+    this.N = new Float32Array(this.P.length);
+    for (let i = 0; i < this.N.length; i += 3) this.N[i + 1] = 1;
+    g.setAttribute('position', new THREE.BufferAttribute(this.P, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.N, 3));
+    g.setIndex(idx);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
     this.mesh = new THREE.Mesh(g, material());
     this.mesh.frustumCulled = false; this.mesh.visible = false;
     scene.add(this.mesh);
@@ -69,7 +76,7 @@ export class TendrilPool {
       _dir.multiplyScalar(1 / len);
       _u.set(-_dir.z, 0, _dir.x); if (_u.lengthSq() < 1e-6) _u.set(1, 0, 0); _u.normalize();
       _v.crossVectors(_dir, _u).normalize();
-      const n = t.segs, S = t.sides, P = t.P;
+      const n = t.segs, S = t.sides, P = t.P, N = t.N;
       const settle = 1 - 0.55 * ease((t.age - t.grow) / 0.2);   // whips wildly, then steadies
       for (let i = 0; i <= n; i++) {
         const s = tail + (head - tail) * (i / n);              // position along the full path
@@ -85,9 +92,11 @@ export class TendrilPool {
           const ca = Math.cos(ang) * r, sa = Math.sin(ang) * r;
           const o = (i * S + j) * 3;
           P[o] = _p.x + _u.x * ca + _v.x * sa; P[o + 1] = _p.y + _u.y * ca + _v.y * sa; P[o + 2] = _p.z + _u.z * ca + _v.z * sa;
+          const cn = Math.cos(ang), sn = Math.sin(ang);       // outward radial normal of the ring
+          N[o] = _u.x * cn + _v.x * sn; N[o + 1] = _u.y * cn + _v.y * sn; N[o + 2] = _u.z * cn + _v.z * sn;
         }
       }
-      t.mesh.geometry.attributes.position.needsUpdate = true;
+      t.mesh.geometry.attributes.position.needsUpdate = true; t.mesh.geometry.attributes.normal.needsUpdate = true;
       t.mesh.visible = true;
     }
   }

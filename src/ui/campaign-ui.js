@@ -102,9 +102,11 @@ export function installCampaignUI(HUD, H) {
     const g = this.game;
     g.audio?.unlock?.();
     this.lastHero = heroId;
-    this.hideMenus();
-    if (data?.mode === 'campaign') g.beginMission(data.missionId, heroId);
-    else g.begin(heroId);
+    if (data?.mode === 'browse') { this.heroSel = heroId; this.toast(`${HERO_INFO[heroId].name} selected as your favourite`); this._back(); return; }
+    this._launch(() => {
+      if (data?.mode === 'campaign') g.beginMission(data.missionId, heroId);
+      else g.begin(heroId);
+    });
   };
 
   // ------------------------------------------------------------------ chapter list
@@ -163,23 +165,39 @@ export function installCampaignUI(HUD, H) {
   };
 
   // ------------------------------------------------------------------ map choice (maps load at boot: switching reloads the page)
+  const SKY = {
+    nyc: '<svg viewBox="0 0 240 110" preserveAspectRatio="xMidYMax slice"><defs><linearGradient id="mn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2a66"/><stop offset="1" stop-color="#e8683a"/></linearGradient></defs><rect width="240" height="110" fill="url(#mn)"/><g fill="#0a0d1f"><rect x="6" y="52" width="22" height="58"/><rect x="30" y="34" width="18" height="76"/><rect x="50" y="62" width="26" height="48"/><path d="M82 110V40l8-22 8 22v70z"/><rect x="100" y="56" width="22" height="54"/><rect x="124" y="42" width="20" height="68"/><rect x="146" y="64" width="24" height="46"/><path d="M172 110V50h18V28h6v22h18v60z"/><rect x="214" y="58" width="22" height="52"/></g><g fill="#ffd98a" opacity=".7"><rect x="34" y="42" width="3" height="3"/><rect x="40" y="56" width="3" height="3"/><rect x="128" y="52" width="3" height="3"/><rect x="134" y="66" width="3" height="3"/><rect x="104" y="66" width="3" height="3"/><rect x="178" y="62" width="3" height="3"/><rect x="200" y="74" width="3" height="3"/><rect x="10" y="64" width="3" height="3"/></g></svg>',
+    singapore: '<svg viewBox="0 0 240 110" preserveAspectRatio="xMidYMax slice"><defs><linearGradient id="ms" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d3b5c"/><stop offset="1" stop-color="#2fb6a6"/></linearGradient></defs><rect width="240" height="110" fill="url(#ms)"/><g fill="#06141f"><path d="M40 110L52 30l12 80zM66 110L78 30l12 80zM92 110L104 30l12 80z" transform="translate(10 8)"/><rect x="40" y="26" width="86" height="8" rx="4" transform="translate(10 6)"/><path d="M158 110V62q10-24 20 0v48zM182 110V54q12-26 24 0v56z"/><rect x="0" y="96" width="240" height="14" fill="#0a2a3d"/></g><g fill="#ffd98a" opacity=".6"><rect x="164" y="76" width="3" height="3"/><rect x="190" y="70" width="3" height="3"/><rect x="198" y="84" width="3" height="3"/></g></svg>',
+  };
   P._build_mapselect = function (scr) {
     const g = this.game, cur = g.world?.id === 'singapore' ? 'singapore' : 'nyc';
-    scr.el.innerHTML = `<div class="panel" style="text-align:center"><h2>Free Roam</h2>
-      <div class="note" style="font-size:14px">Choose a map. Switching maps reloads the game.</div>
-      <div class="menu" style="margin:0 auto"></div></div>`;
-    const menu = scr.el.querySelector('.menu');
-    const add = (label, map) => {
-      const here = map === cur;
-      menu.appendChild(this._btn(scr, here ? `${label} (current)` : label, () => {
-        if (here) this._push('heroselect', { mode: 'freeroam' });
-        else g.switchMap(map, true);
-      }, here ? 'big' : ''));
-    };
-    add('New York', 'nyc');
-    add('Singapore \u2013 Marina Bay', 'singapore');
-    menu.appendChild(this._btn(scr, 'Back', () => this._back()));
+    scr.el.innerHTML = `<div class="msel"><h2>Free Roam</h2>
+      <div class="hsub">Choose a map. Switching maps reloads the game.</div>
+      <div class="mgrid"></div><div class="btnrow"></div></div>`;
+    const grid = scr.el.querySelector('.mgrid');
+    const defs = [
+      { map: 'nyc', name: 'New York', sub: 'Manhattan', c: '#e8683a', txt: 'Skyscraper canyons, avenues and rooftops: classic web-swinging.' },
+      { map: 'singapore', name: 'Singapore \u2013 Marina Bay', sub: 'Marina Bay', c: '#2fb6a6', txt: 'Waterfront towers, gardens and a glittering bay.' },
+    ];
+    for (const d of defs) {
+      const here = d.map === cur;
+      const c = document.createElement('div');
+      c.className = 'mcard';
+      c.style.setProperty('--c', d.c);
+      c.innerHTML = `<div class="art">${SKY[d.map]}${here ? '<em class="cur">CURRENT</em>' : ''}</div>
+        <div class="mi"><small>${esc(d.sub)}</small><h3>${esc(d.name)}</h3><p>${esc(d.txt)}</p><span class="go">${here ? 'Select hero' : 'Load map'}</span></div>`;
+      grid.appendChild(c);
+      this._item(scr, c, { act: () => { if (here) this._push('heroselect', { mode: 'freeroam' }); else g.switchMap(d.map, true); } });
+    }
+    scr.el.querySelector('.btnrow').appendChild(this._btn(scr, 'Back', () => this._back()));
     scr.index = cur === 'singapore' ? 1 : 0;
+    scr.nav = (dir) => {
+      const i = scr.index;
+      if (dir === 'left' || dir === 'right') { if (i < 2) this._focus(i === 0 ? 1 : 0); return true; }
+      if (dir === 'down') { if (i < 2) this._focus(2); return true; }
+      if (dir === 'up') { if (i === 2) this._focus(cur === 'singapore' ? 1 : 0); return true; }
+      return false;
+    };
   };
 
   /** Campaign is New York only: explain and offer to switch maps. */
@@ -194,16 +212,32 @@ export function installCampaignUI(HUD, H) {
   };
 
   // ------------------------------------------------------------------ hero select
+  // power / mobility / ranged / toughness, 1-5 (summary only, not gameplay values)
+  const STATS = {
+    spiderman: [3, 5, 3, 3, 'Agile web-slinger'], ironman: [4, 4, 5, 4, 'Armoured flyer'], hulk: [5, 3, 1, 5, 'Unstoppable brawler'],
+    thor: [5, 4, 4, 4, 'God of thunder'], wolverine: [4, 3, 1, 4, 'Feral healer'], captain: [3, 3, 3, 4, 'Super-soldier'],
+    hawkeye: [2, 3, 5, 2, 'Master marksman'], scarlet: [4, 3, 4, 3, 'Reality warper'], venom: [5, 4, 2, 4, 'Symbiote predator'],
+    carnage: [5, 4, 2, 3, 'Chaos incarnate'], antivenom: [4, 3, 3, 5, 'Cleansing guardian'],
+  };
+  const STAT_LABELS = ['Power', 'Mobility', 'Ranged', 'Toughness'];
   P._build_heroselect = function (scr) {
     const g = this.game, data = scr.data || { mode: 'freeroam' };
     const camp = data.mode === 'campaign' ? g.campaign.missions[data.missionId] : null;
+    const browse = data.mode === 'browse';
     const rec = camp?.recommended?.hero;
-    scr.el.innerHTML = `<div class="hsel"><h2>${camp ? esc(camp.title) : 'Free Roam'}</h2>
-      <div class="hsub">${camp ? `Choose your hero${rec ? ` &middot; recommended: <b>${esc(HERO_INFO[rec].name)}</b> (optional, any hero can win)` : ''}` : 'Choose your hero. Switch any time with the character wheel.'}</div>
-      <div class="hgrid"></div>
+    scr.el.innerHTML = `<div class="hsel"><h2>${camp ? esc(camp.title) : browse ? 'Heroes' : 'Free Roam'}</h2>
+      <div class="hsub">${camp ? `Choose your hero${rec ? ` &middot; recommended: <b>${esc(HERO_INFO[rec].name)}</b> (optional, any hero can win)` : ''}` : browse ? 'Browse the roster. Select a hero to make them your favourite.' : 'Choose your hero. Switch any time with the character wheel.'}</div>
+      <div class="hbody"><div class="hgrid"></div><div class="hdet" data-r="hdet"></div></div>
       <div class="note">${camp ? 'You can switch heroes at any time during the mission.' : ''}</div>
       <div class="btnrow"></div></div>`;
-    const grid = scr.el.querySelector('.hgrid');
+    const grid = scr.el.querySelector('.hgrid'), det = scr.el.querySelector('[data-r="hdet"]');
+    const paint = (id) => {
+      const info = HERO_INFO[id], st = STATS[id] || [3, 3, 3, 3, ''];
+      det.style.setProperty('--c', info.color);
+      det.innerHTML = `<div class="hd-top"><i class="pt">${EMBLEM[id]}</i><div><small>${esc(st[4])}</small><h3>${esc(g.heroes?.[id]?.name || info.name)}</h3></div></div>
+        <div class="hd-stats">${STAT_LABELS.map((l, k) => `<div><span>${l}</span><b>${[0, 1, 2, 3, 4].map((n) => `<i class="${n < st[k] ? 'on' : ''}"></i>`).join('')}</b></div>`).join('')}</div>
+        <ul>${info.powers.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`;
+    };
     ORDER.forEach((id, i) => {
       const info = HERO_INFO[id], h = g.heroes?.[id];
       const c = document.createElement('div');
@@ -211,14 +245,14 @@ export function installCampaignUI(HUD, H) {
       c.style.setProperty('--c', info.color || cssColor(h?.color, '#fff'));
       c.innerHTML = `${id === rec ? '<em class="recb">RECOMMENDED</em>' : ''}<div class="pt">${EMBLEM[id]}</div><div class="ct"><h3>${esc(h?.name || info.name)}</h3><ul>${info.powers.slice(0, 3).map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>`;
       grid.appendChild(c);
-      this._item(scr, c, { act: () => this._startFromSelect(id, data) });
+      this._item(scr, c, { act: () => this._startFromSelect(id, data), onFocus: () => paint(id) });
     });
     scr.el.querySelector('.btnrow').appendChild(this._btn(scr, 'Back', () => this._back()));
     const idx = ORDER.indexOf(this.lastHero || 'spiderman');
     scr.index = idx >= 0 ? idx : 0;
     const N = ORDER.length;
-    const COLS = 4, ROWS = Math.ceil(N / COLS);
     scr.nav = (dir) => {
+      const COLS = Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').length), ROWS = Math.ceil(N / COLS);
       const i = scr.index;
       if (i === N) { // back button: up returns to the last row, same column (clamped)
         if (dir === 'up') this._focus(Math.min(N - 1, (ROWS - 1) * COLS + (this._hcol ?? 0)));

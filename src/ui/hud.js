@@ -5,7 +5,30 @@
 import './hud.css';
 import { installCampaignUI } from './campaign-ui.js';
 import { installSettingsUI } from './settings.js';
+import './menu.css';
 
+const PAD_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10c2.5 0 4 1.8 4.6 5l.7 4.4c.3 2-1.100 3.200-2.800 2.200L16 16.500H8l-3.500 2.100c-1.700 1-3.100-.2-2.800-2.200l.7-4.400C3 8.800 4.500 7 7 7z" opacity=".35"/><path d="M7.500 9.500h1.200v1.300h1.300V12H8.700v1.300H7.500V12H6.200v-1.200h1.300z"/><circle cx="15.500" cy="10.500" r=".9"/><circle cx="17.600" cy="12.600" r=".9"/></svg>';
+const LOGO_SVG = `<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img">
+  <defs>
+    <linearGradient id="lgR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff5a6c"/><stop offset="0.55" stop-color="#e8213a"/><stop offset="1" stop-color="#7a0716"/></linearGradient>
+    <linearGradient id="lgS" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f4f6ff"/><stop offset="1" stop-color="#8d96c2"/></linearGradient>
+    <filter id="lgG" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g class="lg-web" stroke="rgba(255,255,255,0.22)" stroke-width="1" fill="none">
+    <path d="M0 150 L760 150 M380 0 L380 300 M120 20 L640 280 M640 20 L120 280"/>
+    <path d="M380 150 m-70 0 a70 70 0 0 1 140 0 a70 70 0 0 1 -140 0 M380 150 m-140 0 a140 140 0 0 1 280 0 a140 140 0 0 1 -280 0"/>
+  </g>
+  <g transform="translate(380 36) scale(0.9)" filter="url(#lgG)" class="lg-spider">
+    <path d="M0 -4 L7 10 L22 -12 L12 16 L34 12 L14 26 L0 46 L-14 26 L-34 12 L-12 16 L-22 -12 L-7 10 Z" fill="#e8213a" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  </g>
+  <g transform="skewX(-10) translate(36 0)">
+    <text x="70" y="176" textLength="620" lengthAdjust="spacingAndGlyphs" font-family="Impact, 'Arial Black', 'Helvetica Neue', sans-serif" font-weight="900" font-size="124" fill="#05060c" stroke="#05060c" stroke-width="14" stroke-linejoin="round">SPIDER-MAN</text>
+    <text x="70" y="176" textLength="620" lengthAdjust="spacingAndGlyphs" font-family="Impact, 'Arial Black', 'Helvetica Neue', sans-serif" font-weight="900" font-size="124" fill="url(#lgR)" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" filter="url(#lgG)" class="lg-main">SPIDER-MAN</text>
+    <path class="lg-drip" d="M170 186 q0 30 6 42 q6 -12 6 -42 z M390 186 q0 22 5 32 q5 -10 5 -32 z M560 186 q0 36 7 50 q7 -14 7 -50 z" fill="#0a0b14" stroke="#e8213a" stroke-width="1.5"/>
+    <rect x="72" y="196" width="150" height="3" fill="#e8213a"/><rect x="540" y="196" width="150" height="3" fill="#e8213a"/>
+    <text x="380" y="262" text-anchor="middle" font-family="Impact, 'Arial Black', 'Helvetica Neue', sans-serif" font-weight="900" font-size="54" letter-spacing="22" fill="url(#lgS)" stroke="#05060c" stroke-width="6" paint-order="stroke">SYMBIOTE CITY</text>
+  </g>
+</svg>`;
 const ORDER = ['spiderman', 'ironman', 'hulk', 'thor', 'wolverine', 'captain', 'hawkeye', 'scarlet', 'venom', 'carnage', 'antivenom'];
 
 const S = (body, fill = 'none') => `<svg viewBox="0 0 24 24" fill="${fill}" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -447,7 +470,7 @@ export class HUD {
 
   _activate() {
     const it = this.screen?.items[this.screen.index];
-    if (!it) return;
+    if (!it || this._launching) return;
     this.game.audio?.unlock?.();
     this.game.audio?.play('ui_select');
     it.act?.();
@@ -481,23 +504,38 @@ export class HUD {
 
   _build_title(scr) {
     scr.el.innerHTML = `
-      <div class="top"><h1>Spider-Man<em>Symbiote City</em></h1><div class="tagline">Sinister Symbiosis</div></div>
-      <div class="bottom">
-        <div class="menu"></div>
-        <div class="hint" data-r="starthint"></div>
+      <div class="tt-sky"></div><div class="tt-vig"></div>
+      <div class="tt-main">
+        <div class="tt-logo" aria-label="Spider-Man: Symbiote City">${LOGO_SVG}</div>
+        <div class="tt-menu menu" role="menu"></div>
+        <div class="tt-desc" data-r="desc"></div>
+      </div>
+      <div class="tt-bar">
         <div class="padind" data-r="padind" title="Controller settings"></div>
+        <div class="hint" data-r="starthint"></div>
       </div>
       <div class="foot">Fan-made tribute &middot; not affiliated with Marvel or Insomniac</div>`;
     const menu = scr.el.querySelector('.menu');
-    const mk = (label, act, cls) => { const b = this._btn(scr, label, act, cls); menu.appendChild(b); return b; };
-    mk('Campaign', () => this._push(this.game.world?.id === 'singapore' ? 'campaignmap' : 'campaign'), 'big');
-    mk('Free Roam', () => this._push('mapselect'));
-    mk('Controls', () => this._push('controls'));
-    mk('Settings', () => this._push('settings'));
+    const desc = scr.el.querySelector('[data-r="desc"]');
+    const C = this.game.campaign;
+    const sg = this.game.world?.id === 'singapore';
+    const played = !!C && Object.keys(C.progress?.done || {}).length > 0;
+    const mk = (label, act, text, cls = '') => {
+      const b = this._btn(scr, label, act, `tt-item ${cls}`);
+      b.setAttribute('role', 'menuitem');
+      scr.items[scr.items.length - 1].onFocus = () => { desc.textContent = text; desc.classList.remove('pop'); void desc.offsetWidth; desc.classList.add('pop'); };
+      menu.appendChild(b); return b;
+    };
+    mk(played ? 'Continue' : 'Campaign', () => this._push(sg ? 'campaignmap' : 'campaign'),
+      played ? 'Pick up the Sinister Symbiosis story where you left off.' : 'Sinister Symbiosis: stop the symbiote outbreak across New York.', 'big');
+    mk('Free Roam', () => this._push('mapselect'), 'Swing, fly and fight across an open city. Choose New York or Singapore.');
+    mk('Heroes', () => this._push('heroselect', { mode: 'browse' }), 'Browse the roster and pick your favourite hero.');
+    mk('Settings', () => this._push('settings'), 'Graphics, audio, camera, controls and accessibility.');
+    mk('Controls', () => this._push('controls'), 'Keyboard, mouse and controller layouts for every hero.');
     scr.padind = scr.el.querySelector('[data-r="padind"]');
     scr.padind.addEventListener('click', () => { this.game.audio?.play('ui_select'); this._push('controller'); });
     scr.starthint = scr.el.querySelector('[data-r="starthint"]');
-    scr.nav = (dir) => { this._focus(scr.index + (dir === 'left' || dir === 'up' ? -1 : 1)); return true; };
+    scr.nav = (dir) => { if (dir === 'up' || dir === 'down') this._focus(scr.index + (dir === 'up' ? -1 : 1)); return true; };
     this._titleStatus(scr, true);
   }
 
@@ -514,32 +552,47 @@ export class HUD {
     scr.padSig = sig;
     let html, cls;
     if (connected) {
-      const key = this._xbox() ? 'A' : inp.isPlayStation ? '✕' : '✕ / A';
-      html = `Controller connected: ${esc(name)} &mdash; press ${key}`;
+      html = `<i class="pd-ic">${PAD_SVG}</i><span><b>Controller connected</b><small>${esc(name)}</small></span>`;
       cls = 'ok';
     } else {
       cls = 'warn';
-      if (!api) html = 'Your browser does not expose the Gamepad API. Use Chrome or Edge, in its own tab, to play with a controller.';
+      if (!api) html = `<i class="pd-ic">${PAD_SVG}</i><span><b>No Gamepad API</b><small>Use Chrome or Edge in its own tab for controller support</small></span>`;
       else {
-        html = 'No controller detected: press any button on it. If it\'s still missing, open the game in its own tab/window (embedded pages can block controllers), use Chrome/Edge, or connect via USB.';
-        if (isEmbedded()) html += ' <b>This page is embedded in another page (iframe) &mdash; browsers often block controllers there.</b>';
-        if (list.length) html += ` <span class="dim">Ignored device${list.length > 1 ? 's' : ''}: ${list.map((p) => esc((p.id || '?').slice(0, 48))).join(' &middot; ')}</span>`;
+        let sm = 'Press any button on it. Still missing? Open the game in its own tab, or use USB.';
+        if (isEmbedded()) sm += ' This page is embedded (iframe): browsers often block controllers there.';
+        if (list.length) sm += ` Ignored: ${list.map((p) => esc((p.id || '?').slice(0, 40))).join(' / ')}`;
+        html = `<i class="pd-ic">${PAD_SVG}</i><span><b>No controller detected</b><small>${sm}</small></span>`;
       }
     }
     scr.padind.className = `padind ${cls}`;
-    scr.padind.innerHTML = html + ' <u>Controller settings</u>';
-    const pad = connected;
-    scr.starthint.innerHTML = pad
-      ? `${this._glyph('jump', true)} select &nbsp;&middot;&nbsp; D-pad ◀ ▶ navigate`
-      : 'Click / press Enter to select &nbsp;&middot;&nbsp; ◀ ▶ navigate';
+    scr.padind.innerHTML = html;
+    const ok = connected ? (this._xbox() ? 'A' : inp.isPlayStation ? '✕' : '✕') : 'Enter';
+    const bk = connected ? (this._xbox() ? 'B' : '○') : 'Esc';
+    const nv = connected ? 'D-pad' : '↑ ↓';
+    scr.starthint.innerHTML = `<span><kbd>${ok}</kbd> Select</span><span><kbd>${bk}</kbd> Back</span><span><kbd>${nv}</kbd> Navigate</span>`;
+  }
+
+  /** Fade to black, run the start function, then fade the new scene in. */
+  _launch(fn) {
+    if (this._launching) return;
+    this._launching = true;
+    const f = document.createElement('div');
+    f.className = 'launchfade';
+    this.root.appendChild(f);
+    requestAnimationFrame(() => f.classList.add('on'));
+    setTimeout(() => {
+      try { this.hideMenus(); fn(); } finally {
+        f.classList.remove('on');
+        setTimeout(() => { f.remove(); this._launching = false; }, 650);
+      }
+    }, 450);
   }
 
   _start() {
     const g = this.game, id = this.heroSel;
     g.audio?.unlock?.();
     this.lastHero = id;
-    this.hideMenus();
-    g.begin(id);
+    this._launch(() => g.begin(id));
   }
 
   // ---- pause
