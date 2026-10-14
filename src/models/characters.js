@@ -625,7 +625,7 @@ export function buildSymbiote(cfg = {}) {
   const vn = veinNormal(anti ? 5 : 3, 3.4);
   const symOpt = anti
     ? { id: 'anti', color: 0xffffff, map: antiStreakTexture(), rim: 0x9fe8ff, rimK: 0.5, rough: 0.16, normalMap: vn, normalScale: 0.9 }
-    : { id: 'venom', color: 0x040407, rim: 0x2f6bff, rimK: 0.8, rough: 0.12, normalMap: vn, normalScale: 1.1 };
+    : { id: 'venom', color: 0x040407, rim: 0x3a6cff, rimK: 0.55, rough: 0.12, normalMap: vn, normalScale: 1.1 };
   const sym = symMat(symOpt);
   const info = buildBody(model, {
     mats: { default: sym },

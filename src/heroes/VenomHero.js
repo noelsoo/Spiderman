@@ -32,7 +32,7 @@ const CLAW = [
 let SKIN = null;
 function skin() {
   return SKIN || (SKIN = {
-    tend: new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.16, metalness: 0.4, emissive: 0x16084a, emissiveIntensity: 0.5 }),
+    tend: new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.16, metalness: 0.4, emissive: 0x10063a, emissiveIntensity: 0.35 }),
     spike: new THREE.MeshStandardMaterial({ color: 0x07070c, roughness: 0.2, metalness: 0.4, emissive: 0x2a0a66, emissiveIntensity: 0.8 }),
   });
 }
