@@ -640,7 +640,7 @@ export function buildSymbiote(cfg = {}) {
   // eyes: huge jagged white
   const eyeM = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.5, roughness: 0.2 });
   if (anti) addEyes(model, H, 'venom', eyeM, std(0x050508, { roughness: 0.3 }), { grow: 0.56, dy: -0.004, lift: 0.014, depth: 0.01, dx: 0.0, rimGrow: 1.0, rimDx: 0.0, rimDy: 0.0 });
-  else addEyes(model, H, 'venom', eyeM, null, { grow: 1.1, dy: -0.01, lift: 0.012, depth: 0.01, dx: 0.0 });
+  else addEyes(model, H, 'venom', eyeM, null, { grow: 1.3, dy: -0.01, lift: 0.012, depth: 0.01, dx: 0.0 });
   const fangs = !anti;
   // mouth: Venom = huge toothy maw + long tongue; Anti-Venom = closed grin line with a few fangs
   const mouth = std(0x1a0508, { roughness: 0.6 });

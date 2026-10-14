@@ -241,12 +241,12 @@ S.swing = (m, p, c) => {
     p.set(aJ, e.x, e.y, e.z);
   } else p.set(aJ, -2.7, 0, side * 0.25);
   p.set(aE, -0.12);
-  p.set(oJ, 0.7, 0, -side * 0.55); p.set(oE, -0.9);
+  p.set(oJ, 1.0 + 0.12 * Math.sin(c.tm * 3), 0, -side * 0.6); p.set(oE, -0.55);
   // legs tuck at the bottom of the arc (falling / level) and stretch out as the swing rises toward release
   const tuck = clamp(0.95 - v.y * 0.07, 0.12, 1.0) + 0.05 * Math.sin(c.tm * 2.3);
   p.set(TL, -0.55 * tuck - 0.1, 0, 0.1); p.set(KL, 1.5 * tuck); p.set(TR, 0.1 - 0.2 * tuck, 0, -0.1); p.set(KR, 1.3 * tuck + 0.2);
   p.set(FL, 0.7); p.set(FR, 0.7);
-  p.set(H, pitch, 0, -side * 0.12); p.set(CH, 0.1, side * 0.2, 0); p.set(HD, -pitch * 0.5 - 0.1, 0, 0);
+  p.set(H, pitch, 0, -side * 0.12); p.set(CH, 0.1, side * 0.32, -side * 0.08); p.set(HD, -pitch * 0.5 - 0.1, 0, 0);
 };
 /** Spider-Man SM2 perch: deep crouch on the balls of the feet, knees wide, right hand planted between the feet, left forearm on the knee, head up scanning. */
 S.perch = (m, p, c) => {

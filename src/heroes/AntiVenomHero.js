@@ -61,7 +61,7 @@ export class AntiVenomHero extends SymbioteHero {
         wallSpeed: 9, wallSprint: 15, wallJumpOut: 12, wallJumpUp: 14,
         glide: true, glideSpeed: 22, glideFall: -3.5,
         dashSp: 22, dashTime: 0.2, dodgeCd: 0.6, fxColor: HALO,
-        launch: { range: 60, minDist: 6, speed: 34, accel: 70, lift: 0.3, steer: 9, cd: 0.3, maxT: 2.4, endDist: 2, releaseUp: 5, keep: 0.92, width: 0.12 },
+        launch: { range: 60, minDist: 6, speed: 34, accel: 70, lift: 0.3, steer: 9, cd: 0.3, maxT: 2.4, endDist: 2, releaseUp: 5, keep: 0.92, width: 0.055 },
       },
     });
     this.waves = new PressureWaves(game.scene, 4);
