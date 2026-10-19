@@ -1,0 +1,98 @@
+# Handover: Spider-Man: Symbiote City
+
+Paste the "Starting prompt" section into a new chat to continue. Everything else is reference.
+
+## Starting prompt
+
+> Continue work on the Spider-Man: Symbiote City game. Repo `noelsoo/Spiderman`, branch `claude/sharp-turing-uf9t1w`. Read `docs/HANDOVER.md` and `docs/ARCHITECTURE.md` first. Develop on that branch, commit and push when done, and do not open a pull request unless I ask. Start with the "Next steps" list in the handover.
+
+## Project in one paragraph
+
+A fan-made open-world superhero game inspired by Marvel's Spider-Man 2 (PS5). three.js 0.170 plus Vite 5, plain ES modules, no engine. It runs in a browser, as an Electron desktop app (`desktop/`) and as an installable PWA. Keyboard and mouse or a PS4 pad. 11 playable heroes, a 10-mission campaign, a GTA-style sandbox (cars, police, guns) and two maps: New York and Singapore (Marina Bay). All models, textures and audio are procedural, so there are no licensed assets.
+
+## Where things are
+
+- Repo: https://github.com/noelsoo/Spiderman
+- Branch: `claude/sharp-turing-uf9t1w` (everything is pushed; no pull request opened)
+- Playable build (Claude artifact, private): https://claude.ai/artifact/XunNf47u7mQeViiiuS69aP (version 9 at time of writing)
+- Run locally: `npm install && npm run build && npx vite preview --port 8080 --host`, then open http://localhost:8080. Port 5173 was blocked on the user's machine, so use 8080 or any free port.
+- Desktop app: `cd desktop && npm install && npm start`
+- Force-reload after updating (Ctrl+Shift+R): the service worker caches the old build.
+
+## Current state
+
+Working and verified in headless tests: all 11 heroes clear goon fights, all 10 missions complete and unlock, drive/steal/exit cars, wanted level and police, gun shops, fake DS4 input, Spider-Man swing (about 245 m in 8 s), the Singapore map in Free Roam (traffic on the left, peds, police, shops), New York unchanged.
+
+Heroes (`HERO_ORDER`): spiderman, ironman, hulk, thor, wolverine, captain, hawkeye, scarlet, venom, carnage, antivenom.
+
+Recent work, newest first:
+1. Swing pose tweaks and bigger Venom eyes; thinner Anti-Venom tendril.
+2. Black-pixel fix. Root cause: pooled tendril tube geometry in `src/heroes/spider/tendrils.js` had no `normal` attribute, so the lit material produced NaN and black pixels, which bloom spread. Normals are now written every frame.
+3. New home screen (`src/ui/hud.js`, `src/ui/campaign-ui.js`, `src/ui/menu.css`): SVG logo, left menu, controller badge, hero cards with stat panel, map choice cards, fade into gameplay.
+4. Singapore map wired in (`settings.map`, reload-based switch via `Game.switchMap`, `sm-open` sessionStorage flag).
+5. Frustum and distance culling for cars, peds and enemies in `Game._hideNearCameraOccluders` (`src/main.js`). Midtown draw calls 639 to 481.
+6. Bigger New York (about 6x area): Financial District, Upper West/East Side, Hell's Kitchen, Brooklyn, South Bridge, tiled LOD.
+
+## Architecture cheat sheet
+
+Full contracts are in `docs/ARCHITECTURE.md` (v1 to v3 plus Map v3). Key points:
+
+- One shared `game` object (in `src/main.js`) holds `scene, camera, renderer, post, events, physics, input, cam, world, fx, combat, enemies, vehicles, peds, economy, weapons, campaign, audio, hud, player, heroes`. States: loading, menu, playing, paused, overlay, gameover. `game.mode` is `'freeroam'` or `'campaign'`.
+- Heroes extend `src/heroes/Hero.js`. Hooks: `updateAbilities`, `updateVisuals`, `onActivate/onDeactivate`, `abilityHints`. Aim convention: `usesAim`, `aimPreset`, `pressedSpecial()`, `pressedAbility2()`, `fireDown()`.
+- Registries: `registerEnemy(kind, Cls)` in `src/enemies/index.js`; `registerModel(id, builder)` in `src/models/index.js`. Villain modules are imported from `src/enemies/villains/index.js`.
+- Physics (`src/core/physics.js`): AABBs in an XZ spatial grid. `resolveCapsule` returns `wallBox/groundBox`; heroes expose `wallContact/groundContact`.
+- Input (`src/core/input.js`): `BINDINGS` table (keys, mouse, wheel, pad). Raw pads are mapped to the standard layout via `PROFILES`. `consume()` works per source and `prev` tracks the raw state.
+- Camera (`src/core/camera.js`): `requestAim(params)` per frame, sphere-cast collision with smoothed distance.
+- World: `src/world/` is New York; `src/world/sg/` is Singapore (`SingaporeWorld`, same API as `World`, sets `world.id = 'singapore'`). New York has no `id`. Grid constants are in `src/world/grid.js`.
+- Events: `enemy:killed`, `hero:switch`, `vehicle:enter/exit`, `crime`, `cash`, `weapon:fired`, `boss:defeated`.
+- Boss fairness rule: exposed windows of at least 3 s, telegraphs via `windup`, phases at 66% and 33%.
+- Quality tiers low/medium/high/ultra; software GL forces low; `window.__FORCE_WORLD_QUALITY` overrides.
+
+## Gotchas that cost time before
+
+- Procedural texture canvases must use `getContext('2d', { willReadFrequently: true })`, otherwise GPU readback hangs loading.
+- Any custom `BufferGeometry` drawn with a lit material needs a `normal` attribute (the tendril bug above).
+- `Ped` already has its own `radius`/`height` fields; adding getters for them crashed loading.
+- Held, consumed buttons must not re-fire (exiting a car re-entered it). Keep `prev` on raw state.
+- Do not use `pkill -f <broad pattern>`; it kills your own shell.
+- Sonnet subagents hit rate limits twice and sometimes loop on their final report. Resume with SendMessage; stop a looping agent with TaskStop.
+- Software GL (swiftshader) is about 1/8 real time. Keep test viewports small (640x360) and prefer medium quality for speed.
+
+## Testing recipe (headless Playwright)
+
+- Playwright is global at `/opt/node22/lib/node_modules/playwright`; use `createRequire` to load it. Chromium args: `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`.
+- Serve a `vite build --outDir /tmp/<name>` with a tiny static node server (base is `./`).
+- Before load, set `window.__FORCE_WORLD_QUALITY` and `localStorage['sm-settings']` (for example `{"quality":"high","map":"singapore"}`).
+- Wait for `game.state === 'menu'`, then stop the loop and step manually:
+  `game.renderer.setAnimationLoop(null); game.clock.getDelta = () => 1/30; game.begin('venom'); game.frame();`
+- For a screenshot, render once with the loop paused, then capture.
+- Spider-Man's suit toggle is `_toggleSuit()` (not `toggleSuit`); allow about 30 frames for the 0.6 s transform.
+- Fake DS4: monkeypatch `navigator.getGamepads`.
+- Check draw calls with `renderer.info.render.calls`.
+- Publishing the artifact: build to the scratchpad `artifact/` folder, then Artifact publish with the same `index.html` path and `url`. Remove old hashed assets by passing them as `null` in `files`.
+
+## Next steps (priority order)
+
+1. **Get the user's answer on "viewmodel"** (open since two turns ago). They asked for the viewmodel to be improved twice. Ask what they see: screen going black when cars pass, hero's hands/arms, weapon in hand, or camera clipping. The camera work done so far (sphere-cast, hero close fade, car-lift, occluder hiding) may not address their meaning.
+2. **Symbiote heroes still need real work.** The user said Venom, Carnage and Anti-Venom "still need work". The last pass only made small tweaks, because the models already had marbled skin, tendrils, blades, teeth and tongue. Ask for a screenshot or specifics (shape, colour, animation, powers). Candidates: stronger silhouette per hero, distinct idle/run/attack animation sets, more visible power effects, Anti-Venom tendril still glows too bright up close.
+3. **Untested items from the menu and map work:** PS4 pad navigation on the new title screen; the `sm-open` map-switch reload flow end to end in a real browser; the Settings > Gameplay "Free Roam map" row (the agent's regex check returned false, probably a case issue, never re-run); menu shots at 800 and 390 widths for map choice and campaign were not viewed.
+4. **Singapore rough edges:** Merlion tail hard to read, rain trees blobby, Shoppes podium is a plain slab, rain look never reviewed, highway intersections have no signal lamps (fallback phase), ejected-driver animation assumes a left-side seat, `layout.js`/`roads.js` comments describe the lane model backwards (true left-hand traffic is implemented), gun shops still use New York names, swing not re-verified on the final Singapore build. Campaign objectives in `src/campaign/objectives.js` are New York only; Campaign is gated to New York in the menu.
+5. **Police near the player showed 0 in the big New York tests.** Confirm police spawn at wanted level in the bigger map (Singapore at wanted 3 produced 7 cops, so likely fine, but not shown on New York).
+6. **Performance:** peds and vehicles are now culled, but there is still headroom to look at (instancing for peds/cars, shared materials). Aerial views are the worst case. Target was under 350 draw calls.
+7. **Optional:** a HUD rage bar for black-suit Spider-Man from `player.rage` / `player.raging` (requested by the black-suit work); New York `World` has no `id`, add `id: 'nyc'` for consistency; aerial skyline cylinder shows pale cutouts and near/far LOD tiles differ in colour from very high up.
+8. Run the full regression before shipping (hero fight sim for all 11 heroes, missions 1 to 10, drive/steal, shops, DS4), then commit, push and republish the artifact.
+
+## User preferences to respect
+
+Direct answers, no preamble or wrap-up. British English, SGD, metric. Short paragraphs. State confidence when unsure. Push back when something does not hold. No em dashes. The user wants code to run the game on request (the commands above) and prefers Sonnet subagents for features with the stronger model on structure and architecture.
+
+## Commit conventions
+
+Develop on `claude/sharp-turing-uf9t1w`. Push with `git push -u origin claude/sharp-turing-uf9t1w`. End commit messages with:
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01FA75x2UzsQ583eJVoZH1as
+```
+
+Use the attribution lines the new session's own instructions give instead if they differ. Do not open a pull request unless asked.
