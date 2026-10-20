@@ -21,16 +21,78 @@ function reflWalls(ctx, mat, x0, y0, z0, x1, y1, z1, st, col) {
 }
 
 // ---------------------------------------------------------------- Marina Bay Sands
+const FLOOR_H = 3.6, FACADE_ROWS = 6, FACADE_COLS = 8;
+const FACADE = { tw: 24, th: FLOOR_H * FACADE_ROWS };
+const smooth = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+/** Glazed tower facade: one shared material (colour + emissive + roughness/metalness canvases). */
+function mbsFacadeMaterial(ctx) {
+  if (ctx.M.mbsGlass) return ctx.M.mbsGlass;
+  const S = 512, cw = S / FACADE_COLS;
+  const mk = () => { const c = document.createElement('canvas'); c.width = c.height = S; return [c, c.getContext('2d', { willReadFrequently: true })]; };
+  const [cc, a] = mk(), [ce, e] = mk(), [co, o] = mk();
+  e.fillStyle = '#000'; e.fillRect(0, 0, S, S);
+  o.fillStyle = 'rgb(255,60,235)'; o.fillRect(0, 0, S, S);
+  let seed = 1234567;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let r = 0; r < FACADE_ROWS; r++) {
+    const y0 = Math.floor(r * S / FACADE_ROWS), y1 = Math.floor((r + 1) * S / FACADE_ROWS), ch = y1 - y0;
+    const floorLit = rnd() < 0.35;
+    const sp = Math.round(ch * 0.26); // spandrel (floor slab) at the bottom of each storey
+    for (let c = 0; c < FACADE_COLS; c++) {
+      const x0 = c * cw;
+      const sh = rnd();
+      // glass pane: deep blue-grey with a vertical sky-reflection gradient
+      const g = a.createLinearGradient(0, y0, 0, y1 - sp);
+      g.addColorStop(0, `rgb(${120 + sh * 30 | 0},${165 + sh * 30 | 0},${205 + sh * 30 | 0})`);
+      g.addColorStop(1, `rgb(${52 + sh * 18 | 0},${88 + sh * 20 | 0},${130 + sh * 25 | 0})`);
+      a.fillStyle = g; a.fillRect(x0, y0, cw, ch - sp);
+      // spandrel band: pale aluminium
+      a.fillStyle = 'rgb(176,186,198)'; a.fillRect(x0, y1 - sp, cw, sp);
+      a.fillStyle = 'rgb(120,130,144)'; a.fillRect(x0, y1 - 2, cw, 2);
+      // mullions
+      a.fillStyle = 'rgb(150,160,172)'; a.fillRect(x0, y0, 2, ch - sp);
+      // night window
+      if (floorLit ? rnd() < 0.85 : rnd() < 0.3) {
+        const warm = rnd() < 0.7;
+        e.fillStyle = warm ? `rgb(255,${200 + rnd() * 30 | 0},${120 + rnd() * 40 | 0})` : 'rgb(190,225,255)';
+        e.fillRect(x0 + 3, y0 + 2, cw - 4, ch - sp - 3);
+      }
+      // roughness (G) and metalness (B): glass smooth+metallic, slab rougher
+      o.fillStyle = 'rgb(255,70,235)'; o.fillRect(x0, y0, cw, ch - sp);
+      o.fillStyle = 'rgb(255,150,150)'; o.fillRect(x0, y1 - sp, cw, sp);
+      o.fillStyle = 'rgb(255,190,120)'; o.fillRect(x0, y0, 2, ch - sp);
+    }
+  }
+  const tex = (cv, srgb) => {
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    return t;
+  };
+  const map = tex(cc, true), emissiveMap = tex(ce, true), orm = tex(co, false);
+  const opt = { map, emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, vertexColors: true };
+  const m = ctx.quality === 'low'
+    ? new THREE.MeshLambertMaterial(opt)
+    : new THREE.MeshStandardMaterial({ ...opt, roughnessMap: orm, metalnessMap: orm, roughness: 1, metalness: 0.7, envMapIntensity: 1.7 });
+  ctx.M.mbsGlass = m;
+  ctx.mbsMat = m; // night emissive is driven from LightShow.update
+  return m;
+}
+
 export function buildMBS(ctx) {
-  const X = MBS.x, H = MBS.h, N = 16, THICK = 14, HZ = 25, BASE = 24, TOP = 7.5;
-  const st = STYLES.glassBlue;
-  const col = [0.8, 0.95, 1.1];
+  mbsFacadeMaterial(ctx);
+  const st = { mat: 'mbsGlass', tw: FACADE.tw, th: FACADE.th };
+  const X = MBS.x, H = MBS.h, N = 20, THICK = 14, HZ = 25, BASE = 24, TOP = 7.5;
+  const col = [0.9, 0.95, 1.05];
   const refl = ctx.refl;
-  MBS.towerZ.forEach((zc, ti) => {
+  // legs lean together along a gentle curve (inverted V per tower)
+  const legC = (t) => lerp(BASE, TOP, 0.88 * t + 0.12 * t * t);
+  MBS.towerZ.forEach((zc) => {
     for (const side of [-1, 1]) {
       for (let k = 0; k < N; k++) {
         const t0 = k / N, t1 = (k + 1) / N, y0 = H * t0, y1 = H * t1;
-        const c0 = X + side * lerp(BASE, TOP, t0), c1 = X + side * lerp(BASE, TOP, t1);
+        const c0 = X + side * legC(t0), c1 = X + side * legC(t1);
         const dc = c1 - c0, dy = y1 - y0, nl = Math.hypot(dc, dy);
         const b = ctx.chunks.bucket(X, zc, st.mat);
         const hz = HZ;
@@ -46,85 +108,118 @@ export function buildMBS(ctx) {
         const ux0 = (c0 - THICK / 2) / st.tw, ux1 = (c0 + THICK / 2) / st.tw;
         b.quad([c0 - THICK / 2, y0, zc + hz], [c0 + THICK / 2, y0, zc + hz], [c1 + THICK / 2, y1, zc + hz], [c1 - THICK / 2, y1, zc + hz], 0, 0, 1, ux0, v0, ux1, v1, col);
         b.quad([c0 + THICK / 2, y0, zc - hz], [c0 - THICK / 2, y0, zc - hz], [c1 - THICK / 2, y1, zc - hz], [c1 + THICK / 2, y1, zc - hz], 0, 0, -1, ux0, v0, ux1, v1, col);
-        if (refl) {
-          // mirrored copy: reuse quads cheaply by emitting the vertical-box approximation
-          reflWalls(ctx, st.mat, Math.min(c0, c1) - THICK / 2, y0, zc - hz, Math.max(c0, c1) + THICK / 2, y1, zc + hz, st, col);
-        }
+        if (refl) reflWalls(ctx, st.mat, Math.min(c0, c1) - THICK / 2, y0, zc - hz, Math.max(c0, c1) + THICK / 2, y1, zc + hz, st, col);
         addBox(ctx, Math.min(c0, c1) - THICK / 2, y0, zc - hz, Math.max(c0, c1) + THICK / 2, y1, zc + hz, 'building', 'mbs');
-        // glowing corner LEDs
-        const cm = (c0 + c1) / 2;
-        for (const s2 of [-1, 1]) for (const zz of [zc - hz - 0.15, zc + hz - 0.15]) lightBox(ctx, cm + s2 * (THICK / 2) - 0.2, y0, zz, cm + s2 * (THICK / 2) + 0.2, y1, zz + 0.3, [0.5, 0.75, 1.0]);
-        if (k === N - 1) ctx.chunks.bucket(X, zc, 'roof').top(c1 - THICK / 2, zc - hz, c1 + THICK / 2, zc + hz, y1, 8, WHITE);
+        // glowing corner LEDs on the outer edges
+        const cm = (c0 + c1) / 2, so = side * (THICK / 2);
+        for (const zz of [zc - hz - 0.15, zc + hz - 0.15]) lightBox(ctx, cm + so - 0.2, y0, zz, cm + so + 0.2, y1, zz + 0.3, [0.5, 0.75, 1.0]);
       }
     }
-    // cross-bracing atrium glass between the legs at the base (dark glass)
-    ctx.chunks.bucket(X, zc, 'night').boxAll(X - 3, 10, zc - hzOf(), X + 3, 70, zc - hzOf() + 0.3, 1, [0.1, 0.18, 0.3]);
+    // lobby glazing at the base of each tower
+    ctx.chunks.bucket(X, zc, 'night').boxAll(X - 3, 4, zc - HZ - 0.4, X + 3, 30, zc - HZ - 0.1, 1, [0.1, 0.18, 0.3]);
   });
-  function hzOf() { return 24; }
 
-  // ---------------- SkyPark ('ship' with cantilever)
-  const z0 = MBS.skyZ0, z1 = MBS.skyZ1, W = 21;
+  // ---------------- SkyPark: ship-shaped deck, cantilever bow over the north tower
+  const z0 = MBS.skyZ0, z1 = MBS.skyZ1, W = 21, DT = 5;
   const wb = ctx.chunks.bucket(X, 0, 'white');
-  const roofB = ctx.chunks.bucket(X, 0, 'roof');
-  // main deck slab
-  wb.boxClosed(X - W, H, z0 + 20, X + W, H + 5, z1, 6, WHITE);
-  addBox(ctx, X - W, H, z0 + 20, X + W, H + 5, z1, 'roof', 'skypark');
-  // cantilever: tapering prow, 3 stepped slabs
-  const steps = [[z0 + 20, z0 + 14, 20.5], [z0 + 14, z0 + 9, 19], [z0 + 9, z0 + 5, 17], [z0 + 5, z0 + 2, 14.5], [z0 + 2, z0 + 0.5, 11.5], [z0 + 0.5, z0, 8]];
-  steps.forEach(([za, zb, w], i) => {
-    wb.boxClosed(X - w, H, zb, X + w, H + 5, za, 6, WHITE);
-    addBox(ctx, X - w, H, zb, X + w, H + 5, za, 'roof', 'skypark');
-  });
-  // curved hull underside (three narrowing layers)
-  wb.boxClosed(X - 17, H - 3.4, z0 + 14, X + 17, H, z1 - 8, 6, [0.86, 0.88, 0.92]);
-  wb.boxClosed(X - 11, H - 6, z0 + 22, X + 11, H - 3.4, z1 - 30, 6, [0.8, 0.83, 0.88]);
-  wb.boxClosed(X - 7, H - 3, z0 + 6, X + 7, H, z0 + 20, 6, [0.84, 0.86, 0.9]);
-  addBox(ctx, X - 17, H - 3.4, z0 + 14, X + 17, H, z1 - 8, 'building', 'skypark-hull');
-  // deck: gardens, pool, sky bar
-  const g = ctx.chunks.bucket(X, 100, 'grass');
-  const DY = H + 5.04;
-  g.top(X - W + 1, 150, X + W - 1, z1 - 3, DY, 6, [0.8, 1, 0.75]);
-  g.top(X - W + 1, -65, X + W - 1, 8, DY, 6, [0.8, 1, 0.75]);
-  g.top(X - W + 1, z0 + 18, X + W - 1, -70, DY, 6, [0.78, 0.7, 0.55]); // sky-bar timber deck (grass tex tinted)
-  // paved promenade down the middle & around the pool
+  const BOW = 62;
+  const halfW = (z) => {
+    let w = lerp(5.5, W, smooth((z - z0) / BOW));
+    w -= 6 * Math.pow(smooth((z - (z1 - 22)) / 22), 1.5); // rounded stern
+    return w;
+  };
+  const hullD = (z) => { const u = (z - z0) / (z1 - z0); return 9.5 * Math.pow(Math.sin(Math.PI * Math.min(0.97, Math.max(0.03, u))), 0.8); };
+  const HULLC = [0.86, 0.88, 0.92], DECKC = [0.95, 0.96, 0.98];
+  const nrm = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
+  const SL = 5;
+  for (let z = z0; z < z1 - 0.01; z += SL) {
+    const za = z, zb = Math.min(z1, z + SL), wa = halfW(za), wbw = halfW(zb), da = hullD(za), db = hullD(zb);
+    const s = (wbw - wa) / (zb - za), n1 = nrm(1, 0, -s), n2 = nrm(-1, 0, -s);
+    // top slab
+    wb.quad([X - wbw, H + DT, zb], [X + wbw, H + DT, zb], [X + wa, H + DT, za], [X - wa, H + DT, za], 0, 1, 0, 0, 0, 1, 1, DECKC);
+    // side fascia
+    wb.quad([X + wbw, H, zb], [X + wa, H, za], [X + wa, H + DT, za], [X + wbw, H + DT, zb], n1[0], n1[1], n1[2], 0, 0, 1, 1, DECKC);
+    wb.quad([X - wa, H, za], [X - wbw, H, zb], [X - wbw, H + DT, zb], [X - wa, H + DT, za], n2[0], n2[1], n2[2], 0, 0, 1, 1, DECKC);
+    // deck underside shelf and curved hull (slanted flanks + keel)
+    const ha = wa * 0.8, hb = wbw * 0.8, ka = wa * 0.3, kb = wbw * 0.3;
+    wb.quad([X + wa, H, za], [X + wbw, H, zb], [X + hb, H, zb], [X + ha, H, za], 0, -1, 0, 0, 0, 1, 1, HULLC);
+    wb.quad([X - ha, H, za], [X - hb, H, zb], [X - wbw, H, zb], [X - wa, H, za], 0, -1, 0, 0, 0, 1, 1, HULLC);
+    const fl = nrm(1, -0.8, 0);
+    wb.quad([X + ha, H, za], [X + hb, H, zb], [X + kb, H - db, zb], [X + ka, H - da, za], fl[0], fl[1], fl[2], 0, 0, 1, 1, HULLC);
+    wb.quad([X - ka, H - da, za], [X - kb, H - db, zb], [X - hb, H, zb], [X - ha, H, za], -fl[0], fl[1], fl[2], 0, 0, 1, 1, HULLC);
+    wb.quad([X - ka, H - da, za], [X + ka, H - da, za], [X + kb, H - db, zb], [X - kb, H - db, zb], 0, -1, 0, 0, 0, 1, 1, [0.78, 0.8, 0.86]);
+  }
+  // end caps
+  { const w = halfW(z0); wb.quad([X + w, H, z0], [X - w, H, z0], [X - w, H + DT, z0], [X + w, H + DT, z0], 0, 0, -1, 0, 0, 1, 1, DECKC); }
+  { const w = halfW(z1); wb.quad([X - w, H, z1], [X + w, H, z1], [X + w, H + DT, z1], [X - w, H + DT, z1], 0, 0, 1, 0, 0, 1, 1, DECKC); }
+  // collision matches the visible deck and hull (10 m slices)
+  for (let z = z0; z < z1 - 0.01; z += 10) {
+    const zb = Math.min(z1, z + 10), w = (halfW(z) + halfW(zb)) / 2, d = (hullD(z) + hullD(zb)) / 2;
+    addBox(ctx, X - w, H, z, X + w, H + DT, zb, 'roof', 'skypark');
+    addBox(ctx, X - w * 0.7, H - d, z, X + w * 0.7, H, zb, 'building', 'skypark-hull');
+  }
+  const DY = H + DT + 0.04;
+  // deck surfaces: timber on the bow, gardens and promenades behind
+  const gb = ctx.chunks.bucket(X, 100, 'grass');
+  for (let z = z0 + 10; z < -70; z += SL) {
+    const zb = Math.min(-70, z + SL), wa = halfW(z) - 1, wbw = halfW(zb) - 1;
+    gb.quad([X - wbw, DY, zb], [X + wbw, DY, zb], [X + wa, DY, z], [X - wa, DY, z], 0, 1, 0, 0, 0, 1, 1, [0.78, 0.7, 0.55]);
+  }
+  gb.top(X - W + 1, -70, X + W - 1, 8, DY, 6, [0.8, 1, 0.75]);
+  gb.top(X - W + 1, 150, X + W - 1, z1 - 24, DY, 6, [0.8, 1, 0.75]);
   const pv = ctx.chunks.bucket(X, 100, 'sidewalk');
   pv.top(X - W + 1, 8, X - 9.5, 150, DY + 0.01, 6, [1.5, 1.45, 1.4]);
   pv.top(X + 9.5, 8, X + W - 1, 150, DY + 0.01, 6, [1.5, 1.45, 1.4]);
-  // infinity pool (glowing blue strip, 150 m)
+  // infinity pool (glowing blue strip, 150 m) with bright coping and a vanishing edge
   ctx.pool.boxAll(X - 8.2, DY, 10, X + 8.2, DY + 0.18, 148, 4, [1, 1, 1]);
   const gl = ctx.chunks.bucket(X, 100, 'night');
   gl.boxAll(X - 8.4, DY, 9.5, X - 8.2, DY + 0.5, 148.5, 1, [0.9, 0.95, 1]);
   gl.boxAll(X + 8.2, DY, 9.5, X + 8.4, DY + 0.5, 148.5, 1, [0.9, 0.95, 1]);
-  // glass balustrade, edge lights along both sides (night)
-  for (const sd of [-1, 1]) {
-    gl.boxAll(X + sd * (W - 0.3) - 0.1, H + 4.2, z0 + 20, X + sd * (W - 0.3) + 0.1, H + 4.5, z1, 1, [0.55, 0.8, 1.0]);
-    ctx.chunks.bucket(X, 100, 'street').boxAll(X + sd * (W - 0.15) - 0.07, DY, z0 + 20, X + sd * (W - 0.15) + 0.07, DY + 1.1, z1, 1, [0.7, 0.75, 0.8]);
+  gl.boxAll(X - 8.4, DY, 148, X + 8.4, DY + 0.3, 148.5, 1, [0.7, 0.9, 1]);
+  // railings and edge lights follow the hull outline
+  const stB = ctx.chunks.bucket(X, 100, 'street');
+  for (const sd of [-1, 1]) for (let z = z0; z < z1 - 0.01; z += SL) {
+    const zb = Math.min(z1, z + SL), xa = X + sd * (halfW(z) - 0.25), xb = X + sd * (halfW(zb) - 0.25);
+    stB.cylBetween([xa, DY + 1.05, z], [xb, DY + 1.05, zb], 0.07, [0.75, 0.8, 0.86]);
+    stB.boxAll(xa - 0.05, DY, z - 0.05, xa + 0.05, DY + 1.05, z + 0.05, 1, [0.7, 0.75, 0.8]);
+    gl.cylBetween([xa, DY + 0.5, z], [xb, DY + 0.5, zb], 0.09, [0.55, 0.8, 1.0]);
+    gl.cylBetween([X + sd * (halfW(z) + 0.05), H + 0.3, z], [X + sd * (halfW(zb) + 0.05), H + 0.3, zb], 0.12, [0.6, 0.85, 1.0]);
   }
-  // sky bar: pavilion with a curved 'surfboard' canopy at the cantilever
+  // sky bar: pavilion with a curved 'surfboard' canopy on the cantilever
   const sb = ctx.chunks.bucket(X, z0, 'street');
-  for (const sx of [-12, 12]) for (const zz of [z0 + 8, z0 + 30]) sb.boxAll(X + sx - 0.4, DY, zz - 0.4, X + sx + 0.4, DY + 6, zz + 0.4, 1, STEEL);
-  wb.boxAll(X - 16, DY + 6, z0 + 4, X + 16, DY + 6.7, z0 + 36, 6, WHITE);
-  addBox(ctx, X - 16, DY + 6, z0 + 4, X + 16, DY + 6.7, z0 + 36, 'roof', 'skybar');
-  sb.boxAll(X - 15.5, DY, z0 + 6, X + 15.5, DY + 1.1, z0 + 7, 1, [0.55, 0.4, 0.28]);
-  gl.boxAll(X - 15.8, DY + 5.9, z0 + 4, X + 15.8, DY + 6.0, z0 + 36, 1, [1.0, 0.85, 0.55]);
-  // trusses under the prow
-  for (const sx of [-1, 1]) for (let i = 0; i < 4; i++) {
-    const zz = z0 + 20 + i * 10;
-    ctx.chunks.bucket(X, z0, 'street').cylBetween([X + sx * 10, H - 3, zz], [X + sx * 15, H, zz + 12], 0.35, STEEL);
+  const cz0 = z0 + 32, cz1 = z0 + 66;
+  for (const sx of [-1, 1]) for (const zz of [cz0 + 2, cz1 - 2]) sb.boxAll(X + sx * 11 - 0.4, DY, zz - 0.4, X + sx * 11 + 0.4, DY + 6, zz + 0.4, 1, STEEL);
+  for (let i = 0; i < 6; i++) {
+    const za = lerp(cz0, cz1, i / 6), zb = lerp(cz0, cz1, (i + 1) / 6), hw = 14 - 3 * smooth(Math.abs((i + 0.5) / 6 - 0.5) * 2);
+    const lift = 0.25 * Math.sin((i / 6) * Math.PI);
+    wb.boxAll(X - hw, DY + 6 + lift, za, X + hw, DY + 6.7 + lift, zb, 6, WHITE);
   }
-  ctx.spawnDeck = { x: X, y: H + 5.05, z: -55 };
-  // palms & planters on the deck (instanced: y given)
+  addBox(ctx, X - 13, DY + 6, cz0, X + 13, DY + 6.7, cz1, 'roof', 'skybar');
+  sb.boxAll(X - 10, DY, cz0 + 1, X + 10, DY + 1.1, cz0 + 2, 1, [0.55, 0.4, 0.28]);
+  gl.boxAll(X - 12, DY + 5.9, cz0, X + 12, DY + 6.0, cz1, 1, [1.0, 0.85, 0.55]);
+  ctx.spawnDeck = { x: X, y: H + DT + 0.05, z: -55 };
+  // garden trees (merged icospheres) and palms
+  const tb = ctx.chunks.bucket(X, 100, 'white');
+  for (let i = 0; i < 44; i++) {
+    const z = 10 + i * 5.1, sd = i % 2 ? 1 : -1;
+    const g = 0.45 + ((i * 37) % 10) / 40;
+    ball(tb, X + sd * (W - 3.5), DY + 3.6, z, 2.4, 3.2, 2.4, [0.36 * g, 0.88 * g, 0.32 * g]);
+  }
   for (let i = 0; i < 26; i++) {
     const side = i % 2 ? 1 : -1;
     ctx.palmSpots.push([X + side * (W - 3.2), 12 + i * 5.2, 0, DY, 0.55]);
   }
-  for (let i = 0; i < 8; i++) ctx.palmSpots.push([X + (i % 2 ? 6 : -6), z0 + 44 + i * 4, 0, DY, 0.55]);
-  // Event Plaza + Shoppes podium
-  const px0 = 192, px1 = 340;
-  const pod = (x0, z0_, x1, z1_, h, style = 'glassBlue') => emitBox(ctx, style, x0, 0, z0_, x1, h, z1_, { col: [1, 1, 1.05], id: 'shoppes' });
-  pod(230, -42, 240, 252, 14, 'limestone');
-  pod(240, -42, 333, 252, 12, 'concrete');
-  // curved crystal pavilions along the water
+  for (let i = 0; i < 8; i++) ctx.palmSpots.push([X + (i % 2 ? 6 : -6), z0 + 76 + i * 4, 0, DY, 0.55]);
+
+  // ---------------- The Shoppes podium with a wavy roofline and curved waterfront
+  const wave = (z) => 12 + 4.5 * Math.sin(z * 0.05) + 2 * Math.sin(z * 0.13 + 1);
+  const front = (z) => 228 + 9 * Math.sin(z * 0.03 + 0.5);
+  for (let z = -42; z < 252; z += 7) {
+    const zb = Math.min(252, z + 7), h = wave(z + 3.5), xf = front(z + 3.5);
+    emitBox(ctx, 'concrete', xf + 12, 0, z, 335, h, zb, { col: [1, 1, 1.05], id: 'shoppes' });
+    emitBox(ctx, 'glassBlue', xf, 0, z, xf + 12, h * 0.62, zb, { col: [1, 1, 1.05], id: 'shoppes' });
+  }
+  // crystal pavilions along the water
   for (const zz of [-5, 62, 168]) {
     ctx.chunks.bucket(204, zz, 'street').boxAll(196, 0, zz - 12, 214, 9, zz + 12, 4, [0.55, 0.78, 0.92]);
     ctx.chunks.bucket(204, zz, 'night').boxAll(196, 8.8, zz - 12, 214, 9.2, zz + 12, 1, [0.6, 0.85, 1.0]);
