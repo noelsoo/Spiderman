@@ -1,14 +1,18 @@
 // Scarlet Witch: chaos magic. Levitation + flight, hex bolts, telekinesis, chaos wave, hex shield, reality warp.
 //
 //   Space (air, held)   float / hover; otherwise a slow fall         Shift / R2  flight (camera-relative, floaty)
-//   LMB / J / []        hex bolts (homing a little), every 3rd = hex burst AoE
-//   RMB / K / R1        telekinetic grab (target within 30 m). Hold to keep it in front of you, release = hurl,
-//                       LMB while holding = slam it into the ground
-//   E / L1              Chaos Wave (cone shockwave, 5 s)           R / L2  Hex Shield (6 s, 18 s cooldown)
-//   C / Ctrl / O        red-mist dash                              Q / R3  Reality Warp ("No More")
+//   LMB / J / []        enemy within ~4.5 m: Chaos tendril combo (lash, lash, wrap-and-slam + Hex Bolt volley ender)
+//                       otherwise (or hold): hex bolts (homing a little), every 3rd = hex burst AoE
+//   RMB / K / R1        grounded / hovering: telekinetic grab (target within 30 m). Hold to keep it in front of you,
+//                       release = hurl, LMB while holding = slam.  While FLYING (Shift/R2 held): Reality Warp zone
+//   E / L1              tap: Chaos Wave (cone shockwave, 5 s)   HOLD (0.4 s+, aim ring) and release: Chaos Lift & Crush
+//   R / L2              tap: Hex Shield (6 s)                    HOLD (0.4 s+) and release: Mind Control one enemy (7 s)
+//   C / Ctrl / O        red-mist dash                              Q / R3  Reality Warp ("No More") ultimate
 import * as THREE from 'three';
 import { Hero } from './Hero.js';
 import { Timers, aimInfo, enemiesNear, objPos, rumble, clamp, damp, rand, makeHexBolt, hexAssets } from './mystic/util.js';
+import { TendrilPool } from './mystic/tendril.js';
+import { MindGames } from './mystic/mind.js';
 
 const RED = 0xff2a55, PINK = 0xff7a96;
 const TUNE = {
@@ -19,6 +23,11 @@ const TUNE = {
   shieldTime: 6, shieldCd: 18, shieldAbsorb: 0.3, shieldTick: 0.3, shieldDmg: 14, shieldReach: 2.6,
   dashCd: 1, dashSpeed: 27, dashT: 0.28,
   ultRange: 35, ultLift: 1.7, ultCrush: 0.6, ultDmg: 250, ultBossDmg: 200,
+  holdT: 0.4,
+  crushCd: 14, crushR: 10, crushMax: 14, crushLift: 1.25, crushDmg: 55, crushBoss: 40, crushRange: 32,
+  mindCd: 16, mindTime: 7, mindRange: 35,
+  warpCd: 22, warpR: 7.5, warpTime: 7, warpConfuse: 4, warpRange: 30,
+  tendrilRange: 4.6, tendrilDmg: [16, 18, 28], tendrilKb: [5, 5, 16], volleyDmg: 9, volleyN: 5,
 };
 
 const _aim = { dir: new THREE.Vector3(), point: new THREE.Vector3() };
@@ -34,6 +43,11 @@ export class ScarletWitch extends Hero {
     this.grab = null; this.thrown = [];
     this.shieldT = 0; this.shieldTick = 0; this.shieldHit = 0; this.shield = null;
     this.dash = 0; this.ult = null; this.overlay = null;
+    this.tend = new TendrilPool(game.scene, 18, 14);
+    this.mind = new MindGames(this);
+    this.holdE = 0; this.holdR = 0; this.aimFxT = 0; this.mcTarget = null;
+    this.mchain = 0; this.mchainT = 0; this.meleeT = 0;
+    this.crush = null; this.zone = null; this.trails = []; this.swirl = 0; this.crushPt = new THREE.Vector3();
   }
 
   onActivate() { this._reset(); }
@@ -42,19 +56,24 @@ export class ScarletWitch extends Hero {
     this.thrown.length = 0;
     this._shieldOff();
     this._overlay(0);
+    this._cancelCrush(); this._zoneOff();
+    this.mind.releaseAll(); this.tend.clear(); this._stopTrails();
     this._reset();
     this.model.setHexGlow?.(0);
   }
   _reset() {
     this.flying = false; this.hovering = false; this.ult = null; this.dash = 0; this.actionT = 0; this.chain = 0;
     this.gravityScale = 1; this.customMovement = false; this.timers.clear();
+    this.holdE = 0; this.holdR = 0; this.mchain = 0; this.mchainT = 0; this.meleeT = 0; this.mcTarget = null;
   }
 
   get abilityHints() {
+    const cd = (...n) => Math.max(...n.map((x) => this.cooldownFrac(x)));
     return [
-      { action: 'special', label: this.grab ? 'Hurl' : 'Telekinesis', cooldown: this.cooldownFrac('grab'), active: !!this.grab },
-      { action: 'ability', label: 'Chaos Wave', cooldown: this.cooldownFrac('wave') },
-      { action: 'ability2', label: 'Hex Shield', cooldown: this.cooldownFrac('shield'), active: this.shieldT > 0 },
+      { action: 'attack', label: this.mchainT > 0 ? 'Tendrils x' + this.mchain : 'Tendrils / Bolts', cooldown: 0, active: this.mchainT > 0 },
+      { action: 'special', label: this.flying ? 'Warp Zone' : (this.grab ? 'Hurl' : 'Telekinesis'), cooldown: this.flying ? this.cooldownFrac('warp') : this.cooldownFrac('grab'), active: !!this.grab || !!this.zone },
+      { action: 'ability', label: this.holdE >= TUNE.holdT ? 'Release: Crush' : 'Wave | Hold: Crush', cooldown: cd('wave', 'crush'), active: !!this.crush || this.holdE >= TUNE.holdT },
+      { action: 'ability2', label: this.holdR >= TUNE.holdT ? 'Release: Control' : 'Shield | Hold: Mind', cooldown: cd('shield', 'mind'), active: this.shieldT > 0 || !!this.mind.controlled() },
       { action: 'swing', label: 'Flight', cooldown: 0, active: this.flying },
       { action: 'ultimate', label: 'No More', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
@@ -81,6 +100,12 @@ export class ScarletWitch extends Hero {
     this.airT = this.onGround ? 0 : this.airT + dt;
     let glowT = 0;
 
+    this.meleeT = Math.max(0, this.meleeT - dt);
+    if (this.mchainT > 0) { this.mchainT -= dt; if (this.mchainT <= 0) this.mchain = 0; }
+    this.tend.update(dt, this.game.camera.position);
+    this.mind.update(dt, this.game.time);
+    this._zoneUpdate(dt);
+    this._crushUpdate(dt);
     this._shieldUpdate(dt);
     this._thrownUpdate(dt);
     if (this.shieldT > 0) glowT = Math.max(glowT, 0.5);
@@ -111,10 +136,14 @@ export class ScarletWitch extends Hero {
     }
 
     // abilities
-    if (input.pressed('special') && !this.grab) this._tryGrab();
-    if (input.pressed('ability') && this._chaosWave()) glowT = 1;
-    if (input.pressed('ability2')) this._shieldOn();
-    if (input.down('attack') && !this.grab) { if (this._bolt()) glowT = 1; }
+    if (input.pressed('special') && !this.grab) { if (this.flying) this._realityWarp(); else this._tryGrab(); }
+    if (this._holdE(dt, input)) glowT = 1;
+    if (this._holdR(dt, input)) glowT = Math.max(glowT, 0.9);
+    if (!this.grab) {
+      const near = input.pressed('attack') ? this.game.enemies?.nearest?.(this.pos, TUNE.tendrilRange) : null;
+      if (near && near.alive) { if (this.meleeT <= 0 && this._tendrilCombo(near)) glowT = 1; }
+      else if (input.down('attack') && this.meleeT <= 0.12) { if (this._bolt()) glowT = 1; }
+    }
     if (this.actionT > 0) glowT = Math.max(glowT, 0.9);
     this._finish(dt, glowT);
   }
@@ -126,7 +155,14 @@ export class ScarletWitch extends Hero {
     else if (this.grab && !this.flying && !this.hovering && this.onGround) this.setAnim('cast', 1);
     else if (this.flying) this.setAnim(this.vel.length() > 9 ? 'fly' : 'hover', this.vel.length());
     else if (this.hovering) this.setAnim('hover', 0);
-    // red wisps from the hands
+    // red ribbons from the hands + a body wake while levitating / flying
+    if ((this.flying || this.hovering) && !this.ult) {
+      this._startTrails();
+      this.swirl += dt * (this.flying ? 7 : 3.5);
+      const sw = this.swirl, fxx = this.game.fx;
+      fxx?.trailPuff?.(this.pos.x + Math.cos(sw) * 0.75, this.pos.y + 0.9 + Math.sin(sw * 1.7) * 0.6, this.pos.z + Math.sin(sw) * 0.75, PINK, 0.32, 0.6, 0.03);
+      fxx?.trailPuff?.(this.pos.x - Math.cos(sw) * 0.75, this.pos.y + 0.9 - Math.sin(sw * 1.7) * 0.6, this.pos.z - Math.sin(sw) * 0.75, RED, 0.32, 0.6, 0.03);
+    } else this._stopTrails();
     this.wispT -= dt;
     if (this.glow > 0.15 && this.wispT <= 0) {
       this.wispT = 0.06 / Math.max(0.3, this.glow);
@@ -222,19 +258,24 @@ export class ScarletWitch extends Hero {
     if (tgt) _b.lerp(_a.subVectors(tgt.center ?? tgt.pos, _c).normalize().multiplyScalar(_b.length()), 0.6);
     _b.normalize();
     this.yaw = Math.atan2(_b.x, _b.z);
-    const size = burst ? 2.2 : 1;
-    g.combat.projectile({
-      kind: 'repulsor', pos: _c, vel: _a.copy(_b).multiplyScalar(burst ? 36 : TUNE.boltSpeed), damage: burst ? TUNE.burstDmg : TUNE.boltDmg,
-      radius: burst ? 0.5 : 0.3, life: 1.8, color: RED, mesh: makeHexBolt(size), source: this, knockback: 3, up: 1, stun: 0.2,
-      homing: tgt && !burst ? tgt : (tgt ?? null), turn: 2.2, heavy: burst,
-      onExpire: burst ? (p) => this._hexBurst(p.pos.clone()) : (p) => g.fx?.burst?.(p.pos, RED, 6, 3, 0.25, 0.15),
-    });
-    g.audio?.play(burst ? 'thunder' : 'whoosh', { volume: burst ? 0.3 : 0.35, pitch: 1.5 });
-    g.fx?.burst?.(_c, RED, burst ? 14 : 5, 3, 0.25, 0.2);
+    this._spawnBolt(_c, _b, tgt, burst);
     this.actionAnim = burst ? 'cast' : (this.hand ? 'shoot' : 'throw'); this.actionT = burst ? 0.35 : 0.2;
     this.setAnim(this.actionAnim, 1);
     this.chain++; this.chainT = 0.8;
     return true;
+  }
+  /** One hex bolt from `from` along `dir` (both are copied). burst = big bolt that detonates as a hex burst. */
+  _spawnBolt(from, dir, tgt, burst = false, dmg = null, speed = null) {
+    const g = this.game;
+    const pos = from.clone(), vel = dir.clone().normalize().multiplyScalar(speed ?? (burst ? 36 : TUNE.boltSpeed));
+    g.combat.projectile({
+      kind: 'repulsor', pos, vel, damage: dmg ?? (burst ? TUNE.burstDmg : TUNE.boltDmg),
+      radius: burst ? 0.5 : 0.3, life: 1.8, color: RED, mesh: makeHexBolt(burst ? 2.2 : 1), source: this, knockback: 3, up: 1, stun: 0.2,
+      homing: tgt ?? null, turn: 2.2, heavy: burst,
+      onExpire: burst ? (p) => this._hexBurst(p.pos.clone()) : (p) => g.fx?.burst?.(p.pos, RED, 6, 3, 0.25, 0.15),
+    });
+    g.audio?.play(burst ? 'thunder' : 'whoosh', { volume: burst ? 0.3 : 0.3, pitch: 1.5 });
+    g.fx?.burst?.(pos, RED, burst ? 14 : 5, 3, 0.25, 0.2);
   }
   _hexBurst(pos) {
     const g = this.game;
@@ -410,6 +451,357 @@ export class ScarletWitch extends Hero {
         _b.subVectors(e.pos, this.pos).setY(0).normalize().multiplyScalar(9); _b.y = 3;
         if (e.takeDamage(TUNE.shieldDmg, { knockback: _b.clone(), stun: 0.4, source: this, kind: 'hex' })) {
           g.fx?.hitSpark?.(e.center, RED, false); this.registerHit();
+        }
+      }
+    }
+  }
+
+  // ---- context helpers ----------------------------------------------------------------
+  /** Ground point under the camera reticle, clamped to `range` metres from the hero. */
+  _groundPoint(range, out) {
+    aimInfo(this, range + 10, _aim);
+    out.copy(_aim.point);
+    _t.set(out.x - this.pos.x, 0, out.z - this.pos.z);
+    const d = _t.length();
+    if (d > range) { _t.multiplyScalar(range / d); out.x = this.pos.x + _t.x; out.z = this.pos.z + _t.z; }
+    const h = this.game.physics.heightAt(out.x, out.z, Math.max(out.y, this.pos.y) + 1.5);
+    out.y = Number.isFinite(h) ? h : 0;
+    return out;
+  }
+  _lookAt(p) {
+    _t.set(p.x - this.pos.x, 0, p.z - this.pos.z);
+    if (_t.lengthSq() > 0.01) this.yaw = Math.atan2(_t.x, _t.z);
+  }
+
+  // ---- hold E: Chaos Magic levitate-and-crush ----------------------------------------------
+  _holdE(dt, input) {
+    let glow = false;
+    if (input.pressed('ability')) this.holdE = 1e-4;
+    if (this.holdE > 0) {
+      const down = input.down('ability');
+      if (down) {
+        this.holdE += dt;
+        if (this.holdE >= TUNE.holdT && (this.cooldowns.crush || 0) <= 0) { this._crushAim(dt); glow = true; }
+      }
+      if (!down || input.released('ability')) {
+        const h = this.holdE; this.holdE = 0;
+        if (h < TUNE.holdT) { if (this._chaosWave()) glow = true; }
+        else if (this._startCrush()) glow = true;
+        else if (this._chaosWave()) glow = true;
+      }
+    }
+    return glow;
+  }
+  _crushAim(dt) {
+    const g = this.game, pt = this.crushPt;
+    this._groundPoint(TUNE.crushRange, pt);
+    this._lookAt(pt);
+    this.aimFxT -= dt;
+    if (this.aimFxT <= 0) {
+      this.aimFxT = 0.12;
+      const grow = clamp((this.holdE - TUNE.holdT) / 0.6, 0, 1);
+      g.fx?.ring?.(_a.set(pt.x, pt.y + 0.12, pt.z), TUNE.crushR * (0.55 + 0.45 * grow), RED, 0.3);
+      g.fx?.ring?.(_a.set(pt.x, pt.y + 0.12, pt.z), TUNE.crushR * 0.35, PINK, 0.25);
+      for (let i = 0; i < 5; i++) {
+        const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * TUNE.crushR;
+        g.fx?.burst?.(_a.set(pt.x + Math.cos(a) * r, pt.y + 0.2, pt.z + Math.sin(a) * r), RED, 2, 3.5, 0.8, 0.22);
+      }
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || Math.hypot(e.pos.x - pt.x, e.pos.z - pt.z) > TUNE.crushR) continue;
+        g.fx?.ring?.(_a.set(e.pos.x, e.pos.y + 0.1, e.pos.z), 0.9, PINK, 0.2);
+      }
+      this.tend.fire(this._handPos(_c), _b.set(pt.x, pt.y + 0.3, pt.z), { life: 0.2, width: 0.1, curl: 0.5, grow: 0.5 });
+    }
+    this.actionT = Math.max(this.actionT, 0.1); this.actionAnim = 'cast';
+  }
+  _startCrush() {
+    const g = this.game;
+    if (!this.useCooldown('crush', TUNE.crushCd)) return false;
+    const pt = this._groundPoint(TUNE.crushRange, this.crushPt);
+    const vic = [], bosses = [];
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || Math.hypot(e.pos.x - pt.x, e.pos.z - pt.z) > TUNE.crushR) continue;
+      (e.isBoss ? bosses : vic).push(e);
+    }
+    vic.sort((a, b) => Math.hypot(a.pos.x - pt.x, a.pos.z - pt.z) - Math.hypot(b.pos.x - pt.x, b.pos.z - pt.z));
+    vic.length = Math.min(vic.length, TUNE.crushMax);
+    if (!vic.length && !bosses.length) { this.cooldowns.crush = 0; g.fx?.text?.(_a.set(pt.x, pt.y + 1, pt.z), 'NO TARGETS', PINK); return false; }
+    this._cancelCrush();
+    this.crush = { phase: 'lift', t: 0, pt: pt.clone(), tendT: 0, impacts: 0, victims: vic.map((e, i) => ({ e, x: e.pos.x, z: e.pos.z, y0: e.pos.y, ph: Math.random() * 6.28, i, done: false })) };
+    for (const e of vic) e.model?.setTint?.(RED, 0.5);
+    for (const b of bosses) {
+      b.takeDamage(TUNE.crushBoss, { stun: 1.2, source: this, kind: 'hex' });
+      g.fx?.text?.(_a.copy(b.pos).setY(b.pos.y + b.height + 0.5), 'RESISTS', RED); this.registerHit();
+    }
+    g.fx?.shockwave?.(pt.clone(), TUNE.crushR * 1.1, RED);
+    g.fx?.flash?.(_a.set(pt.x, pt.y + 1.5, pt.z), RED, 6, 0.3);
+    g.hud?.toast?.('CHAOS MAGIC');
+    g.audio?.play('thunder', { volume: 0.7 }); g.audio?.play('whoosh', { pitch: 0.6 });
+    g.cam.shake(0.35); rumble(g, 0.6, 0.6, 300);
+    this.actionT = 0.6; this.actionAnim = 'cast'; this.setAnim('cast', 1);
+    return true;
+  }
+  _cancelCrush() {
+    if (!this.crush) return;
+    for (const v of this.crush.victims) v.e.model?.setTint?.(RED, 0);
+    this.crush = null;
+  }
+  _crushUpdate(dt) {
+    const c = this.crush; if (!c) return;
+    const g = this.game;
+    c.t += dt;
+    let alive = 0;
+    for (const v of c.victims) if (!v.done && v.e.alive && !v.e.removed) alive++;
+    if (!alive) { this._cancelCrush(); return; }
+    if (c.phase === 'lift') {
+      const k = clamp(c.t / 0.55, 0, 1), ease = k * k * (3 - 2 * k);
+      for (const v of c.victims) {
+        const e = v.e; if (!e.alive || e.removed) continue;
+        const a = g.time * 2.2 + v.ph, r = 1.3 * ease;
+        _t.set(v.x + Math.cos(a) * r, v.y0 + (4.8 + (v.i % 4) * 0.9) * ease + Math.sin(g.time * 3 + v.ph) * 0.2, v.z + Math.sin(a) * r);
+        this._hold(e, _t, 7, 26);
+        this._aura(e);
+      }
+      c.tendT -= dt;
+      if (c.tendT <= 0) {
+        c.tendT = 0.17;
+        let n = 0;
+        for (const v of c.victims) {
+          if (!v.e.alive || n >= 8) continue; n++;
+          const e = v.e;
+          this.tend.fire(this._handPos(_c), e.center, { life: 0.3, width: 0.13, curl: 0.55, waves: 2, grow: 0.3, fromFn: (o) => this._handPos(o), toFn: (o) => o.copy(e.center) });
+        }
+        g.fx?.ring?.(_a.set(c.pt.x, c.pt.y + 0.12, c.pt.z), TUNE.crushR * (1 - 0.35 * ease), RED, 0.25);
+      }
+      g.cam.shake(0.05 + 0.08 * ease);
+      if (c.t >= TUNE.crushLift) {
+        c.phase = 'slam'; c.t = 0;
+        g.audio?.play('thunder', { volume: 0.8 }); g.audio?.play('whoosh', { pitch: 0.5, volume: 0.7 });
+        for (const v of c.victims) if (v.e.alive) { v.e.vel.set(0, -50, 0); v.e.launched = true; v.e.stunTimer = Math.max(v.e.stunTimer, 0.6); }
+        this.actionT = 0.3; this.actionAnim = 'throw';
+      }
+      return;
+    }
+    // slam
+    for (const v of c.victims) {
+      const e = v.e;
+      if (v.done || !e.alive || e.removed) continue;
+      e.launched = true; e.stunTimer = Math.max(e.stunTimer, 0.4);
+      if (c.t < 0.5) e.vel.y = Math.min(e.vel.y, -50);
+      g.fx?.trailPuff?.(e.center.x, e.center.y + 0.4, e.center.z, RED, 0.8, 0.35, 0.08);
+      if ((c.t > 0.08 && e.onGround) || c.t > 1.1) {
+        v.done = true; c.impacts++;
+        e.model?.setTint?.(RED, 0);
+        _a.set(e.pos.x, e.pos.y + 0.3, e.pos.z);
+        e.takeDamage(TUNE.crushDmg, { stun: 1.6, source: this, kind: 'hex' });
+        g.combat.aoe({ center: _a.clone(), radius: 2.8, damage: 14, knockback: 8, up: 4, stun: 0.6, source: this });
+        if (c.impacts <= 4) { g.fx?.shockwave?.(_a.clone(), 4, RED); g.fx?.flash?.(_a.clone(), RED, 4, 0.15); g.audio?.play('smash', { volume: 0.5 }); }
+        else g.fx?.ring?.(_a.clone(), 3, PINK, 0.3);
+        g.fx?.burst?.(_a.clone(), RED, 16, 6, 0.5, 0.28);
+        g.fx?.hitSpark?.(e.center, RED, true);
+        this.registerHit();
+      }
+    }
+    if (c.victims.every((v) => v.done || !v.e.alive || v.e.removed)) {
+      g.cam.shake(0.55); rumble(g, 0.8, 0.5, 220);
+      if (c.impacts > 1 && g._slowmo <= 0.05) g.slowmo?.(0.08, 0.1);
+      this._cancelCrush();
+    }
+  }
+
+  // ---- hold R: mind control ----------------------------------------------------------------
+  _holdR(dt, input) {
+    let glow = false;
+    if (input.pressed('ability2')) this.holdR = 1e-4;
+    if (this.holdR > 0) {
+      const down = input.down('ability2');
+      if (down) {
+        this.holdR += dt;
+        if (this.holdR >= TUNE.holdT) {
+          const e = this.findTarget(TUNE.mindRange, 45) ?? this.game.enemies?.nearest?.(this.pos, 18);
+          this.mcTarget = e && e.alive ? e : null;
+          glow = true;
+          this.aimFxT -= dt;
+          if (this.mcTarget && this.aimFxT <= 0) {
+            this.aimFxT = 0.1;
+            const g = this.game, t = this.mcTarget;
+            g.fx?.ring?.(_a.set(t.pos.x, t.pos.y + 0.1, t.pos.z), 1.1, PINK, 0.2);
+            g.fx?.burst?.(_a.set(t.center.x, t.pos.y + t.height + 0.4, t.center.z), RED, 2, 1.5, 0.4, 0.2);
+            this.tend.fire(this._handPos(_c), t.center, { life: 0.14, width: 0.05, curl: 0.25, grow: 0.5 });
+          }
+          this.actionT = Math.max(this.actionT, 0.1); this.actionAnim = 'cast';
+        }
+      }
+      if (!down || input.released('ability2')) {
+        const h = this.holdR; this.holdR = 0;
+        if (h < TUNE.holdT) this._shieldOn(); else this._mindControl(this.mcTarget);
+        this.mcTarget = null;
+      }
+    }
+    return glow;
+  }
+  _mindControl(e) {
+    const g = this.game;
+    if (!e || !e.alive) { g.fx?.text?.(_a.copy(this.pos).setY(this.pos.y + this.height + 0.5), 'NO TARGET', PINK); return false; }
+    if ((this.cooldowns.mind || 0) > 0) return false;
+    this.useCooldown('mind', TUNE.mindCd);
+    this._handPos(_c);
+    g.fx?.lightning?.(_c.clone(), e.center.clone(), RED, 0.3, 3);
+    this.tend.fire(_c, e.center, { life: 0.5, width: 0.2, curl: 0.8, waves: 3, fromFn: (o) => this._handPos(o), toFn: (o) => o.copy(e.center) });
+    g.audio?.play('thunder', { volume: 0.5, pitch: 1.3 });
+    this.actionT = 0.4; this.actionAnim = 'cast'; this.setAnim('cast', 1);
+    if (e.isBoss) {
+      e.takeDamage(35, { stun: 1.0, source: this, kind: 'hex' });
+      g.fx?.text?.(_a.copy(e.pos).setY(e.pos.y + e.height + 0.5), 'RESISTS', RED); this.registerHit();
+      return true;
+    }
+    const old = this.mind.controlled(); if (old && old !== e) this.mind.release(old);
+    this.mind.apply(e, 'control', TUNE.mindTime);
+    g.fx?.text?.(_a.copy(e.pos).setY(e.pos.y + e.height + 0.6), 'MIND CONTROL', PINK);
+    g.fx?.ring?.(_a.set(e.pos.x, e.pos.y + 0.1, e.pos.z), 2.5, RED, 0.4);
+    g.fx?.flash?.(e.center, RED, 4, 0.2);
+    g.cam.shake(0.15); rumble(g, 0.4, 0.5, 150);
+    return true;
+  }
+
+  // ---- tendril melee combo with Hex Bolt volley ender -------------------------------------------
+  _tendrilCombo(near) {
+    const g = this.game;
+    const step = this.mchain % 3;
+    this.mchain++; this.mchainT = 1.2;
+    this.meleeT = [0.3, 0.32, 0.65][step];
+    this._lookAt(near.pos);
+    const fwd = this.forward;
+    if (this.onGround) { this.vel.x += fwd.x * 3; this.vel.z += fwd.z * 3; }
+    this.actionAnim = ['throw', 'shoot', 'cast'][step]; this.actionT = [0.3, 0.32, 0.6][step]; this.setAnim(this.actionAnim, 1);
+    g.audio?.play('whoosh', { volume: 0.5, pitch: 1.2 });
+    const nTend = step === 2 ? 5 : 3;
+    const tc = near.center.clone();
+    for (let i = 0; i < nTend; i++) {
+      this._handPos(_c); this.hand ^= 1;
+      _b.copy(tc); _b.x += rand(-0.7, 0.7); _b.y += rand(-0.6, 0.6); _b.z += rand(-0.7, 0.7);
+      this.tend.fire(_c, _b, { life: step === 2 ? 0.55 : 0.34, width: step === 2 ? 0.2 : 0.14, curl: step === 2 ? 0.9 : 0.6, waves: 2 + (i % 3) * 0.5, grow: 0.25 });
+    }
+    g.fx?.flash?.(this._handPos(_c), RED, 3, 0.1);
+    const dmg = TUNE.tendrilDmg[step], kb = TUNE.tendrilKb[step];
+    if (step === 2) {
+      // wrap-and-pull: enemies in front are dragged to the hero, then slammed
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || e.isBoss) continue;
+        _t.set(e.pos.x - this.pos.x, 0, e.pos.z - this.pos.z);
+        const d = _t.length(); if (d > TUNE.tendrilRange + 1.5 || d < 1.4) continue;
+        if (_t.normalize().dot(fwd) < 0.2) continue;
+        e.vel.x -= _t.x * 9; e.vel.z -= _t.z * 9;
+        const ee = e;
+        this.tend.fire(this._handPos(_c), e.center, { life: 0.4, width: 0.15, curl: 0.5, fromFn: (o) => this._handPos(o), toFn: (o) => o.copy(ee.center) });
+      }
+    }
+    this.timers.after(step === 2 ? 0.22 : 0.09, () => {
+      if (!this.active || this.dead) return;
+      const f = this.forward;
+      const hits = g.combat.melee({ origin: this.center, forward: f, range: TUNE.tendrilRange, arc: step === 2 ? 200 : 150, damage: dmg, knockback: kb, up: [1, 1, 6][step], stun: [0.3, 0.3, 1][step], source: this, heavy: step === 2 }) ?? [];
+      for (const h of hits) {
+        g.fx?.hitSpark?.(h.center ?? h.pos, RED, step === 2);
+        g.fx?.burst?.(h.center ?? h.pos, PINK, 8, 5, 0.3, 0.2);
+      }
+      if (hits.length) { rumble(g, 0.25 + step * 0.2, 0.2, 90); g.audio?.play(step === 2 ? 'heavyhit' : 'hit', { volume: 0.5 }); }
+      if (step === 2) {
+        g.fx?.shockwave?.(_a.copy(this.pos).addScaledVector(f, 2.2), 4.5, RED);
+        g.cam.shake(0.3);
+      }
+    });
+    if (step === 2) {
+      // combo ender: rapid-fire hex bolt volley
+      const tg = [];
+      for (const e of g.enemies?.list ?? []) if (e.alive && e.pos.distanceTo(this.pos) < 32) tg.push(e);
+      tg.sort((a, b) => a.pos.distanceTo(this.pos) - b.pos.distanceTo(this.pos));
+      for (let i = 0; i < TUNE.volleyN; i++) {
+        this.timers.after(0.3 + i * 0.065, () => {
+          if (!this.active || this.dead) return;
+          const t = tg.length ? tg[i % tg.length] : null;
+          this._handPos(_c); this.hand ^= 1;
+          if (t && t.alive) _b.subVectors(t.center, _c); else _b.copy(this.forward);
+          _b.normalize(); _b.x += rand(-0.07, 0.07); _b.y += rand(-0.04, 0.07); _b.z += rand(-0.07, 0.07);
+          this._spawnBolt(_c, _b, t && t.alive ? t : null, false, TUNE.volleyDmg, 58);
+        });
+      }
+      this.actionT = 0.8;
+    }
+    return true;
+  }
+
+  // ---- flight ribbons ----------------------------------------------------------------
+  _startTrails() {
+    if (this.trails.length) return;
+    const fx = this.game.fx; if (!fx?.trail) return;
+    for (const o of [this.model.handL, this.model.handR]) if (o) { const h = fx.trail(o, RED, 0.18, 0.6); if (h) this.trails.push(h); }
+    if (this.model.chest) { const h = fx.trail(this.model.chest, PINK, 0.3, 0.7); if (h) this.trails.push(h); }
+  }
+  _stopTrails() { for (const h of this.trails) h.stop?.(); this.trails.length = 0; }
+
+  // ---- Reality Warp zone (special while flying) ------------------------------------------
+  _realityWarp() {
+    const g = this.game;
+    if (!this.useCooldown('warp', TUNE.warpCd)) return false;
+    this._zoneOff();
+    const pt = this._groundPoint(TUNE.warpRange, new THREE.Vector3());
+    const H = hexAssets(), R = TUNE.warpR;
+    const mats = [H.rune.clone(), H.rune.clone(), H.dome.clone(), H.fill.clone()];
+    const grp = new THREE.Group(); grp.position.copy(pt);
+    const disc = new THREE.Mesh(H.runeGeo, mats[0]); disc.rotation.x = -Math.PI / 2; disc.position.y = 0.12; disc.scale.setScalar(R * 2.1);
+    const disc2 = new THREE.Mesh(H.runeGeo, mats[1]); disc2.rotation.x = -Math.PI / 2; disc2.position.y = 0.16; disc2.scale.setScalar(R * 1.3);
+    const wire = new THREE.Mesh(H.domeGeo, mats[2]); wire.scale.setScalar(R);
+    const fill = new THREE.Mesh(H.domeGeo, mats[3]); fill.scale.setScalar(R * 0.98);
+    grp.add(disc, disc2, wire, fill);
+    g.scene.add(grp);
+    this.zone = { pt, t: 0, tick: 0, pulse: 0, seen: new Set(), grp, mats, parts: [disc, disc2, wire, fill], r: R };
+    g.fx?.shockwave?.(pt.clone(), R * 1.2, RED);
+    g.fx?.flash?.(_a.set(pt.x, pt.y + 1.5, pt.z), RED, 6, 0.3);
+    g.fx?.lightning?.(this._handPos(_c).clone(), new THREE.Vector3(pt.x, pt.y + 0.5, pt.z), RED, 0.3, 3);
+    g.hud?.toast?.('REALITY WARP');
+    g.audio?.play('thunder', { volume: 0.7 });
+    g.cam.shake(0.3); rumble(g, 0.5, 0.5, 250);
+    this._lookAt(pt);
+    this.actionT = 0.5; this.actionAnim = 'cast'; this.setAnim('cast', 1);
+    return true;
+  }
+  _zoneOff() {
+    const z = this.zone; if (!z) return;
+    this.game.scene.remove(z.grp);
+    for (const m of z.mats) m.dispose();
+    this.zone = null;
+  }
+  _zoneUpdate(dt) {
+    const z = this.zone; if (!z) return;
+    const g = this.game, R = z.r;
+    z.t += dt;
+    const k = Math.min(1, z.t / 0.45), out = clamp((TUNE.warpTime - z.t) / 0.9, 0, 1), a = Math.min(k, out);
+    if (z.t >= TUNE.warpTime) { g.fx?.burst?.(z.pt, RED, 24, 6, 0.6, 0.3); this._zoneOff(); return; }
+    z.grp.scale.setScalar(0.55 + 0.45 * k);
+    z.mats[0].opacity = 0.85 * a; z.mats[1].opacity = 0.65 * a; z.mats[2].opacity = 0.3 * a; z.mats[3].opacity = 0.09 * a;
+    z.parts[0].rotation.z += dt * 0.5; z.parts[1].rotation.z -= dt * 1.0;
+    z.parts[2].rotation.y += dt * 0.4; z.parts[2].rotation.x += dt * 0.15;
+    // rising motes, pulsing rings
+    for (let i = 0; i < 2; i++) {
+      const an = Math.random() * 6.28, r = Math.sqrt(Math.random()) * R;
+      g.fx?.burst?.(_a.set(z.pt.x + Math.cos(an) * r, z.pt.y + 0.2, z.pt.z + Math.sin(an) * r), Math.random() < 0.5 ? RED : PINK, 1, 2.2, 0.9, 0.2);
+    }
+    z.pulse -= dt;
+    if (z.pulse <= 0) { z.pulse = 0.9; g.fx?.ring?.(_a.set(z.pt.x, z.pt.y + 0.15, z.pt.z), R * 0.9, RED, 0.6); }
+    z.tick -= dt;
+    if (z.tick <= 0) {
+      z.tick = 0.25;
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || e.removed) continue;
+        if (Math.hypot(e.pos.x - z.pt.x, e.pos.z - z.pt.z) > R || Math.abs(e.pos.y - z.pt.y) > 7) continue;
+        e.slowTimer = Math.max(e.slowTimer || 0, 0.6);
+        if (e.isBoss) continue;
+        if (!z.seen.has(e)) {
+          z.seen.add(e);
+          if (this.mind.apply(e, 'confuse', TUNE.warpConfuse)) {
+            g.fx?.text?.(_a.copy(e.pos).setY(e.pos.y + e.height + 0.5), 'CONFUSED', PINK);
+            g.fx?.burst?.(e.center, PINK, 10, 3, 0.4, 0.2);
+          }
         }
       }
     }

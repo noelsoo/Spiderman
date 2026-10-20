@@ -9,12 +9,21 @@
 //   tap R / tap L2        Unibeam: tap to start charging, tap again (or LMB) to fire early, auto-fires when full
 //   ultimate Q / R3       Proton Cannon (shoulder-mounted sustained beam steered by the camera)
 //   jump x2 / hold, Shift / R2: flight + boost (steer the camera: boost turns are rate limited so you bank around)
+//
+// Context variants (no extra bindings):
+//   attack LMB/J/[]       grounded: palm-blast / thruster-punch combo (jab, jab, THRUSTER PUNCH, dual-palm blast)
+//                         flying fast: dash strike.  Flying + hold dodge (descend) + attack: GROUND POUND dive
+//   hold special K / R1   (unaimed, 0.35 s+) smart-targeting SHOULDER LASERS: marks up to 6 enemies, release = sweep beams
+//   hold ability E / L1   (unaimed, 0.3 s+) deploy the IRON LEGION mini-drones (they shoot for ~11 s, then pop)
+//   dodge C / Ctrl / O    tap on the ground = dash; tap in flight = AIR DASH (boost burst);
+//                         HOLD on the ground = NANO SHIELD (blocks 88% damage, drains an energy bar); hold in flight = descend
 import * as THREE from 'three';
 import { Hero } from './Hero.js';
 import {
   Timers, BeamMesh, GlowSprite, LockMarkers, aimInfo, assistAim, enemiesInReticle, enemyCenter, beamDamage, rumble, applyTilt,
   impactFx, precisionHit, setReticle, hitStop, clamp, damp, rand, objPos, approachVal,
 } from './avengers/util.js';
+import { Legion } from './ironman/legion.js';
 
 // ---- tuning ----------------------------------------------------------------
 const HOVER_SPEED = 20, STRAFE_SPEED = 15, BOOST_SPEED = 62, BOOST_MAX = 80, ASCEND = 14, BOOST_TURN = 2.3;
@@ -24,6 +33,11 @@ const RAPID_INTERVAL = 0.11, RAPID_DMG = 15, BURST_TIME = 0.4, HEAVY_MAX = 1.0, 
 const UNIBEAM_CD = 12, UNIBEAM_MAX_CHARGE = 1.6, UNIBEAM_MIN_CHARGE = 0.4;
 const ULT_WINDUP = 1.1, ULT_TIME = 4.5, ULT_TICK = 0.1, ULT_TICK_DMG = 20, ULT_RANGE = 100, ULT_WIDTH = 3.6;
 const ARMOR_GOLD = 0xffcc33, REPULSOR_COL = 0xbff4ff, PROTON_COL = 0xffc070;
+const LASER_HOLD = 0.35, LASER_CD = 10, LASER_MAX = 6, LASER_TICK = 0.1, LASER_DMG = 11;
+const LEGION_HOLD = 0.3, LEGION_CD = 16, LEGION_LIFE = 11;
+const NANO_HOLD = 0.2, NANO_DRAIN = 22, NANO_REGEN = 24, NANO_TAKE = 0.12;
+const AIRDASH_CD = 1.3, AIRDASH_SPEED = 66, AIRDASH_T = 0.24;
+const POUND_CD = 5, POUND_MIN_ALT = 4;
 const AIM_PRESET = { fov: 46, distance: 2.6, shoulder: 0.9, height: 1.7 };
 
 const _as = { dir: new THREE.Vector3(), point: new THREE.Vector3() };
@@ -60,6 +74,13 @@ export class IronMan extends Hero {
     this.glows = [new GlowSprite(game.scene, 0xffb050), new GlowSprite(game.scene, 0xffb050), new GlowSprite(game.scene, 0xaaf0ff), new GlowSprite(game.scene, 0xffd9a0)];
     this.markers = new LockMarkers(game.scene, MISSILE_MAX);
     this._thrusterBase = null;
+    // context powers
+    this.holdS = 0; this.holdE = 0; this.legionDone = false; this.dodgeHeld = 0;
+    this.laser = null; this.scanning = false; this._scanT = 0; this._scanList = [];
+    this.laserMarkers = new LockMarkers(game.scene, LASER_MAX);
+    this.legion = new Legion(this, 4);
+    this.nano = false; this.shieldE = 100; this.nanoLock = 0; this.nanoHit = 0; this.nanoGrp = null;
+    this.airDashT = 0; this.pound = null;
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -67,8 +88,11 @@ export class IronMan extends Hero {
     this.flying = false; this.ult = null; this.charging = false; this.actionT = 0; this.heavy = 0; this.fireHeld = 0;
     this.lock.on = false;
     this.gravityScale = 1;
+    this.shieldE = 100;
   }
   onDeactivate() {
+    this.legion.clear(); this.laser = null; this.scanning = false; this.laserMarkers.hideAll();
+    this._nanoOff(); this.airDashT = 0; this.pound = null; this.holdS = 0; this.holdE = 0; this.legionDone = false; this.dodgeHeld = 0;
     this.flying = false; this.boosting = false; this.charging = false; this.ult = null; this.beamT = 0; this.heavy = 0;
     this.lock.on = false; this.markers.hideAll();
     this.gravityScale = 1; this.timers.clear();
@@ -83,9 +107,11 @@ export class IronMan extends Hero {
 
   get abilityHints() {
     return [
-      { action: 'special', label: 'Repulsor', cooldown: this.cooldownFrac('repulsor') },
-      { action: 'ability', label: this.aiming ? 'Missile Lock' : 'Micro-Missiles', cooldown: this.cooldownFrac('missile'), active: this.lock.on },
+      { action: 'attack', label: this.flying ? 'Strike | Dive: Pound' : 'Palm / Thruster', cooldown: this.flying ? this.cooldownFrac('pound') : 0, active: !!this.pound },
+      { action: 'special', label: this.holdS >= LASER_HOLD ? 'Release: Lasers' : 'Repulsor | Hold: Laser', cooldown: Math.max(this.cooldownFrac('repulsor'), this.cooldownFrac('lasers')), active: !!this.laser || this.holdS >= LASER_HOLD },
+      { action: 'ability', label: this.aiming ? 'Missile Lock' : 'Missiles | Hold: Legion', cooldown: Math.max(this.cooldownFrac('missile'), this.legion.count ? 0 : this.cooldownFrac('legion')), active: this.lock.on || this.legion.count > 0 },
       { action: 'ability2', label: 'Unibeam', cooldown: this.cooldownFrac('unibeam'), active: this.charging },
+      { action: 'dodge', label: this.flying ? 'Air Dash | Hold: Down' : 'Dash | Hold: Shield', cooldown: this.flying ? this.cooldownFrac('airdash') : (this.nano || this.shieldE < 99 ? 1 - this.shieldE / 100 : 0), active: this.nano },
       { action: 'ultimate', label: 'Proton Cannon', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
   }
@@ -94,6 +120,14 @@ export class IronMan extends Hero {
 
   takeDamage(amount, fromPos) {
     if (this.ult) return false;
+    if (this.nano && amount > 0 && !this.dead && this.invuln <= 0) {
+      this.shieldE -= amount * 0.6; this.nanoHit = 0.3;
+      amount *= NANO_TAKE; fromPos = undefined;
+      const g = this.game;
+      g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.4, this.pos.z), 'BLOCKED', 0xaaf0ff);
+      g.fx?.burst?.(this.center, 0xaaf0ff, 12, 5, 0.3, 0.18);
+      g.audio?.play('hit', { volume: 0.35, pitch: 1.5 });
+    }
     const ok = super.takeDamage(amount, fromPos);
     if (ok) { this.lock.on && this._cancelLock(); this.heavy = 0; this.fireHeld = 0; }
     return ok;
@@ -104,10 +138,15 @@ export class IronMan extends Hero {
     this.timers.update(dt);
     this.actionT = Math.max(0, this.actionT - dt);
     this.chainT -= dt; if (this.chainT <= 0) this.chain = 0;
+    this.legion.update(dt, this.game.time);
+    this.laserMarkers.hideFrom(this.scanning ? this._scanList.length : 0);
+    this._nanoUpdate(dt, this.game.input);
+    this._laserUpdate(dt);
 
     if (this.ult) { setReticle(this, null); this._updateUlt(dt, input); this._finish(dt); return; }
 
     setReticle(this, this.aiming ? 'repulsor' : null);
+    if (this.pound) { this._poundUpdate(dt); this._combatHolds(dt, input); this._finish(dt); return; }
     this._flightState(dt, input);
     if (this.flying) this._flightMove(dt, input);
     else { this.customMovement = false; this.gravityScale = 1; this.boosting = false; }
@@ -130,6 +169,7 @@ export class IronMan extends Hero {
     if (this.flying) tt = this.boosting ? 1 : 0.3 + 0.4 * clamp(sp / HOVER_SPEED, 0, 1);
     else if (!this.onGround && this.game.input.down('jump')) tt = 0.3;
     if (this.ult) tt = 0.55;
+    if (this.pound || this.airDashT > 0) tt = 1;
     this.thrust = damp(this.thrust, tt, 8, dt);
     const fovT = this.boosting ? 18 * clamp((sp - 15) / 55, 0, 1) : 0;
     this.fov = damp(this.fov, fovT, 4, dt);
@@ -154,6 +194,12 @@ export class IronMan extends Hero {
       this.faceTowards(this.game.cam.forward, dt, 20);
       if (!this.onGround) this.setAnim(this.vel.y > 0 ? 'jump' : 'fall', hs);
       else this.setAnim('aim', hs);
+    }
+    if (this.nano) {
+      const lim = this.walkSpeed * 0.45, hs = Math.hypot(this.vel.x, this.vel.z);
+      if (hs > lim) { this.vel.x *= lim / hs; this.vel.z *= lim / hs; }
+      this.faceTowards(this.game.cam.forward, dt, 14);
+      this.setAnim('aim', hs);
     }
     if (this.actionT > 0) this.setAnim(this.actionAnim, this.anim.speed);
     if (this.charging) this.setAnim('charge');
@@ -184,6 +230,13 @@ export class IronMan extends Hero {
   _flightMove(dt, input) {
     const g = this.game, cam = g.cam;
     this.customMovement = true; this.gravityScale = 0;
+    if (this.airDashT > 0) {
+      this.airDashT -= dt; this.boosting = true;
+      g.fx?.trailPuff?.(this.pos.x, this.pos.y + 0.9, this.pos.z, 0xaaf0ff, 0.9, 0.45, 0.15);
+      _a.set(this.vel.x, 0, this.vel.z); if (_a.lengthSq() > 1) this.faceTowards(_a, dt, 14);
+      if (this.airDashT <= 0) this.vel.multiplyScalar(0.45);
+      return;
+    }
     const aim = cam.aimDirection(_aim.dir).normalize();
     const mv = input.move;
     _wish.set(0, 0, 0).addScaledVector(aim, mv.y).addScaledVector(cam.right, mv.x);
@@ -242,6 +295,7 @@ export class IronMan extends Hero {
     const g = this.game;
     const vy = -this._impactVy;
     this._landCd = this._landCd ?? 0;
+    if (this.pound) { this._poundImpact(); return; }
     if (this.ult) return;
     if (this.flying && this.boosting) return; // skimming the ground at speed, stay airborne
     if (((this.flying && vy > 3.5) || vy > 20) && g.time - this._landCd > 0.8) {
@@ -259,23 +313,72 @@ export class IronMan extends Hero {
   // ---- melee + repulsor ------------------------------------------------------
   _combat(dt, input) {
     const g = this.game;
-    const busy = this.charging || this.lock.on || this.heavy > 0.05;
+    const busy = this.charging || this.lock.on || this.heavy > 0.05 || this.nano || !!this.laser;
     const free = this.actionT <= 0 && !busy;
+    const prevHeld = this.dodgeHeld;
+    this.dodgeHeld = input.down('dodge') ? this.dodgeHeld + dt : 0;
 
     if (input.pressed('attack') && free) {
-      if (this.flying && (this.boosting || this.vel.length() > 14)) this._dashPunch();
+      if (this.flying && this.dodgeHeld > 0.05 && this._groundPound()) { /* dive started */ }
+      else if (this.flying && (this.boosting || this.vel.length() > 14)) this._dashPunch();
       else this._meleeCombo();
     }
-    if (this.pressedSpecial() && (this.cooldowns.repulsor || 0) <= 0 && !this.charging && !this.lock.on) this._quickRepulsor();
-    if (input.pressed('ability') && !this.aiming && !busy && (this.cooldowns.missile || 0) <= 0) this._missileSalvo(this._nearestTargets(6), false);
+    this._combatHolds(dt, input);
+    if (input.pressed('ability') && !this.aiming && !busy) { this.holdE = 1e-4; this.legionDone = false; }
     if (input.pressed('ultimate') && this.focus >= 100 && !this.charging) this._startUlt();
-    if (!this.flying && input.pressed('dodge') && (this.cooldowns.dash || 0) <= 0 && !busy) {
-      this.useCooldown('dash', 0.8);
-      const w = g.cam.moveVector(input.move, _a); if (w.lengthSq() < 0.01) w.copy(this.forward);
-      w.normalize(); this.vel.x = w.x * 24; this.vel.z = w.z * 24; this.yaw = Math.atan2(w.x, w.z);
-      this.invuln = Math.max(this.invuln, 0.25);
-      this.actionAnim = 'dash'; this.actionT = 0.3;
-      g.audio?.play('whoosh'); g.fx?.burst?.(this.pos.clone().setY(this.pos.y + 0.5), 0xffb050, 12, 4, 0.3, 0.2);
+    // dodge: tap = dash (ground) / air dash (flight); hold on the ground = nano shield (see _nanoUpdate)
+    if (input.released('dodge') && prevHeld > 0 && prevHeld < NANO_HOLD && !this.charging && !this.lock.on && !this.heavy) {
+      if (this.flying) this._airDash(input);
+      else if (!this.nano && (this.cooldowns.dash || 0) <= 0) {
+        this.useCooldown('dash', 0.8);
+        const w = g.cam.moveVector(input.move, _a); if (w.lengthSq() < 0.01) w.copy(this.forward);
+        w.normalize(); this.vel.x = w.x * 24; this.vel.z = w.z * 24; this.yaw = Math.atan2(w.x, w.z);
+        this.invuln = Math.max(this.invuln, 0.25);
+        this.actionAnim = 'dash'; this.actionT = 0.3;
+        g.audio?.play('whoosh'); g.fx?.burst?.(this.pos.clone().setY(this.pos.y + 0.5), 0xffb050, 12, 4, 0.3, 0.2);
+      }
+    }
+  }
+
+  /** Hold-vs-tap handling for special (repulsor / shoulder lasers) and ability (missiles / Iron Legion). */
+  _combatHolds(dt, input) {
+    const busy = this.charging || this.lock.on || this.heavy > 0.05 || this.nano || !!this.laser;
+    const repReady = (this.cooldowns.repulsor || 0) <= 0 && !this.charging && !this.lock.on;
+    // ---- special
+    if (this.aiming) {
+      this.holdS = 0; this.scanning = false;
+      if (this.pressedSpecial() && repReady) this._quickRepulsor();
+    } else {
+      if (this._aimTap === 'special' && repReady) this._quickRepulsor();
+      if (input.pressed('special') && !busy && !this.pound) this.holdS = 1e-4;
+      if (this.holdS > 0) {
+        const down = input.down('special');
+        if (down) {
+          this.holdS += dt;
+          if (this.holdS >= LASER_HOLD && (this.cooldowns.lasers || 0) <= 0) this._laserScan(dt);
+        }
+        if (!down || input.released('special')) {
+          const h = this.holdS; this.holdS = 0; this.scanning = false;
+          if (h >= LASER_HOLD && (this.cooldowns.lasers || 0) <= 0) this._fireLasers();
+          else if (h < LASER_HOLD && repReady) this._quickRepulsor();
+        }
+      }
+    }
+    // ---- ability (unaimed): tap = micro-missiles, hold = Iron Legion
+    if (this.holdE > 0) {
+      const down = input.down('ability');
+      if (this.aiming || busy) this.holdE = 0;
+      else {
+        if (down) {
+          this.holdE += dt;
+          if (this.holdE >= LEGION_HOLD && !this.legionDone) { this.legionDone = true; this._deployLegion(); }
+        }
+        if (!down || input.released('ability')) {
+          const h = this.holdE; this.holdE = 0;
+          if (!this.legionDone && h < LEGION_HOLD && (this.cooldowns.missile || 0) <= 0) this._missileSalvo(this._nearestTargets(6), false);
+          this.legionDone = false;
+        }
+      }
     }
   }
 
@@ -287,23 +390,61 @@ export class IronMan extends Hero {
 
   _meleeCombo() {
     const g = this.game;
-    const step = this.chain % 3;
+    const step = this.chain % 4;
     const t = this._facingToTarget(9, 80);
     const fwd = this.forward;
-    // anticipation: the lunge starts at once, the strike lands after the wind-up
-    if (this.onGround || !this.flying) { this.vel.x += fwd.x * (t ? 7 : 3); this.vel.z += fwd.z * (t ? 7 : 3); }
-    const anims = ['punch1', 'punch2', 'kick'], dmg = [18, 20, 32], kn = [6, 7, 15], up = [1.5, 1.5, 5], dur = [0.34, 0.36, 0.5], delay = [0.1, 0.11, 0.18];
+    const lunge = [t ? 5 : 2, t ? 5 : 2, t ? 15 : 9, 3][step];
+    if (this.onGround || !this.flying) { this.vel.x += fwd.x * lunge; this.vel.z += fwd.z * lunge; }
+    const anims = ['punch1', 'punch2', 'punch3', 'shoot'];
+    const dmg = [16, 18, 30, 34], kn = [5, 6, 15, 18], up = [1.2, 1.2, 3.5, 6], dur = [0.3, 0.32, 0.5, 0.64], delay = [0.09, 0.09, 0.15, 0.2];
+    const range = [2.7, 2.7, 3.7, 6.2], arc = [110, 110, 90, 75], stun = [0.3, 0.3, 0.7, 1.0];
     this.actionAnim = anims[step]; this.actionT = dur[step]; this.setAnim(anims[step]);
     this.chain++; this.chainT = 1.0;
     g.audio?.play('whoosh', { volume: 0.5 });
+    // wind-up fx: palm charge / thruster ignition
+    const side = step & 1;
+    if (step === 2) {
+      this.timers.after(0.02, () => {
+        if (!this.active) return;
+        const h = this._handPos(0, _b).clone(), back = this.forward.multiplyScalar(-1);
+        g.fx?.burst?.(h.clone().addScaledVector(back, 0.35), 0xffaa44, 16, 5, 0.35, 0.28);
+        g.fx?.burst?.(h.clone().addScaledVector(back, 0.35), 0xaaf0ff, 6, 3, 0.25, 0.2);
+        g.fx?.glow?.(h, 0xffcc88, 1.6, 0.15); g.fx?.flash?.(h, 0xffaa55, 3, 0.12);
+        g.audio?.play('thruster', { volume: 0.5, pitch: 1.3 });
+      });
+    } else if (step === 3) {
+      g.fx?.flash?.(this.center, REPULSOR_COL, 3, 0.15);
+      g.audio?.play('repulsor', { volume: 0.7, pitch: 0.7 });
+    }
     this.timers.after(delay[step], () => {
       if (!this.active) return;
       this._hitFocus = 1;
-      const hits = g.combat?.melee?.({ origin: this.center, forward: this.forward, range: 2.8, arc: 110, damage: dmg[step] * this.dmgMul, knockback: kn[step], up: up[step], stun: step === 2 ? 0.8 : 0.3, source: this, heavy: step === 2 }) ?? [];
+      const f = this.forward;
+      const hits = g.combat?.melee?.({ origin: this.center, forward: f, range: range[step], arc: arc[step], damage: dmg[step] * this.dmgMul, knockback: kn[step], up: up[step], stun: stun[step], source: this, heavy: step >= 2 }) ?? [];
+      // palm repulsor flashes (the hand-blasters behind the punches)
+      const from = this._handPos(side, _a).clone();
+      if (step < 2) {
+        g.fx?.beam?.(from, from.clone().addScaledVector(f, 2.4), REPULSOR_COL, 0.16, 0.07);
+        g.fx?.glow?.(from, REPULSOR_COL, 0.9, 0.08); g.fx?.flash?.(from, REPULSOR_COL, 1.8, 0.07);
+      } else if (step === 2) {
+        g.fx?.beam?.(from, from.clone().addScaledVector(f, 3.2), 0xffcc88, 0.3, 0.1);
+        g.fx?.ring?.(from.clone().addScaledVector(f, 1.6), 1.8, 0xffcc88, 0.3);
+      } else {
+        for (let k = 0; k < 2; k++) {
+          const hp = this._handPos(k, _c).clone();
+          for (let a = -1; a <= 1; a++) {
+            _d.copy(f).applyAxisAngle(UPV, a * 0.18 + (k ? 0.05 : -0.05));
+            g.fx?.beam?.(hp, hp.clone().addScaledVector(_d, 6.2), REPULSOR_COL, a ? 0.12 : 0.28, 0.12);
+          }
+          g.fx?.flash?.(hp, REPULSOR_COL, 3, 0.12);
+        }
+        g.fx?.shockwave?.(this.pos.clone().addScaledVector(f, 3), 5, REPULSOR_COL);
+        this.vel.x -= f.x * 5; this.vel.z -= f.z * 5;
+      }
       if (hits.length) {
-        for (const h of hits) g.fx?.burst?.(enemyCenter(h, _b).clone(), ARMOR_GOLD, 10, 5, 0.3, 0.2);
-        rumble(g, 0.3 + step * 0.2, 0.2, 90);
-        if (step === 2) { g.cam.shake(0.3); hitStop(g, 0.06, 0.05); }
+        for (const h of hits) g.fx?.burst?.(enemyCenter(h, _b).clone(), step === 3 ? REPULSOR_COL : ARMOR_GOLD, 10 + step * 3, 5, 0.3, 0.2);
+        rumble(g, 0.3 + step * 0.15, 0.2, 90);
+        if (step >= 2) { g.cam.shake(0.3); hitStop(g, 0.06, 0.05); }
       }
     });
   }
@@ -573,6 +714,245 @@ export class IronMan extends Hero {
     this.yaw = Math.atan2(dir.x, dir.z);
   }
 
+  // ---- flight boost: air dash ---------------------------------------------------------
+  _airDash(input) {
+    if (!this.useCooldown('airdash', AIRDASH_CD)) return false;
+    const g = this.game, cam = g.cam;
+    const aim = cam.aimDirection(_aim.dir).normalize();
+    _wish.set(0, 0, 0).addScaledVector(aim, input.move.y).addScaledVector(cam.right, input.move.x);
+    if (_wish.lengthSq() < 0.05) _wish.copy(aim); else _wish.normalize();
+    this.vel.copy(_wish).multiplyScalar(AIRDASH_SPEED);
+    this.airDashT = AIRDASH_T; this.boosting = true;
+    this.invuln = Math.max(this.invuln, 0.3);
+    this.fov = Math.max(this.fov, 20);
+    g.fx?.ring?.(this.center, 4.5, 0xaaf0ff, 0.35);
+    g.fx?.burst?.(this.center.addScaledVector(_wish, -0.8), 0xaaf0ff, 22, 8, 0.4, 0.3);
+    g.fx?.flash?.(this.center, 0xaaf0ff, 4, 0.15);
+    g.audio?.play('thruster', { volume: 0.8, pitch: 1.5 }); g.audio?.play('whoosh', { pitch: 0.8 });
+    g.cam.shake(0.18); rumble(g, 0.4, 0.5, 120);
+    this.actionAnim = 'dash'; this.actionT = 0.25; this.setAnim('dash');
+    return true;
+  }
+
+  // ---- ground pound dive (flight + hold dodge + attack) ------------------------------------
+  _groundPound() {
+    const g = this.game;
+    const alt = this.pos.y - g.physics.heightAt(this.pos.x, this.pos.z, this.pos.y + 0.5);
+    if (alt < POUND_MIN_ALT) return false;
+    if (!this.useCooldown('pound', POUND_CD)) return false;
+    this.pound = { t: 0, from: this.pos.y };
+    this.boosting = false; this.airDashT = 0; this.nano = false;
+    this.vel.set(this.vel.x * 0.15, Math.min(this.vel.y, -28), this.vel.z * 0.15);
+    this.invuln = Math.max(this.invuln, 0.3);
+    g.audio?.play('thruster', { volume: 0.9, pitch: 0.7 }); g.audio?.play('whoosh', { pitch: 0.5 });
+    g.fx?.ring?.(this.center, 3.5, ARMOR_GOLD, 0.3);
+    g.hud?.toast?.('GROUND POUND');
+    g.cam.shake(0.2);
+    this.actionT = 0; this.setAnim('fly', 60);
+    return true;
+  }
+  _poundUpdate(dt) {
+    const g = this.game, u = this.pound;
+    u.t += dt;
+    this.customMovement = true; this.gravityScale = 0; this.flying = true;
+    this.vel.y = Math.max(-88, Math.min(this.vel.y, -28) - 150 * dt);
+    this.vel.x = damp(this.vel.x, 0, 3, dt); this.vel.z = damp(this.vel.z, 0, 3, dt);
+    this.setAnim('fly', 60);
+    g.fx?.trailPuff?.(this.pos.x, this.pos.y + 2.1, this.pos.z, 0xffaa44, 1.0, 0.5, 0.2);
+    g.fx?.trailPuff?.(this.pos.x, this.pos.y + 2.6, this.pos.z, 0xaaf0ff, 0.7, 0.4, 0.2);
+    g.cam.shake(0.05); g.cam.fovKick = Math.max(g.cam.fovKick, 14);
+    if (this.onGround && u.t > 0.05) this._poundImpact();
+    else if (u.t > 3.5) this.pound = null;
+  }
+  _poundImpact() {
+    const u = this.pound; if (!u) return;
+    this.pound = null;
+    const g = this.game;
+    const h = Math.max(0, u.from - this.pos.y);
+    const r = 7 + clamp(h * 0.12, 0, 3.5), dmg = 38 + clamp(h * 1.1, 0, 30);
+    const p = this.pos.clone();
+    this._hitFocus = 1;
+    g.combat?.aoe?.({ center: p.clone(), radius: r, damage: dmg * this.dmgMul, knockback: 20, up: 10, stun: 1.4, source: this });
+    impactFx(g, p, r, ARMOR_GOLD, 0.9);
+    g.fx?.shockwave?.(p.clone(), r * 1.5, 0xffd070);
+    g.fx?.ring?.(p.clone().setY(p.y + 0.15), r, 0xaaf0ff, 0.5);
+    g.fx?.explosion?.(p.clone(), 3.5, 0xffa040);
+    g.fx?.dust?.(p, 18, r);
+    g.audio?.play('land'); g.audio?.play('smash'); g.audio?.play('explosion', { volume: 0.6 });
+    g.cam.shake(0.95); rumble(g, 1, 0.7, 320); hitStop(g, 0.08, 0.05);
+    this.flying = false; this.customMovement = false; this.gravityScale = 1; this.boosting = false;
+    this.actionAnim = 'land'; this.actionT = 0.6; this.setAnim('land');
+    this._landCd = g.time;
+  }
+
+  // ---- Iron Legion mini-drones ------------------------------------------------------------
+  _deployLegion() {
+    const g = this.game;
+    if (!this.useCooldown('legion', LEGION_CD)) { g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.6, this.pos.z), 'RECHARGING', 0xffcc33); return false; }
+    for (let i = 0; i < 2; i++) {
+      const from = this._shoulderSide(i, _a).clone();
+      this.legion.deploy(from, LEGION_LIFE, i);
+      g.fx?.burst?.(from, 0xffcc88, 10, 4, 0.3, 0.2); g.fx?.ring?.(from, 1.6, 0xaaf0ff, 0.3);
+    }
+    g.hud?.toast?.('IRON LEGION');
+    g.audio?.play('missile', { volume: 0.4, pitch: 1.4 }); g.audio?.play('thruster', { volume: 0.4, pitch: 1.2 });
+    this.actionAnim = 'cast'; this.actionT = 0.45; this.setAnim('cast');
+    g.cam.shake(0.08);
+    return true;
+  }
+
+  // ---- smart-targeting shoulder lasers -------------------------------------------------------
+  _shoulderSide(side, out) {
+    const gr = this.model.group;
+    gr.updateMatrixWorld(true);
+    return gr.localToWorld(out.set(side ? -0.34 : 0.34, this.height * 0.86, 0.12));
+  }
+  /** Up to LASER_MAX enemies, ordered left to right as seen by the camera. */
+  _laserTargets() {
+    const g = this.game, cam = g.cam;
+    const cands = [];
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || e.removed) continue;
+      const d = e.pos.distanceTo(this.pos);
+      if (d > 45) continue;
+      enemyCenter(e, _e).sub(this.pos);
+      const f = _e.dot(cam.forward), r = _e.dot(cam.right);
+      if (f < -2) continue;
+      cands.push({ e, d, az: Math.atan2(r, Math.max(0.01, f)) });
+    }
+    cands.sort((a, b) => a.d - b.d);
+    cands.length = Math.min(cands.length, LASER_MAX);
+    cands.sort((a, b) => a.az - b.az);
+    return cands.map((c) => c.e);
+  }
+  _laserScan(dt) {
+    const g = this.game;
+    this.scanning = true;
+    this._scanT -= dt;
+    if (this._scanT <= 0) { this._scanT = 0.12; this._scanList = this._laserTargets(); }
+    const f = clamp((this.holdS - LASER_HOLD) / 0.4, 0, 1);
+    for (let i = 0; i < this._scanList.length; i++) {
+      const e = this._scanList[i];
+      if (!e.alive) continue;
+      enemyCenter(e, _e);
+      this.laserMarkers.set(i, _e, f, g.camera.position);
+    }
+    this.laserMarkers.hideFrom(this._scanList.length);
+    for (let k = 0; k < 2; k++) {
+      const sp = this._shoulderSide(k, _d);
+      g.fx?.flash?.(sp, 0xff6a3a, 1 + f * 2, 0.06);
+      if (Math.random() < 0.5) g.fx?.burst?.(sp, 0xff9a60, 1, 1.5, 0.2, 0.14);
+    }
+    this.faceTowards(g.cam.forward, dt, 8);
+    this.actionAnim = 'charge'; this.actionT = 0.1;
+  }
+  _fireLasers() {
+    const g = this.game;
+    this.laserMarkers.hideAll();
+    const targets = this._laserTargets();
+    if (!targets.length) { g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.6, this.pos.z), 'NO TARGETS', 0xff7a50); return false; }
+    this.useCooldown('lasers', LASER_CD);
+    const pts = targets.map((e) => enemyCenter(e, new THREE.Vector3()));
+    this.laser = { t: 0, dur: clamp(0.5 * targets.length + 0.5, 0.9, 2.6), targets, pts, tick: 0, p: pts[0].clone(), snd: 0 };
+    g.audio?.play('unibeam', { volume: 0.5, pitch: 1.7 });
+    g.hud?.toast?.('SMART LASERS');
+    g.cam.shake(0.12); rumble(g, 0.4, 0.6, 200);
+    return true;
+  }
+  _laserUpdate(dt) {
+    const L = this.laser; if (!L) return;
+    const g = this.game, n = L.targets.length;
+    L.t += dt; L.tick -= dt; L.snd -= dt;
+    for (let i = 0; i < n; i++) if (L.targets[i].alive) enemyCenter(L.targets[i], L.pts[i]);
+    if (L.t >= L.dur || this.dead) { this.laser = null; g.fx?.burst?.(this._shoulderSide(0, _a), 0xff9a60, 10, 4, 0.3, 0.2); return; }
+    // sweep point: glides across the targets in order (smart-targeting snaps to each), dwelling on every one
+    const u = clamp(L.t / L.dur, 0, 1) * Math.max(1, n - 1);
+    const i0 = Math.min(n - 1, Math.floor(u)), i1 = Math.min(n - 1, i0 + 1), fr = u - i0;
+    const ease = fr < 0.35 ? 0 : fr > 0.65 ? 1 : (fr - 0.35) / 0.3;
+    L.p.copy(L.pts[i0]).lerp(L.pts[i1], n > 1 ? ease : 0);
+    if (n === 1) { L.p.x += Math.sin(L.t * 9) * 0.5; L.p.y += Math.cos(L.t * 7) * 0.3; }
+    for (let k = 0; k < 2; k++) {
+      const sp = this._shoulderSide(k, _d);
+      g.fx?.beam?.(sp, L.p, 0xff5a30, 0.12, 0.1);
+      g.fx?.beam?.(sp, L.p, 0xffffff, 0.045, 0.09);
+      g.fx?.glow?.(sp, 0xff8a50, 0.7, 0.06);
+    }
+    g.fx?.flash?.(L.p, 0xff7a40, 3, 0.06);
+    if (Math.random() < 0.7) g.fx?.burst?.(L.p, 0xffaa60, 3, 5, 0.25, 0.18);
+    this.faceTowards(_a.set(L.p.x - this.pos.x, 0, L.p.z - this.pos.z), dt, 10);
+    this.actionAnim = 'shoot'; this.actionT = Math.max(this.actionT, 0.1);
+    if (L.snd <= 0) { L.snd = 0.22; g.audio?.play('repulsor', { volume: 0.3, pitch: 1.9 }); }
+    g.cam.shake(0.025);
+    if (L.tick <= 0) {
+      L.tick = LASER_TICK;
+      this._hitFocus = 0.3;
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || e.removed) continue;
+        enemyCenter(e, _e);
+        if (_e.distanceTo(L.p) > 2.4 + (e.radius ?? 0.5)) continue;
+        _c.subVectors(_e, this.pos).setY(0).normalize().multiplyScalar(3); _c.y = 1.5;
+        const dealt = e.takeDamage?.(LASER_DMG * this.dmgMul, { knockback: _c.clone(), stun: 0.18, source: this, kind: 'laser' });
+        if (dealt > 0) { g.fx?.hitSpark?.(_e, 0xff9a60, false); this.registerHit(); }
+      }
+      this._hitFocus = 1;
+    }
+  }
+
+  // ---- nano shield (hold dodge on the ground) -------------------------------------------------
+  _nanoBubble() {
+    if (this.nanoGrp) return this.nanoGrp;
+    const g = this.game;
+    const grp = new THREE.Group();
+    const mk = (color, opacity, extra = {}) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, ...extra });
+    const wire = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), mk(0xaaf0ff, 0.3, { wireframe: true }));
+    const fill = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mk(0x66ccff, 0.1, { side: THREE.DoubleSide }));
+    const r1 = new THREE.Mesh(new THREE.TorusGeometry(1, 0.012, 6, 56), mk(ARMOR_GOLD, 0.7));
+    const r2 = r1.clone(); r2.rotation.x = Math.PI / 2;
+    grp.add(wire, fill, r1, r2);
+    grp.visible = false; grp.scale.setScalar(1.7);
+    g.scene.add(grp);
+    this.nanoGrp = { grp, wire, fill, r1, r2 };
+    return this.nanoGrp;
+  }
+  _nanoOn() {
+    const g = this.game, b = this._nanoBubble();
+    this.nano = true; b.grp.visible = true;
+    g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.1), 3.2, 0xaaf0ff, 0.35);
+    g.fx?.burst?.(this.center, 0xaaf0ff, 16, 5, 0.4, 0.2);
+    g.audio?.play('ui_select', { volume: 0.5, pitch: 0.6 }); g.audio?.play('thruster', { volume: 0.3, pitch: 1.6 });
+  }
+  _nanoOff() {
+    this.nano = false;
+    if (this.nanoGrp) this.nanoGrp.grp.visible = false;
+  }
+  _nanoUpdate(dt, input) {
+    const g = this.game;
+    if (this.nanoLock > 0) this.nanoLock -= dt;
+    if (this.nanoHit > 0) this.nanoHit -= dt;
+    const want = input.down('dodge') && this.dodgeHeld > NANO_HOLD && this.onGround && !this.flying && !this.ult && !this.pound
+      && !this.charging && !this.lock.on && !this.laser && this.nanoLock <= 0 && this.shieldE > 6 && !this.dead;
+    if (want && !this.nano) this._nanoOn();
+    else if (!want && this.nano) { this._nanoOff(); g.fx?.burst?.(this.center, 0xaaf0ff, 10, 4, 0.3, 0.18); }
+    if (this.nano) {
+      this.shieldE -= NANO_DRAIN * dt;
+      if (this.shieldE <= 0) {
+        this.shieldE = 0; this.nanoLock = 2.5; this._nanoOff();
+        g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.5, this.pos.z), 'SHIELD DOWN', 0xff7a50);
+        g.fx?.burst?.(this.center, 0xffaa55, 24, 7, 0.5, 0.25); g.audio?.play('hit', { pitch: 0.7 });
+      }
+    } else this.shieldE = Math.min(100, this.shieldE + (this.nanoLock > 0 ? 10 : NANO_REGEN) * dt);
+    const b = this.nanoGrp;
+    if (b && b.grp.visible) {
+      const low = this.shieldE < 25 ? 0.6 + 0.4 * Math.sin(g.time * 30) : 1;
+      b.grp.position.copy(this.center);
+      b.grp.scale.setScalar(1.7 * (1 + this.nanoHit * 0.2));
+      b.wire.rotation.y += dt * 0.7; b.wire.rotation.x += dt * 0.3;
+      b.r1.rotation.z += dt * 1.4; b.r2.rotation.y -= dt * 1.1;
+      b.wire.material.opacity = (0.28 + this.nanoHit * 1.2) * low;
+      b.fill.material.opacity = (0.08 + this.nanoHit * 0.5) * low;
+    }
+  }
+
   // ---- ultimate: Proton Cannon ---------------------------------------------------------------
   _shoulderPos(out) {
     const g = this.model.group;
@@ -696,7 +1076,8 @@ export class IronMan extends Hero {
       if (this.charging) pitchT = 0;
       if (this.aiming) pitchT = 0.28 * clamp(sp / STRAFE_SPEED, 0, 1);
     }
-    this.pitch = damp(this.pitch, pitchT, this.boosting ? 4.5 : 6, dt);
+    if (this.pound) pitchT = Math.PI * 0.96;
+    this.pitch = damp(this.pitch, pitchT, this.pound ? 10 : (this.boosting ? 4.5 : 6), dt);
     let rollT = 0;
     if (this.flying && !this.ult) {
       const hs = Math.hypot(this.vel.x, this.vel.z);
