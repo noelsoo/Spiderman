@@ -208,7 +208,16 @@ export class Atmosphere {
     if (sun.castShadow) {
       const bx = this._bx.set(0, 1, 0).cross(dir).normalize();
       const by = this._by.copy(dir).cross(bx).normalize();
-      const texel = 150 / this.sun.shadow.mapSize.x;
+      // fit the frustum to the view: tight (crisp contact shadows) at street level, wider when the camera is high
+      const h = Math.max(0, camera.position.y - focus.y) + Math.max(0, focus.y - 20) * 0.6;
+      const half = Math.min(170, 75 + Math.round(Math.max(0, h - 30) / 25) * 12);
+      if (half !== this._half) {
+        this._half = half;
+        const c = sun.shadow.camera;
+        c.left = -half; c.right = half; c.top = half; c.bottom = -half;
+        c.updateProjectionMatrix();
+      }
+      const texel = (2 * (this._half || 75)) / this.sun.shadow.mapSize.x;
       const px = T.dot(bx), py = T.dot(by);
       T.addScaledVector(bx, Math.round(px / texel) * texel - px).addScaledVector(by, Math.round(py / texel) * texel - py);
     }

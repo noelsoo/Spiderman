@@ -1,6 +1,7 @@
 // All textures are generated procedurally on canvases (no downloads).
 // Facades come as { map, emissive, normal, orm } (orm: G = roughness, B = metalness, multiplied by the material values).
 import * as THREE from 'three';
+import { mulberry32 } from './geo.js';
 
 function cv(w, h) {
   const c = document.createElement('canvas');
@@ -208,6 +209,62 @@ function facade(opt, rng, aniso, S, extras) {
       win(wx, wy, ww, wh);
       R(L, wx + ww / 2 - 1.5, wy, 3, wh, { c: rgb(...mul(opt.base, 0.5)), h: 225 });
     }
+  } else if (opt.kind === 'hdb') { // Singapore HDB slab block: colour-banded walls, open corridors, stair cores
+    noiseFill(g, S, S, opt.base, 14, rng);
+    R(L, 0, 0, S, S, { h: 150, m: wallM });
+    for (let cy = 0; cy < rows; cy++) {
+      const y = cy * ch;
+      // corridor slab edge + parapet wall with a coloured band
+      R(L, 0, y + ch * 0.9, S, ch * 0.1, { c: rgb(...mul(opt.base, 0.62)), h: 235 });
+      R(L, 0, y + ch * 0.58, S, ch * 0.32, { c: rgb(...mul(opt.base, 0.93)), h: 175 });
+      R(L, 0, y + ch * 0.55, S, ch * 0.035, { c: rgb(...mul(opt.base, 1.1)), h: 225 });
+      R(L, 0, y + ch * 0.62, S, ch * 0.04, { c: rgb(...opt.accent), h: 160 });
+      // corridor rail posts and the dark recess behind them
+      R(L, 0, y + ch * 0.66, S, ch * 0.24, { c: rgb(...mul(opt.base, 0.8)), h: 120 });
+      for (let cx = 0; cx < cols; cx++) {
+        const x = cx * cw;
+        const core = cx === 3 || cx === 4; // stair / lift core
+        if (core) {
+          R(L, x, y, cw, ch, { c: rgb(...mul(opt.accent, 0.9)), h: 190, m: wallM });
+          R(L, x + cw * 0.38, y + ch * 0.15, cw * 0.24, ch * 0.62, { h: 45 });
+          win(x + cw * 0.38, y + ch * 0.15, cw * 0.24, ch * 0.62);
+        } else {
+          const wx = x + cw * 0.16, ww = cw * 0.68, wy = y + ch * 0.1, wh = ch * 0.43;
+          R(L, wx - 3, wy - 3, ww + 6, wh + 6, { c: rgb(...mul(opt.base, 0.55)), h: 210 }); // frame
+          R(L, wx, wy, ww, wh, { h: 45 });
+          win(wx, wy, ww, wh, 'glass');
+          R(L, wx + ww / 2 - 1.5, wy, 3, wh, { c: rgb(...mul(opt.base, 0.5)), h: 220 });
+          R(L, wx - 6, wy + wh + 3, ww + 12, 6, { c: rgb(...mul(opt.base, 0.7)), h: 230 }); // sill / AC ledge
+          // AC condenser or hanging washing, sparsely
+          const r2 = rng();
+          if (r2 < 0.12) R(L, x + cw * 0.55, y + ch * 0.64, cw * 0.32, ch * 0.2, { c: rgb(170, 172, 170), h: 215 });
+          else if (r2 < 0.2) { const lc = [[220, 70, 60], [60, 120, 200], [235, 220, 90], [240, 240, 240]][(rng() * 4) | 0]; R(L, x + cw * 0.3, y + ch * 0.56, cw * 0.1, ch * 0.3, { c: rgb(...lc), h: 170 }); R(L, x + cw * 0.5, y + ch * 0.56, cw * 0.1, ch * 0.3, { c: rgb(...lc), h: 170 }); }
+        }
+      }
+    }
+  } else if (opt.kind === 'shop') { // Singapore shophouse: pastel plaster, arched shuttered windows, five-foot-way pilasters
+    noiseFill(g, S, S, opt.base, 12, rng);
+    R(L, 0, 0, S, S, { h: 140, m: wallM });
+    for (let cy = 0; cy < rows; cy++) {
+      const y = cy * ch;
+      R(L, 0, y + ch * 0.9, S, ch * 0.1, { c: rgb(...mul(opt.base, 1.12)), h: 230 }); // string course
+      for (let cx = 0; cx < cols; cx++) {
+        const x = cx * cw;
+        R(L, x, y, cw * 0.1, ch, { c: rgb(...mul(opt.base, 1.1)), h: 200 }); // pilaster
+        const wx = x + cw * 0.22, ww = cw * 0.56, wy = y + ch * 0.18, wh = ch * 0.66;
+        R(L, wx - 3, wy - 5, ww + 6, wh + 8, { c: rgb(...mul(opt.base, 1.15)), h: 215 }); // moulded surround
+        R(L, wx, wy, ww, wh, { c: rgb(...mul(opt.trim, 0.8)), h: 60 });
+        if (rng() < 0.45) { // louvred shutters, half open
+          const open = rng() < 0.5, sw2 = ww * (open ? 0.3 : 0.5);
+          for (const sx of [wx, wx + ww - sw2]) {
+            R(L, sx, wy, sw2, wh, { c: rgb(...opt.trim), h: 175 });
+            for (let ly = wy + 3; ly < wy + wh; ly += 5) R(L, sx, ly, sw2, 1.6, { c: rgb(...mul(opt.trim, 0.55)), h: 120 });
+          }
+          if (open) win(wx + sw2, wy, ww - sw2 * 2, wh, 'glass');
+        } else win(wx, wy, ww, wh, 'glass');
+        R(L, wx - 6, wy + wh + 2, ww + 12, 5, { c: rgb(...mul(opt.base, 0.8)), h: 235 });
+      }
+    }
   } else { // concrete ribbon windows
     noiseFill(g, S, S, opt.base, 22, rng);
     R(L, 0, 0, S, S, { h: 150, m: wallM });
@@ -223,6 +280,21 @@ function facade(opt, rng, aniso, S, extras) {
         R(L, x, y, 6, ch, { c: rgb(...mul(opt.base, 0.6)), h: 200 });
       }
     }
+  }
+  // weathering: rain streaks run down from sills and parapets (colour layer only)
+  if (opt.kind !== 'glass') {
+    for (let i = 0; i < 70; i++) {
+      const x = rng() * S, y0 = rng() * S, l = 30 + rng() * 150, w = 2 + rng() * 7;
+      const gr = g.createLinearGradient(0, y0, 0, y0 + l);
+      gr.addColorStop(0, 'rgba(25,22,18,0.16)'); gr.addColorStop(1, 'rgba(25,22,18,0)');
+      g.fillStyle = gr; g.fillRect(x, y0, w, l);
+    }
+    for (let i = 0; i < 6; i++) { const gr = g.createLinearGradient(0, 0, 0, S); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.05)'); g.fillStyle = gr; g.fillRect(rng() * S, 0, 20 + rng() * 60, S); }
+  } else {
+    // curtain-wall: individual panes catch a different slice of sky; vary roughness/metal a little per pane
+    g.globalAlpha = 0.07;
+    for (let i = 0; i < 28; i++) { g.fillStyle = rng() < 0.5 ? '#bfe6ff' : '#0a1a24'; g.fillRect(((rng() * cols) | 0) * cw + 3, ((rng() * rows) | 0) * ch + ch * 0.05, cw - 6, ch * 0.74); }
+    g.globalAlpha = 1;
   }
   const out = { map: mk(L.c, aniso), emissive: mk(L.e, aniso) };
   if (extras) {
@@ -298,52 +370,123 @@ function storefront(rng, aniso, big, extras) {
 
 function asphalt(rng, aniso, S, extras) {
   const [c, g] = cv(S, S);
-  noiseFill(g, S, S, [78, 77, 80], 30, rng);
+  noiseFill(g, S, S, [76, 75, 78], 30, rng);
+  // coarse aggregate speckle (light and dark chips)
+  for (let i = 0; i < S * 5; i++) {
+    const v = rng();
+    g.fillStyle = v < 0.5 ? rgb(150, 148, 145, 0.18 + rng() * 0.2) : rgb(18, 18, 20, 0.2 + rng() * 0.2);
+    g.fillRect(rng() * S, rng() * S, 1 + rng() * 2, 1 + rng() * 2);
+  }
   for (let i = 0; i < 90; i++) { // worn / repaired patches
     const a = rng() < 0.5 ? 0.07 : -0.06;
     g.fillStyle = a > 0 ? rgb(255, 255, 255, a) : rgb(0, 0, 0, -a);
     g.fillRect(rng() * S, rng() * S, 30 + rng() * 140, 14 + rng() * 90);
   }
+  // utility-trench patches: darker, fresher asphalt with a hairline edge
+  const patches = [];
+  for (let i = 0; i < 6; i++) {
+    const w = 80 + rng() * 170, h = 40 + rng() * 110, x = rng() * (S - w), y = rng() * (S - h);
+    g.fillStyle = rgb(40, 40, 43, 0.22); g.fillRect(x, y, w, h);
+    g.strokeStyle = rgb(8, 8, 10, 0.4); g.lineWidth = 1.5; g.strokeRect(x, y, w, h);
+    patches.push([x, y, w, h]);
+  }
   // oil drips and tyre-dark blotches
+  const oils = [];
   for (let i = 0; i < 28; i++) {
     const x = rng() * S, y = rng() * S, r = 6 + rng() * 26, grd = g.createRadialGradient(x, y, 0, x, y, r);
-    grd.addColorStop(0, 'rgba(10,10,12,0.28)'); grd.addColorStop(1, 'rgba(10,10,12,0)');
+    grd.addColorStop(0, 'rgba(10,10,12,0.3)'); grd.addColorStop(1, 'rgba(10,10,12,0)');
     g.fillStyle = grd; g.fillRect(x - r, y - r, r * 2, r * 2);
+    oils.push([x, y, r]);
   }
-  // cracks
+  // cracks: main crack plus a few branches, drawn as polylines (kept for the height map)
   g.lineCap = 'round';
-  for (let i = 0; i < 14; i++) {
-    g.strokeStyle = rgb(14, 14, 16, 0.55); g.lineWidth = 1 + rng() * 1.6; g.beginPath();
-    let x = rng() * S, y = rng() * S; g.moveTo(x, y);
-    for (let k = 0; k < 9; k++) { x += (rng() - 0.5) * 70; y += (rng() - 0.5) * 70; g.lineTo(x, y); }
-    g.stroke();
+  const cracks = [];
+  for (let i = 0; i < 16; i++) {
+    const pts = []; let x = rng() * S, y = rng() * S, ang = rng() * 6.28;
+    pts.push([x, y]);
+    const n = 8 + ((rng() * 8) | 0);
+    for (let k = 0; k < n; k++) {
+      ang += (rng() - 0.5) * 1.3; const l = 14 + rng() * 46;
+      x += Math.cos(ang) * l; y += Math.sin(ang) * l; pts.push([x, y]);
+      if (rng() < 0.16) { // branch
+        let bx = x, by = y, ba = ang + (rng() < 0.5 ? 1 : -1) * (0.6 + rng() * 0.6); const bp = [[bx, by]];
+        for (let q = 0; q < 3; q++) { ba += (rng() - 0.5); bx += Math.cos(ba) * (10 + rng() * 22); by += Math.sin(ba) * (10 + rng() * 22); bp.push([bx, by]); }
+        cracks.push({ pts: bp, w: 0.8 });
+      }
+    }
+    cracks.push({ pts, w: 1.2 + rng() * 1.4 });
   }
+  const stroke = (ctx, col, wMul) => {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const cr of cracks) {
+      ctx.strokeStyle = col; ctx.lineWidth = cr.w * wMul; ctx.beginPath();
+      cr.pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+      ctx.stroke();
+    }
+  };
+  stroke(g, rgb(10, 10, 12, 0.7), 1);
+  // tar-filled seams: a pale, slightly glossy line next to some cracks
+  g.save(); g.translate(1.5, 1.5); stroke(g, rgb(140, 138, 134, 0.14), 0.7); g.restore();
   const t = mk(c, aniso);
   if (!extras) return { map: t };
-  const [h, gh] = cv(S / 2, S / 2);
-  noiseFill(gh, S / 2, S / 2, [128, 128, 128], 120, rng);
-  const [m, gm] = cv(S / 2, S / 2);
-  noiseFill(gm, S / 2, S / 2, [0, 215, 0], 50, rng);
-  const img = gm.getImageData(0, 0, S / 2, S / 2); for (let i = 0; i < img.data.length; i += 4) { img.data[i] = 255; img.data[i + 2] = 0; } gm.putImageData(img, 0, 0);
-  return { map: t, normal: mk(normalFromHeight(h, 1.6), aniso, false), orm: mk(m, aniso, false) };
+  const H = S / 2, k = H / S;
+  const [h, gh] = cv(H, H);
+  noiseFill(gh, H, H, [128, 128, 128], 130, rng);
+  gh.save(); gh.scale(k, k);
+  for (const [x, y, w, hh] of patches) { gh.fillStyle = rgb(150, 150, 150, 0.6); gh.fillRect(x, y, w, hh); gh.strokeStyle = '#202020'; gh.lineWidth = 3; gh.strokeRect(x, y, w, hh); }
+  stroke(gh, '#101010', 2.2); // cracks are grooves
+  gh.restore();
+  // roughness: dry asphalt ~0.9, polished wear and puddle sheen are lower. G = roughness, B = metalness
+  const [m, gm] = cv(H, H);
+  gm.fillStyle = 'rgb(255,226,0)'; gm.fillRect(0, 0, H, H);
+  const img = gm.getImageData(0, 0, H, H);
+  for (let i = 0; i < H * H; i++) img.data[i * 4 + 1] = 205 + rng() * 40;
+  gm.putImageData(img, 0, 0);
+  gm.save(); gm.scale(k, k);
+  for (const [x, y, r] of oils) { // oil film and shallow puddles are glossy
+    if (rng() < 0.55) continue;
+    const rr = r * (1.6 + rng() * 1.4), grd = gm.createRadialGradient(x, y, 0, x, y, rr);
+    grd.addColorStop(0, 'rgba(255,70,0,0.9)'); grd.addColorStop(0.6, 'rgba(255,120,0,0.45)'); grd.addColorStop(1, 'rgba(255,226,0,0)');
+    gm.fillStyle = grd; gm.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  }
+  gm.globalAlpha = 0.5; stroke(gm, 'rgb(255,150,0)', 1.4); // tar seams are smoother than the aggregate
+  gm.restore();
+  return { map: t, normal: mk(normalFromHeight(h, 1.8), aniso, false), orm: mk(m, aniso, false) };
 }
 
 function sidewalk(rng, aniso, S, extras) {
   const [c, g] = cv(S, S);
-  noiseFill(g, S, S, [166, 161, 152], 20, rng);
+  noiseFill(g, S, S, [166, 161, 152], 18, rng);
+  const n = 4, slab = S / n;
+  // each paving slab gets its own tone and a slight lean so the grid does not read as a repeat
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const t = rng();
+    g.fillStyle = t < 0.5 ? rgb(255, 250, 235, 0.03 + rng() * 0.08) : rgb(0, 0, 0, 0.03 + rng() * 0.08);
+    g.fillRect(i * slab, j * slab, slab, slab);
+    if (rng() < 0.25) { const gr = g.createLinearGradient(i * slab, j * slab, (i + 1) * slab, (j + 1) * slab); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.08)'); g.fillStyle = gr; g.fillRect(i * slab, j * slab, slab, slab); }
+  }
   for (let i = 0; i < 70; i++) { g.fillStyle = rgb(0, 0, 0, 0.03 + rng() * 0.04); g.fillRect(rng() * S, rng() * S, 20 + rng() * 80, 20 + rng() * 80); }
   for (let i = 0; i < 160; i++) { g.fillStyle = rgb(60, 56, 50, 0.4 + rng() * 0.3); g.fillRect(rng() * S, rng() * S, 2 + rng() * 3, 2 + rng() * 3); } // gum
-  const slab = S / 4;
-  g.strokeStyle = rgb(60, 56, 50, 0.7); g.lineWidth = 3;
+  // salt-pitting speckle
+  for (let i = 0; i < S * 3; i++) { g.fillStyle = rgb(rng() < 0.5 ? 235 : 70, rng() < 0.5 ? 232 : 66, 60, 0.12 + rng() * 0.15); g.fillRect(rng() * S, rng() * S, 1, 1 + rng() * 1.5); }
+  g.strokeStyle = rgb(52, 49, 44, 0.8); g.lineWidth = 3;
   for (let i = 0; i <= S; i += slab) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, S); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(S, i); g.stroke(); }
-  for (let i = 0; i < 4; i++) { g.strokeStyle = rgb(50, 46, 42, 0.5); g.lineWidth = 1.5; g.beginPath(); let x = rng() * S, y = rng() * S; g.moveTo(x, y); for (let k = 0; k < 5; k++) { x += (rng() - 0.5) * 70; y += (rng() - 0.5) * 70; g.lineTo(x, y); } g.stroke(); }
+  // bright bevel on the slab edges
+  g.strokeStyle = rgb(230, 225, 214, 0.18); g.lineWidth = 2;
+  for (let i = 0; i <= S; i += slab) { g.beginPath(); g.moveTo(i + 3, 0); g.lineTo(i + 3, S); g.stroke(); g.beginPath(); g.moveTo(0, i + 3); g.lineTo(S, i + 3); g.stroke(); }
+  const cr = [];
+  for (let i = 0; i < 5; i++) { const pts = []; let x = rng() * S, y = rng() * S; pts.push([x, y]); for (let k = 0; k < 5; k++) { x += (rng() - 0.5) * 70; y += (rng() - 0.5) * 70; pts.push([x, y]); } cr.push(pts); }
+  const drawCr = (ctx, col, w) => { ctx.strokeStyle = col; ctx.lineWidth = w; for (const pts of cr) { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); } };
+  drawCr(g, rgb(46, 43, 39, 0.55), 1.5);
   const t = mk(c, aniso);
   if (!extras) return { map: t };
   const [h, gh] = cv(S, S);
-  noiseFill(gh, S, S, [200, 200, 200], 40, rng);
-  gh.strokeStyle = '#303030'; gh.lineWidth = 6;
+  noiseFill(gh, S, S, [200, 200, 200], 44, rng);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const v = 190 + rng() * 25; gh.fillStyle = gray(v); gh.fillRect(i * slab + 4, j * slab + 4, slab - 8, slab - 8); }
+  gh.strokeStyle = '#282828'; gh.lineWidth = 8;
   for (let i = 0; i <= S; i += slab) { gh.beginPath(); gh.moveTo(i, 0); gh.lineTo(i, S); gh.stroke(); gh.beginPath(); gh.moveTo(0, i); gh.lineTo(S, i); gh.stroke(); }
-  return { map: t, normal: mk(normalFromHeight(h, 2.0), aniso, false) };
+  drawCr(gh, '#202020', 3);
+  return { map: t, normal: mk(normalFromHeight(h, 2.2), aniso, false) };
 }
 
 function roof(rng, aniso, S) {
@@ -550,7 +693,12 @@ function farAtlas() {
   return { map: t, emissive: e };
 }
 
-export function makeTextures(renderer, rng, quality = 'high') {
+// How many values the original texture generator drew from the shared world rng, per tier. The world rng is advanced by the
+// same amount after generating textures from a private stream, so the city layout stays identical when textures change.
+const LEGACY_RNG_DRAWS = { low: 1016731, medium: 3179415, high: 4752357, ultra: 4752357 };
+
+export function makeTextures(renderer, worldRng, quality = 'high') {
+  const rng = mulberry32(0x7e57);
   const low = quality === 'low';
   const aniso = Math.min(quality === 'ultra' ? 16 : 8, renderer.capabilities.getMaxAnisotropy?.() ?? 4);
   const S = quality === 'high' || quality === 'ultra' ? 1024 : 512;
@@ -567,8 +715,17 @@ export function makeTextures(renderer, rng, quality = 'high') {
   };
   const asp = asphalt(rng, aniso, low ? 256 : 1024, extras);
   const sw = sidewalk(rng, aniso, low ? 256 : 512, extras);
+  for (let i = LEGACY_RNG_DRAWS[quality] ?? LEGACY_RNG_DRAWS.high; i > 0; i--) worldRng();
   return {
     facades: F,
+    /** Singapore-only facades (HDB slab block, shophouse), generated on first use so New York never pays for them. */
+    ensureSg() {
+      if (!F.hdb) {
+        F.hdb = f({ kind: 'hdb', base: [238, 232, 220], accent: [205, 120, 95], pane: [60, 90, 110], lit: 0.26 });
+        F.shophouse = f({ kind: 'shop', base: [235, 222, 200], trim: [70, 120, 105], pane: [60, 85, 100], lit: 0.22 });
+      }
+      return F;
+    },
     storefront: storefront(rng, aniso, !low, extras),
     asphalt: asp.map, asphaltN: asp.normal, asphaltORM: asp.orm,
     sidewalk: sw.map, sidewalkN: sw.normal,

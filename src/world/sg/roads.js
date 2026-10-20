@@ -1,5 +1,6 @@
 // Road network data + meshes (asphalt, markings, sidewalks, signals). Singapore drives on the LEFT.
 import * as THREE from 'three';
+import { antiTile } from '../materials.js';
 import { AVE, STR, DIAG, L, cells, WEST_X, WEST_Z } from './layout.js';
 
 const CYCLE = 32;
@@ -95,6 +96,7 @@ const _c = new THREE.Color();
 /** Fill chunk buckets with asphalt, markings, sidewalks; returns lamp / tree anchor lists. */
 export function buildRoadMeshes(ctx) {
   const lamps = [], treeSpots = [];
+  if (ctx.quality !== 'low') { antiTile(ctx.M.road); antiTile(ctx.M.sidewalk); }
   const asp = (x, z) => ctx.chunks.bucket(x, z, 'road');
   const mk = (x, z) => ctx.chunks.bucket(x, z, 'markings');
   const sw = (x, z) => ctx.chunks.bucket(x, z, 'sidewalk');
