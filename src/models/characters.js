@@ -4,7 +4,7 @@ import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import { buildMjolnir } from './mjolnir.js';
 import {
   G, std, metal, glow, glowInstance, symMat, limbGeo, profileGeo, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo,
-  mergeParts, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
+  mergeParts, muscleLimb, handGeo, footGeo, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
   M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, scaleMaps, armorMaps, arcTexture, thorDiscTexture, capeTexture, tornShortsTexture, veinNormal, symEmblemTexture, antiStreakTexture, drawTex, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
@@ -106,10 +106,17 @@ export function buildBody(model, s) {
   // neck + head
   const H = s.head || {};
   const hR = H.R ?? d.headR, hsx = H.sx ?? 0.92, hsy = H.sy ?? 1.05, hsz = H.sz ?? 1.0;
-  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k, (s.neckR ?? 0.05) * 1.15 * k, d.neck * 2.2, seg(12, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.3, 0] });
+  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k * 0.92, (s.neckR ?? 0.05) * 1.28 * k, d.neck * 2.4, seg(14, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.3, 0] });
   const y0 = hR * hsy * 0.95;
   const head = P(model, j[J.HD], sphereGeo(1, seg(32, 14), seg(24, 10)), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
   const headInfo = { R: hR, sx: hsx, sy: hsy, sz: hsz, y0 };
+  // trapezius slopes from the neck to the shoulders; lats flare under the arms
+  const TR = s.traps ?? 1, LAT = s.lats ?? 1;
+  const nR = (s.neckR ?? 0.05) * k;
+  for (const sd of [1, -1]) {
+    P(model, j[J.CH], sphereGeo(1, seg(14, 8), seg(10, 6)), mt('chest'), { slot: sl('chest'), pos: [sd * (nR * 1.35 + 0.035 * k), d.chest * 0.93, -0.012 * k], rot: [0, 0, -sd * 0.62], scale: [0.085 * k * TR, 0.028 * k * TR, 0.058 * k * sz * 1.1] });
+    if (LAT > 0) P(model, j[J.CH], sphereGeo(1, seg(14, 8), seg(10, 6)), mt('chest'), { slot: sl('chest'), pos: [sd * 0.152 * k * sx * cR, 0.1 * k, -0.035 * k * sz], rot: [0, 0, sd * 0.12], scale: [0.04 * k * LAT, 0.115 * k, 0.07 * k * sz] });
+  }
 
   // arms
   const A = s.arm || {};
@@ -118,11 +125,13 @@ export function buildBody(model, s) {
   const hand = s.hand || [0.045, 0.055, 0.05];
   for (const side of [1, -1]) {
     const sh = j[side > 0 ? J.AL : J.AR], el = j[side > 0 ? J.EL : J.ER], wr = j[side > 0 ? J.WL : J.WR];
-    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.15, 0.015 * k, 0], scale: [u0 * sb * 1.15, u0 * sb * 1.1, u0 * sb * 1.1] });
-    P(model, sh, limbGeo(d.upper, u0, u1, A.ub ?? 0.14, 0.3, SL), mt('upperArm'), { slot: sl('upperArm') });
-    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 1.02, u1 * 1.02, u1 * 1.02] });
-    P(model, el, limbGeo(d.fore, f0, f1, A.fb ?? 0.18, 0.28, SL), mt('foreArm'), { slot: sl('foreArm') });
-    P(model, wr, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.5, 0.0], scale: [hand[0] * k, hand[1] * k, hand[2] * k] });
+    const MU = s.muscle ?? 1;
+    // deltoid: teardrop cap over the shoulder, blends into the upper arm
+    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.22, -0.012 * k, -0.004 * k], rot: [0, 0, -side * 0.18], scale: [u0 * sb * 1.12, u0 * sb * 1.55, u0 * sb * 1.2] });
+    P(model, sh, muscleLimb('arm', d.upper, u0, u1, MU, SL), mt('upperArm'), { slot: sl('upperArm') });
+    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 0.95, u1 * 1.0, u1 * 0.95] });
+    P(model, el, muscleLimb('fore', d.fore, f0 * 1.08, f1, MU, SL), mt('foreArm'), { slot: sl('foreArm') });
+    P(model, wr, handGeo(hand[0] * k * 0.92, hand[1] * k * 1.12, hand[2] * k * 1.0, s.fingers !== false, s.fist ?? 0.35), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.15, 0.0] });
   }
   // legs
   const L = s.leg || {};
@@ -130,10 +139,11 @@ export function buildBody(model, s) {
   const foot = s.foot || [0.055, 0.045, 0.14];
   for (const side of [1, -1]) {
     const th = j[side > 0 ? J.TL : J.TR], kn = j[side > 0 ? J.KL : J.KR], ft = j[side > 0 ? J.FL : J.FR];
-    P(model, th, limbGeo(d.thigh, t0, t1, L.tb ?? 0.1, 0.3, SL), mt('thigh'), { slot: sl('thigh') });
-    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 1.02, t1 * 1.02, t1 * 1.02] });
-    P(model, kn, limbGeo(d.shin, s0, s1, L.sb ?? 0.14, 0.25, SL), mt('shin'), { slot: sl('shin') });
-    P(model, ft, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('foot'), { slot: sl('foot'), pos: [0, -d.footH * 0.5 + foot[1] * k * 0.4, foot[2] * k * 0.32], scale: [foot[0] * k, foot[1] * k + 0.01, foot[2] * k] });
+    const MU = s.muscle ?? 1;
+    P(model, th, muscleLimb('thigh', d.thigh, t0 * 1.04, t1, MU, SL), mt('thigh'), { slot: sl('thigh') });
+    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 0.9, t1 * 1.0, t1 * 0.95] });
+    P(model, kn, muscleLimb('shin', d.shin, s0 * 1.05, s1, MU, SL), mt('shin'), { slot: sl('shin') });
+    P(model, ft, footGeo(foot[0] * k * 1.05, d.footH * 1.02, foot[2] * k * 0.95, seg(12, 8)), mt('foot'), { slot: sl('foot'), pos: [0, 0, foot[2] * k * 0.2] });
   }
   return { headInfo, chestRad, head, abdomen, hr: hR };
 }
@@ -203,7 +213,7 @@ export function buildSpiderMan(opts = {}) {
     head: { R: 0.108, sx: 0.9, sy: 1.08, sz: 1.0 },
     arm: { u0: 0.047, u1: 0.037, f0: 0.039, f1: 0.03, ub: 0.1, fb: 0.14 },
     leg: { t0: 0.082, t1: 0.054, s0: 0.054, s1: 0.036, tb: 0.1, sb: 0.12 },
-    foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045],
+    foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045], fingers: false,
     pelvis: [0.34, 0.2, 0.24],
   });
   addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0.008 });
@@ -413,7 +423,7 @@ export function buildHulk() {
   const shorts = std(0xffffff, { map: tornShortsTexture(), roughness: 0.88, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
   const info = buildBody(model, {
     mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin },
-    torso: { sx: 1.62, sz: 0.95, chestR: 1.38, waistR: 1.05 },
+    muscle: 1.3, traps: 0.7, torso: { sx: 1.62, sz: 0.95, chestR: 1.38, waistR: 1.05 },
     head: { R: 0.098, sx: 1.0, sy: 0.98, sz: 1.04 },
     arm: { u0: 0.062, u1: 0.05, f0: 0.054, f1: 0.042, ub: 0.3, fb: 0.35, shoulder: 1.55 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.28, sb: 0.3 },
@@ -477,7 +487,7 @@ export function buildThor() {
   const skin = std(0xe0b090, { roughness: 0.62 });
   const info = buildBody(model, {
     mats: { default: suit, chest: suit, abdomen: suit, pelvis: leather, neck: skin, head: skin, shoulder: silver, upperArm: suit, foreArm: suit, hand: leather, thigh: suit, shin: leather, foot: leather },
-    torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
+    muscle: 1.1, torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
     head: { R: 0.108, sx: 0.9, sy: 1.1, sz: 1.0 },
     arm: { u0: 0.058, u1: 0.046, f0: 0.046, f1: 0.036, ub: 0.14, fb: 0.15 },
     leg: { t0: 0.09, t1: 0.062, s0: 0.062, s1: 0.042, tb: 0.1, sb: 0.12 },
@@ -629,7 +639,7 @@ export function buildSymbiote(cfg = {}) {
   const sym = symMat(symOpt);
   const info = buildBody(model, {
     mats: { default: sym },
-    torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
+    muscle: 1.25, torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
     head: { R: HR, sx: anti ? 0.98 : 1.25, sy: 1.0, sz: anti ? 1.0 : 1.1 },
     arm: { u0: 0.06, u1: 0.048, f0: 0.052, f1: 0.04, ub: 0.28, fb: 0.3, shoulder: 1.45 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.25, sb: 0.28 },
