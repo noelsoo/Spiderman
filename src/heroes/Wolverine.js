@@ -1,8 +1,14 @@
 // Wolverine: feral speed, claw combo with bleed, Lunge maul, Claw Spin, Berserker Rage, Healing Factor, Weapon X frenzy.
 //   attack J/LMB/□   special K/RMB/R1 Lunge   ability E/L1 Claw Spin   ability2 R/L2 Berserker Rage   ultimate Q/R3 Weapon X
-//   dodge C/○ = roll;  dodge while holding sprint/swing = slide;  attack in air = diving claw drop;  walk into walls = claw climb
+//   dodge C/○ = roll;  dodge while holding sprint/swing = slide;  attack in air = diving claw drop (POUNCE onto an enemy below);  walk into walls = claw climb
+//   v3 powers (context variants, no new bindings):
+//   special K/R1       Lunge (far)  |  Grab & Throw "Fastball" (enemy within 3.4 m, aimed with the camera)  |  Pin Takedown (stunned / webbed / nearly dead enemy)
+//   ability E/L1       TAP Claw Spin   |  HOLD (0.22 s) Feral Sense: enemies glow through walls, scent lines (8 s max)
+//   ability2 R/L2      TAP Berserker Rage  |  HOLD (0.35 s) Feral Roar: staggers everything within 10 m
+//   attack in air      Pounce from height (homes in on the enemy below)   jump held on a wall = slow claw-dig climb (sprint = fast)
 import * as THREE from 'three';
 import { Hero, approach } from './Hero.js';
+import { SlashPool, DigMarks, Wounds, SenseOverlay } from './wolverine/fx.js';
 import { Timers, aimInfo, enemiesNear, enemyCenter, rumble, impactFx, clamp, damp, objPos, hurt, trailOn, impact } from './squad/util.js';
 
 // ---- tuning ----------------------------------------------------------------
@@ -13,6 +19,11 @@ const RAGE_TIME = 10, RAGE_CD = 20, RAGE_DMG = 1.6, RAGE_ATK = 1.6, RAGE_SPEED =
 const HEAL_DELAY = 2.5, HEAL_RATE = 6;
 const BLEED_TIME = 3, BLEED_TICK = 0.5, BLEED_DMG = 2.4;
 const ULT_RANGE = 25, ULT_MAX = 8, ULT_DASH = 0.13, ULT_SLASH = 0.1;
+const HOLD_SENSE = 0.22, HOLD_ROAR = 0.35, SENSE_MAX = 8, SENSE_CD = 5, SENSE_RANGE = 70;
+const ROAR_CD = 14, ROAR_RADIUS = 10;
+const GRAB_RANGE = 3.4, GRAB_CD = 4, THROW_SPEED = 30, THROW_DMG = 28;
+const PIN_RANGE = 8, PIN_CD = 2.5, POUNCE_RANGE = 26, POUNCE_SPEED = 38;
+const CLIMB_SLOW = 6.5;
 const GOLD = 0xffd060, BLOOD = 0xb01818, RED = 0xff2a1a, GREEN = 0x55ff77, STEEL = 0xe8f0ff;
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _w = new THREE.Vector3(), _d = new THREE.Vector3();
@@ -38,6 +49,14 @@ export class Wolverine extends Hero {
     this.moveDir = new THREE.Vector3(0, 0, 1); this.modeSpeed = 0;
     this.slideHit = 0; this.rollHeld = false;
     this.fov = 0; this._impactVy = 0; this._tintOn = false; this._trail = null;
+    this.slash = new SlashPool(game.scene);
+    this.dig = new DigMarks(game.scene);
+    this.wounds = new Wounds(this.model, this.height);
+    this.senseFx = new SenseOverlay(game.scene);
+    this.senseOn = false; this.senseT = 0; this._scentT = 0;
+    this._abT = 0; this._ab2T = 0; this._roared = false; this._senseHeld = false;
+    this.grab = null; this.thrown = [];
+    this.spKind = 'lunge';
   }
 
   onActivate() {
@@ -48,20 +67,26 @@ export class Wolverine extends Hero {
   onDeactivate() {
     const g = this.game;
     this.timers.clear(); this.bleeds.clear();
-    this.mode = 'normal'; this.lunge = null; this.spinT = 0; this.gravityScale = 1;
+    this.mode = 'normal'; this.lunge = null; this.pounceE = null; this.spinT = 0; this.gravityScale = 1;
     if (this.ult) { this.ult = null; g._slowmo = 0; g.timeScale = 1; }
     this.rageT = 0; this.dmgMul = 1; this.atkSpeed = 1; this.speedMul = 1;
     this.model.setTint?.(RED, 0); this._tintOn = false;
     this._setClaws(false);
     this._trail?.stop?.(); this._trail = null;
     g.cam.fovKick = 0;
+    this._senseStop(true);
+    this.grab = null; this.thrown.length = 0; this._abT = 0; this._ab2T = 0; this._roared = false;
+    this.slash.clear(); this.dig.clear(); this.wounds.hide();
   }
 
   get abilityHints() {
+    const sp = this.spKind === 'throw' ? 'Grab & Throw' : this.spKind === 'pin' ? 'Pin Takedown' : 'Lunge';
+    const spCd = this.spKind === 'throw' ? 'grab' : this.spKind === 'pin' ? 'pin' : 'lunge';
     return [
-      { action: 'special', label: 'Lunge', cooldown: this.cooldownFrac('lunge'), active: this.mode === 'lunge' },
-      { action: 'ability', label: 'Claw Spin', cooldown: this.cooldownFrac('spin'), active: this.spinT > 0 },
-      { action: 'ability2', label: 'Berserker Rage', cooldown: this.cooldownFrac('rage'), active: this.rageT > 0 },
+      { action: 'attack', label: this.onGround ? 'Claw Combo' : 'Pounce (air)', cooldown: 0, active: this.mode === 'pounce' || this.mode === 'dive' },
+      { action: 'special', label: sp, cooldown: this.cooldownFrac(spCd), active: this.mode === 'lunge' || !!this.grab },
+      { action: 'ability', label: 'Claw Spin (hold: Sense)', cooldown: this.senseOn ? 0 : Math.max(this.cooldownFrac('spin'), this.cooldownFrac('sense')), active: this.spinT > 0 || this.senseOn },
+      { action: 'ability2', label: 'Rage (hold: Roar)', cooldown: this.cooldownFrac('rage'), active: this.rageT > 0 },
       { action: 'ultimate', label: 'Weapon X', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
   }
@@ -103,12 +128,12 @@ export class Wolverine extends Hero {
         else if (normal) this.bufferT = 0.3;
       }
       if (this.bufferT > 0) { this.bufferT -= dt; if (free && normal) { this.bufferT = 0; this._attack(); } }
-      if (input.pressed('special') && (normal || this.mode === 'climb') && this.spinT <= 0 && (this.cooldowns.lunge || 0) <= 0) this._lunge();
-      if (input.pressed('ability') && (normal || this.mode === 'climb') && (this.cooldowns.spin || 0) <= 0) this._spin();
-      if (input.pressed('ability2') && (this.cooldowns.rage || 0) <= 0 && this.rageT <= 0) this._startRage();
+      this._specialUpdate(input, normal);
+      this._abilityUpdate(dt, input, normal);
       if (input.pressed('dodge') && normal && (this.cooldowns.dodge || 0) <= 0) this._dodge(input);
       if (input.pressed('ultimate') && this.focus >= 100) this._startUlt();
     }
+    this._grabUpdate(dt);
     this._movement(dt, input);
 
     this._impactVy = this.vel.y;
@@ -210,6 +235,7 @@ export class Wolverine extends Hero {
 
     switch (this.mode) {
       case 'lunge': this._lungeMove(dt); return;
+      case 'pounce': this._pounceMove(dt); return;
       case 'ult': this._ultMove(dt); return;
       case 'roll': this._rollMove(dt, input); return;
       case 'slide': this._slideMove(dt, input); return;
@@ -219,9 +245,9 @@ export class Wolverine extends Hero {
     }
     this.noWallT += dt; this.grabCd -= dt;
     // claw-climb: pressing into a wall in the air, or a tall wall from the ground
-    if (this.grabCd <= 0 && this.onWall && input.move.y > 0.3) {
+    if (this.grabCd <= 0 && this.onWall && (input.move.y > 0.3 || (!this.onGround && input.down('jump') && this.vel.y < 5))) {
       _a.copy(this.wallNormal).negate();
-      if (!this.onGround && (wish.dot(_a) > 0.3 || this.vel.y < 6)) { this._startClimb(); this._climb(dt, input, wish, mag); return; }
+      if (!this.onGround && (wish.dot(_a) > 0.3 || this.vel.y < 6 || input.down('jump'))) { this._startClimb(); this._climb(dt, input, wish, mag); return; }
       if (this.onGround && mag > 0.4 && wish.dot(_a) > 0.6 && this._wallTall()) { this._startClimb(); this._climb(dt, input, wish, mag); return; }
     }
     this.gravityScale = this.spinT > 0 ? 0.35 : 1;
@@ -290,7 +316,8 @@ export class Wolverine extends Hero {
     }
     if (input.move.y < -0.4 || (this.onGround && input.move.y <= 0.1)) { this._endMode(); this.vel.set(n.x * 3, 0, n.z * 3); return; }
     if (this.noWallT > 0.15) { this._endMode(); this.vel.set(-n.x * 8, 11, -n.z * 8); this.grabCd = 0.5; g.audio?.play('whoosh'); return; }
-    const up = input.move.y > 0.15 ? CLIMB : input.move.y < -0.15 ? -6 : 0;
+    const fast = input.down('sprint') || input.down('swing');
+    const up = input.move.y > 0.15 ? (fast ? CLIMB : CLIMB_SLOW) : input.move.y < -0.15 ? -6 : input.down('jump') ? CLIMB_SLOW * 0.5 : 0;
     _a.set(-n.z, 0, n.x);
     const side = Math.sign(g.cam.right.dot(_a)) || 1;
     const lat = input.move.x * 8 * side;
@@ -300,7 +327,11 @@ export class Wolverine extends Hero {
     this.climbFx -= dt;
     if (this.climbFx <= 0 && (up !== 0 || Math.abs(lat) > 0.5)) {
       this.climbFx = 0.17;
-      g.fx?.sparks?.(this.pos.clone().setY(this.pos.y + this.height * 0.9), n, STEEL, 4, 5, 0.25, 0.08);
+      this._digSide = -(this._digSide ?? 1);
+      _a.set(this.pos.x - n.x * (this.radius + 0.05), this.pos.y + this.height * (0.75 + 0.2 * this._digSide), this.pos.z - n.z * (this.radius + 0.05));
+      this.dig.add(_a, n);
+      g.fx?.sparks?.(_a.clone(), n, STEEL, 6, 5, 0.3, 0.08);
+      g.fx?.dust?.(_a.clone(), 2, 0.5, 0.3);
       g.audio?.play('punch', { volume: 0.2, pitch: 1.8 });
     }
     if (this.actionT > 0) this.setAnim(this.actionAnim);
@@ -391,26 +422,88 @@ export class Wolverine extends Hero {
     const g = this.game;
     const c = this.center, r = _a.set(fwd.z, 0, -fwd.x);
     const flip = step % 2 ? -1 : 1;
-    for (let k = -1; k <= 1; k++) {
-      const p0 = c.clone().addScaledVector(fwd, 0.5).addScaledVector(r, -1.0 * flip).add(_b.set(0, 0.75 - k * 0.0, 0));
+    const yaw = Math.atan2(fwd.x, fwd.z);
+    // sweeping three-blade crescent trail (diagonal for punches, flat for the kick, steep for the uppercut)
+    const tilts = [0.62, 0.62, 0.12, -1.15];
+    const col = this.rageT > 0 ? RED : step === 3 ? GOLD : STEEL;
+    this.slash.slash(c, yaw, { tilt: tilts[step % 4], flip: flip < 0, color: col, scale: 1 + (step % 4) * 0.08 + (this.rageT > 0 ? 0.15 : 0), life: step === 3 ? 0.32 : 0.24 });
+    for (let k = -1; k <= 1; k += 2) {
+      const p0 = c.clone().addScaledVector(fwd, 0.5).addScaledVector(r, -1.0 * flip).add(_b.set(0, 0.75, 0));
       p0.y += k * 0.12;
       const p1 = c.clone().addScaledVector(fwd, 1.5).addScaledVector(r, 1.0 * flip).add(_b.set(0, -0.45, 0));
       p1.y += k * 0.12;
-      g.fx?.beam?.(p0, p1, STEEL, 0.05, 0.13);
+      g.fx?.beam?.(p0, p1, STEEL, 0.04, 0.1);
     }
     if (step === 3) { const p = c.clone().addScaledVector(fwd, 1.4); g.fx?.beam?.(p.clone().setY(this.pos.y + 0.1), p.clone().setY(this.pos.y + 2.2), GOLD, 0.12, 0.18); }
   }
 
   _dive() {
     const g = this.game;
+    // POUNCE: if an enemy is below us, home in on it instead of diving straight down
+    const t = this._pounceTarget();
+    if (t) {
+      this.mode = 'pounce'; this.modeT = 0; this.pounceE = t; this.gravityScale = 0;
+      this._extend(); this.setAnim('smash');
+      this._trail?.stop?.(); this._trail = trailOn(g, this.model.chest ?? this.model.group, RED, 0.3, 0.35);
+      g.audio?.play('roar', { volume: 0.45, pitch: 1.1 }); g.audio?.play('whoosh', { pitch: 1.2 });
+      g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.5, this.pos.z), 'POUNCE', RED);
+      g.slowmo?.(0.1, 0.5);
+      return;
+    }
     this.mode = 'dive'; this.modeT = 0;
     this.vel.x *= 0.25; this.vel.z *= 0.25; this.vel.y = -38; this.gravityScale = 2;
     this._extend(); this.setAnim('smash');
     this._trail?.stop?.(); this._trail = trailOn(g, this.model.chest ?? this.model.group, GOLD, 0.25, 0.3);
     g.audio?.play('whoosh', { pitch: 1.4 }); g.cam.shake(0.08);
   }
+  _pounceTarget() {
+    const g = this.game;
+    let best = null, bd = Infinity;
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive) continue;
+      const dy = this.pos.y - e.pos.y;
+      const dh = Math.hypot(e.pos.x - this.pos.x, e.pos.z - this.pos.z);
+      if (dy < 1.2 || dh > POUNCE_RANGE || dy + dh > POUNCE_RANGE * 1.4) continue;
+      const score = dh + Math.abs(dy) * 0.4;
+      if (score < bd) { bd = score; best = e; }
+    }
+    return best;
+  }
+  _pounceMove(dt) {
+    const g = this.game, e = this.pounceE;
+    if (!e || !e.alive) { this.mode = 'dive'; this.modeT = 0; this.gravityScale = 2; this.pounceE = null; return; }
+    this.gravityScale = 0;
+    enemyCenter(e, _c);
+    _a.subVectors(_c, this.center);
+    const d = _a.length();
+    if (d > 0.01) _a.multiplyScalar(1 / d);
+    this.vel.copy(_a).multiplyScalar(Math.min(POUNCE_SPEED + this.modeT * 25, d / Math.max(dt, 1e-3)));
+    this.yaw = Math.atan2(_a.x, _a.z);
+    this.setAnim('smash'); this._extend();
+    g.fx?.beam?.(this.center.clone(), this.center.clone().addScaledVector(_a, -2.2), RED, 0.18, 0.15);
+    if (d < 1.9 || this.modeT > 1.4) {
+      this.pounceE = null; this.vel.set(0, 0, 0);
+      const hit = d < 3.2;
+      if (hit) {
+        const kb = _d.subVectors(e.pos, this.pos).setY(0).normalize().multiplyScalar(6).setY(2).clone();
+        hurt(g, this, e, 42 * this.dm(), { kb, stun: 1.3, kind: 'melee', color: 0xffd070 });
+        this._applyBleed(e);
+        this._slashFx(this.forward, 3); this._slashFx(this.forward, 0);
+        g.fx?.burst?.(enemyCenter(e, _c), BLOOD, 14, 7, 0.45, 0.17);
+        g.fx?.ring?.(e.pos.clone().setY(e.pos.y + 0.15), 3.5, RED, 0.4);
+        g.fx?.flash?.(enemyCenter(e, _c).clone(), 0xffd070, 5, 0.2);
+        const hits = g.combat?.aoe?.({ center: e.pos.clone(), radius: 3.2, damage: 16 * this.dm(), knockback: 9, up: 4, stun: 0.7, source: this }) ?? [];
+        this._hitFx(hits);
+        g.audio?.play('heavyhit', { volume: 0.8 }); impact(g, 0.7);
+      }
+      this._trail?.stop?.(); this._trail = null;
+      this._endMode(); this.actionAnim = 'land'; this.actionT = 0.25;
+      this.vel.set(-this.forward.x * 4, 8, -this.forward.z * 4); this.onGround = false;
+    }
+  }
   onLand() {
     const g = this.game, vy = -this._impactVy;
+    if (this.mode === 'pounce') { this._trail?.stop?.(); this._trail = null; this.pounceE = null; this._endMode(); }
     if (this.mode === 'dive') {
       this._trail?.stop?.(); this._trail = null;
       const c = this.pos.clone();
@@ -425,9 +518,9 @@ export class Wolverine extends Hero {
   }
 
   // ---- special: Lunge ---------------------------------------------------------------
-  _lunge() {
+  _lunge(pinTarget = null) {
     const g = this.game;
-    const t = this.findTarget(LUNGE_RANGE, 110) ?? g.enemies?.nearest?.(this.pos, LUNGE_RANGE) ?? null;
+    const t = pinTarget ?? this.findTarget(LUNGE_RANGE, 110) ?? g.enemies?.nearest?.(this.pos, LUNGE_RANGE) ?? null;
     this._extend();
     this.bufferT = 0;
     if (!t) {
@@ -438,8 +531,9 @@ export class Wolverine extends Hero {
       this.timers.after(0.2, () => { if (!this.active) return; const hits = g.combat?.melee?.({ origin: this.center, forward: this.forward, range: 3.2, arc: 140, damage: 22 * this.dm(), knockback: 10, up: 4, stun: 0.6, source: this }) ?? []; this._slashFx(this.forward, 0); this._hitFx(hits); });
       return;
     }
-    this.useCooldown('lunge', LUNGE_CD);
-    this.lunge = { e: t, phase: 'fly', t: 0, hits: 0, hitT: 0 };
+    if (pinTarget) this.useCooldown('pin', PIN_CD); else this.useCooldown('lunge', LUNGE_CD);
+    this.lunge = { e: t, phase: 'fly', t: 0, hits: 0, hitT: 0, pin: !!pinTarget };
+    if (pinTarget && t.pos.distanceTo(this.pos) < 2.4) { this.lunge.phase = 'maul'; g.fx?.text?.(_a.set(t.pos.x, t.pos.y + t.height + 0.9, t.pos.z), 'PIN TAKEDOWN', RED, { size: 1.4 }); }
     this.mode = 'lunge'; this.modeT = 0; this.gravityScale = 0; this.onGround = false;
     this.invuln = Math.max(this.invuln, 2);
     this.spinT = 0; this.actionT = 0;
@@ -468,7 +562,10 @@ export class Wolverine extends Hero {
       this.vel.copy(_a).multiplyScalar(sp);
       this.yaw = Math.atan2(_a.x, _a.z);
       this.setAnim('dash', LUNGE_SPEED);
-      if (d < 1.8 || L.t > 0.9) { L.phase = 'maul'; L.t = 0; L.hitT = 0; L.hits = 0; this.vel.set(0, 0, 0); g.cam.shake(0.25); g.audio?.play('heavyhit'); }
+      if (d < 1.8 || L.t > 0.9) {
+        L.phase = 'maul'; L.t = 0; L.hitT = 0; L.hits = 0; this.vel.set(0, 0, 0); g.cam.shake(0.25); g.audio?.play('heavyhit');
+        if (L.pin) g.fx?.text?.(_a.set(e.pos.x, e.pos.y + e.height + 0.9, e.pos.z), 'PIN TAKEDOWN', RED, { size: 1.4 });
+      }
       return;
     }
     // maul: pin the target and rake it
@@ -477,14 +574,16 @@ export class Wolverine extends Hero {
     this.vel.set((_b.x - this.pos.x) * 14, (_b.y + 0.3 - this.pos.y) * 14, (_b.z - this.pos.z) * 14);
     _d.subVectors(e.pos, this.pos).setY(0); if (_d.lengthSq() > 0.01) this.yaw = Math.atan2(_d.x, _d.z);
     e.vel.x = 0; e.vel.z = 0;
+    if (L.pin && !e.isBoss) { e.stunTimer = Math.max(e.stunTimer ?? 0, 0.5); e.downTimer = Math.max(e.downTimer ?? 0, 0.5); }   // knee on the chest: it cannot get up
     this.invuln = Math.max(this.invuln, 0.3);
-    this.setAnim(L.hits % 2 ? 'punch2' : 'punch1');
+    this.setAnim(L.pin ? 'smash' : L.hits % 2 ? 'punch2' : 'punch1');
     L.hitT -= dt;
     if (L.hitT <= 0) {
-      L.hitT = 0.14 / this.atkSpeed; L.hits++;
-      const last = L.hits >= 6;
+      L.hitT = (L.pin ? 0.17 : 0.14) / this.atkSpeed; L.hits++;
+      const last = L.hits >= (L.pin ? 4 : 6);
       const kb = last ? _a.subVectors(e.pos, this.pos).setY(0).normalize().multiplyScalar(14).setY(7).clone() : undefined;
-      hurt(g, this, e, (last ? 28 : 9) * this.dm(), { kb, stun: last ? 1.2 : 0.5, kind: 'melee', color: last ? 0xffd070 : 0xff9090 });
+      hurt(g, this, e, (L.pin ? (last ? 46 : 12) : (last ? 28 : 9)) * this.dm(), { kb, stun: last ? 1.2 : 0.5, kind: 'melee', color: last ? 0xffd070 : 0xff9090 });
+      if (L.pin && last) { g.slowmo?.(0.35, 0.3); g.fx?.ring?.(e.pos.clone().setY(e.pos.y + 0.15), 4, RED, 0.5); g.fx?.flash?.(enemyCenter(e, _c).clone(), 0xffd070, 6, 0.25); g.cam.shake(0.45); }
       this._applyBleed(e);
       const fw = this.forward; this._slashFx(fw, L.hits);
       g.fx?.burst?.(enemyCenter(e, _c), BLOOD, 6, 5, 0.35, 0.14);
@@ -517,6 +616,7 @@ export class Wolverine extends Hero {
         _b.set(Math.cos(ang + 0.5) * SPIN_RADIUS * 0.85, 0.1 + (k - 1) * 0.15, Math.sin(ang + 0.5) * SPIN_RADIUS * 0.85).add(c);
         g.fx?.beam?.(_a.clone(), _b.clone(), k === 0 ? GOLD : STEEL, 0.07, 0.1);
       }
+      this.slash.slash(c, a, { tilt: 0.05, flip: false, color: this.rageT > 0 ? RED : GOLD, scale: 1.45, life: 0.22, forward: 0 });
     }
     if (this.spinTick <= 0) {
       this.spinTick = 0.2; this.spinN++;
@@ -529,9 +629,223 @@ export class Wolverine extends Hero {
     if (this.spinT <= 0) { this.spinT = 0; this.actionT = 0.15; this.actionAnim = 'land'; }
   }
 
+  // ---- special: context variants (Lunge / Grab & Throw / Pin Takedown) -------------------------------
+  _specialUpdate(input, normal) {
+    const g = this.game;
+    // decide what the button would do right now (also drives the HUD label)
+    let kind = 'lunge', tgt = null;
+    if (normal || this.mode === 'climb') {
+      let bd = PIN_RANGE;
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || e.isBoss) continue;
+        if (!(e.stunned || e.webbed || e.hp <= e.maxHp * 0.25)) continue;
+        const d = e.pos.distanceTo(this.pos);
+        if (d < bd) { bd = d; tgt = e; }
+      }
+      if (tgt) kind = 'pin';
+      else {
+        const n = g.enemies?.nearest?.(this.pos, GRAB_RANGE);
+        if (n && n.alive && !n.isBoss && this.onGround && this.mode === 'normal') { tgt = n; kind = 'throw'; }
+      }
+    }
+    this.spKind = kind;
+    if (!input.pressed('special') || !(normal || this.mode === 'climb') || this.spinT > 0 || this.grab) return;
+    if (kind === 'pin') { if ((this.cooldowns.pin || 0) <= 0) { this.bufferT = 0; this._extend(); this._lunge(tgt); } }
+    else if (kind === 'throw') { if ((this.cooldowns.grab || 0) <= 0) this._startGrab(tgt); }
+    else if ((this.cooldowns.lunge || 0) <= 0) this._lunge();
+  }
+
+  // Grab & Throw (Fastball Special): seize the enemy, wind up, hurl it down the camera line. It bowls through others.
+  _startGrab(e) {
+    const g = this.game;
+    this.useCooldown('grab', GRAB_CD);
+    this.grab = { e, t: 0 };
+    this._extend(); this.spinT = 0; this.bufferT = 0;
+    _a.subVectors(e.pos, this.pos).setY(0); if (_a.lengthSq() > 0.01) this.yaw = Math.atan2(_a.x, _a.z);
+    e.interrupt?.();
+    this.actionAnim = 'throw'; this.actionT = 0.45; this.setAnim('throw');
+    g.audio?.play('roar', { volume: 0.35, pitch: 1.3 }); g.audio?.play('whoosh', { pitch: 0.9 });
+    g.fx?.burst?.(enemyCenter(e, _c), STEEL, 8, 4, 0.3, 0.12);
+  }
+  _grabUpdate(dt) {
+    const G = this.grab, g = this.game;
+    if (!G) return;
+    const e = G.e;
+    if (!e || !e.alive || this.mode !== 'normal') { this.grab = null; return; }
+    G.t += dt;
+    const fw = this.forward;
+    // hold the victim overhead and spin up
+    e.pos.set(this.pos.x + fw.x * 0.9, this.pos.y + 1.1 + Math.sin(G.t * 10) * 0.05, this.pos.z + fw.z * 0.9);
+    e.vel.set(0, 0, 0); e.stunTimer = Math.max(e.stunTimer ?? 0, 0.3);
+    e.yaw = this.yaw + G.t * 3.6;
+    this.actionT = Math.max(this.actionT, 0.1);
+    if (G.t < 0.28) return;
+    // release
+    const aim = g.cam.forward;
+    _d.set(aim.x, 0, aim.z); if (_d.lengthSq() < 0.01) _d.copy(fw); _d.normalize();
+    // aim-assist: bend towards another enemy in the throw cone
+    let best = null, bs = 0.8;
+    for (const o of g.enemies?.list ?? []) {
+      if (!o.alive || o === e) continue;
+      _a.subVectors(o.pos, this.pos).setY(0); const dd = _a.length();
+      if (dd < 3 || dd > 40) continue;
+      const dot = _a.multiplyScalar(1 / dd).dot(_d);
+      if (dot > bs) { bs = dot; best = o; }
+    }
+    if (best) { _a.subVectors(best.pos, this.pos).setY(0).normalize(); _d.lerp(_a, 0.8).normalize(); }
+    this.yaw = Math.atan2(_d.x, _d.z);
+    e.launch?.({});
+    e.vel.set(_d.x * THROW_SPEED, 5.5, _d.z * THROW_SPEED);
+    e.onGround = false;
+    this.thrown.push({ e, t: 0, hit: new Set([e]), trail: trailOn(g, e.root ?? e.model?.group ?? this.model.group, GOLD, 0.35, 0.35) });
+    this.grab = null; this.actionAnim = 'throw'; this.actionT = 0.35; this.setAnim('throw');
+    this.vel.x -= _d.x * 3; this.vel.z -= _d.z * 3;
+    g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.6, this.pos.z), 'FASTBALL!', GOLD, { size: 1.4 });
+    g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 1.1), 2.5, GOLD, 0.3);
+    g.audio?.play('throw', { volume: 0.8, pitch: 0.8 }); g.audio?.play('heavyhit', { volume: 0.5 });
+    g.cam.shake(0.3); rumble(g, 0.6, 0.4, 140);
+  }
+  _thrownUpdate(dt) {
+    const g = this.game;
+    for (let i = this.thrown.length - 1; i >= 0; i--) {
+      const T = this.thrown[i], e = T.e;
+      T.t += dt;
+      let done = !e.alive || T.t > 2.2;
+      if (!done) {
+        const c = enemyCenter(e, _c);
+        g.fx?.trailPuff?.(c.x, c.y, c.z, GOLD, 0.35, 0.3, 0.02);
+        for (const o of g.enemies?.list ?? []) {
+          if (!o.alive || T.hit.has(o)) continue;
+          if (o.center.distanceTo(c) > 1.5 + (o.radius ?? 0.5)) continue;
+          T.hit.add(o);
+          _d.copy(e.vel).setY(0).normalize().multiplyScalar(11).setY(5);
+          hurt(g, this, o, THROW_DMG * this.dm(), { kb: _d.clone(), stun: 1.0, kind: 'melee', color: 0xffd070 });
+          g.fx?.shockwave?.(o.pos.clone().setY(o.pos.y + 0.1), 3, GOLD);
+          g.audio?.play('heavyhit', { volume: 0.7 }); impact(g, 0.5);
+        }
+        if (T.t > 0.12 && (e.onGround || Math.hypot(e.vel.x, e.vel.z) < 6)) {
+          // landing / wall crunch: the thrown enemy takes the hit too
+          hurt(g, this, e, 24 * this.dm(), { stun: 1.0, kind: 'melee', color: 0xffd070 });
+          g.fx?.shockwave?.(e.pos.clone().setY(e.pos.y + 0.1), 4, GOLD);
+          impact(g, 0.6);
+          done = true;
+        }
+      }
+      if (done) { T.trail?.stop?.(); this.thrown.splice(i, 1); }
+    }
+  }
+
+  // ---- ability: TAP Claw Spin / HOLD Feral Sense ----------------------------------------------------
+  _abilityUpdate(dt, input, normal) {
+    const ok = normal || this.mode === 'climb';
+    // ability (E / L1)
+    const abDown = input.down('ability');
+    if (input.pressed('ability')) { this._abT = 0; this._senseHeld = false; }
+    if (abDown) {
+      this._abT += dt;
+      if (this._abT >= HOLD_SENSE && !this.senseOn && !this._senseHeld && ok && (this.cooldowns.sense || 0) <= 0) { this._senseHeld = true; this._senseStart(); }
+    }
+    if (input.released('ability')) {
+      if (this.senseOn) this._senseStop();
+      else if (this._abT < HOLD_SENSE && ok && this.spinT <= 0 && (this.cooldowns.spin || 0) <= 0) this._spin();
+    }
+    if (this.senseOn) {
+      this.senseT += dt;
+      if (this.senseT > SENSE_MAX || !abDown) this._senseStop();
+    }
+    // ability2 (R / L2): tap = rage, hold = roar
+    const a2Down = input.down('ability2');
+    if (input.pressed('ability2')) { this._ab2T = 0; this._roared = false; }
+    if (a2Down) {
+      this._ab2T += dt;
+      if (this._ab2T >= HOLD_ROAR && !this._roared && ok && (this.cooldowns.roar || 0) <= 0) { this._roared = true; this._roar(); }
+    }
+    if (input.released('ability2')) {
+      if (!this._roared && this._ab2T < HOLD_ROAR && (this.cooldowns.rage || 0) <= 0 && this.rageT <= 0) this._startRage();
+    }
+  }
+
+  _senseStart() {
+    const g = this.game;
+    this.senseOn = true; this.senseT = 0; this._scentT = 0;
+    this._extend();
+    g.audio?.play('whoosh', { volume: 0.4, pitch: 0.6 });
+    g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.2), 14, GOLD, 0.6);
+    g.hud?.toast?.('FERAL SENSE');
+  }
+  _senseStop(silent = false) {
+    if (this.senseOn && !silent) this.useCooldown('sense', SENSE_CD);
+    this.senseOn = false; this.senseFx?.hide();
+  }
+  _senseTick(dt) {
+    const g = this.game;
+    this.senseFx.update(dt, g.enemies?.list ?? [], this.pos, SENSE_RANGE, this.senseOn);
+    if (!this.senseOn) return;
+    this._scentT -= dt;
+    if (this._scentT <= 0) {
+      this._scentT = 0.14;
+      let n = 0;
+      const c = this.center;
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive || n >= 6) continue;
+        const d = e.pos.distanceTo(this.pos);
+        if (d > SENSE_RANGE) continue;
+        n++;
+        // scent thread from nose to prey, plus a pulse above their head
+        _b.copy(enemyCenter(e, _w)).sub(c);
+        const len = _b.length(); if (len < 0.5) continue;
+        _b.multiplyScalar(Math.min(1, 9 / len)).add(c);
+        g.fx?.beam?.(c.clone(), _b.clone(), e.isBoss ? GOLD : RED, 0.03, 0.16);
+        g.fx?.glow?.(_a.set(e.pos.x, e.pos.y + e.height + 0.5, e.pos.z), e.isBoss ? GOLD : RED, 0.9, 0.2);
+      }
+    }
+  }
+
+  // ---- ability2 hold: Feral Roar ---------------------------------------------------------------------------
+  _roar() {
+    const g = this.game;
+    this.useCooldown('roar', ROAR_CD);
+    this._extend();
+    this.invuln = Math.max(this.invuln, 0.35);
+    this.actionAnim = 'smash'; this.actionT = 0.6; this.setAnim('smash');
+    this.vel.x *= 0.2; this.vel.z *= 0.2;
+    g.audio?.play('roar', { volume: 1 }); g.audio?.play('boss_roar', { volume: 0.5, pitch: 1.2 });
+    g.cam.shake(0.8); rumble(g, 1, 0.9, 450);
+    g.slowmo?.(0.18, 0.5);
+    const c = this.pos.clone().setY(this.pos.y + 0.15);
+    // expanding shock rings + a red flash
+    for (let k = 0; k < 3; k++) this.timers.after(k * 0.11, () => { if (this.active) g.fx?.ring?.(c, ROAR_RADIUS * (0.55 + k * 0.25), k === 1 ? GOLD : RED, 0.55); });
+    g.fx?.shockwave?.(c.clone(), ROAR_RADIUS * 0.8, RED);
+    g.fx?.burst?.(this.center, RED, 30, 10, 0.7, 0.3);
+    g.fx?.flash?.(this.center, RED, 6, 0.3);
+    g.fx?.text?.(_a.set(this.pos.x, this.pos.y + this.height + 0.6, this.pos.z), 'FERAL ROAR', RED, { size: 1.5 });
+    // stagger: light damage + fear shove (bosses only flinch: their super armour ignores the stun)
+    for (const e of enemiesNear(g, this.pos, ROAR_RADIUS)) {
+      _d.subVectors(e.pos, this.pos).setY(0);
+      const dd = _d.length() || 1; _d.multiplyScalar(1 / dd);
+      const f = 1 - 0.5 * dd / ROAR_RADIUS;
+      e.takeDamage?.(5 * this.dm(), { knockback: _d.clone().multiplyScalar(9 * f).setY(2.5), stun: e.isBoss ? 0.4 : 1.8 * f + 0.5, source: this, kind: 'roar' });
+      if (e.isBoss) e.slowTimer = Math.max(e.slowTimer ?? 0, 1.2);
+      else if (e.alive) { e.slowTimer = Math.max(e.slowTimer ?? 0, 3.5); e.stunTimer = Math.max(e.stunTimer ?? 0, 1.2 * f + 0.4); }
+      g.fx?.burst?.(enemyCenter(e, _c), GOLD, 6, 4, 0.35, 0.14);
+    }
+    this.addFocus(6);
+  }
+
+  // ---- visuals (after physics) ---------------------------------------------------------------------------------
+  updateVisuals(dt) {
+    const g = this.game;
+    this.slash.update(dt); this.dig.update(dt);
+    this.wounds.update(dt, this.hp / this.maxHp, this.regenning, g, this);
+    this._senseTick(dt);
+    this._thrownUpdate(dt);
+    if (this.dead) this._senseStop();
+  }
+
   // ---- ultimate: Weapon X frenzy -----------------------------------------------------
   _startUlt() {
     const g = this.game;
+    this._senseStop(true); this.grab = null;
     // greedy nearest-neighbour chain of up to 8 enemies
     const pool = enemiesNear(g, this.pos, ULT_RANGE).filter((e) => e.alive);
     if (!pool.length) { g.hud?.toast?.('No targets in range'); return; }
