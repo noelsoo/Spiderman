@@ -888,3 +888,18 @@ export function footGeo(w, h, l, seg = 10) {
     { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.28, -l * 0.08], scale: [w * 0.7, h * 0.55, l * 0.3] },
   ]);
 }
+
+/** Deform a (cloned) lathe/profile geometry in place. fn(x, y, z) -> [x, y, z]. Re-computes normals and welds the lathe seam. */
+export function deformLathe(geo, seg, fn) {
+  const g = geo.clone();
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) { const o = fn(pos.getX(i), pos.getY(i), pos.getZ(i)); pos.setXYZ(i, o[0], o[1], o[2]); }
+  g.computeVertexNormals();
+  const n = g.attributes.normal, rows = pos.count / (seg + 1);
+  for (let r = 0; r < rows; r++) {
+    const a = r * (seg + 1), b = a + seg;
+    const x = n.getX(a) + n.getX(b), y = n.getY(a) + n.getY(b), z = n.getZ(a) + n.getZ(b), l = Math.hypot(x, y, z) || 1;
+    n.setXYZ(a, x / l, y / l, z / l); n.setXYZ(b, x / l, y / l, z / l);
+  }
+  return g;
+}
