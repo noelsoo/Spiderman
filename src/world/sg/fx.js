@@ -5,7 +5,8 @@ import * as THREE from 'three';
 export class LightShow {
   constructor(group, ctx) {
     this.t = 0;
-    const N = 14;
+    const N = 18;
+    this.facade = ctx && ctx.mbsMat;
     this.n = N;
     // beam: open cylinder along +y from 0..1, brightest at the base, fading out
     const g = new THREE.CylinderGeometry(0.5, 1, 1, 8, 6, true);
@@ -23,12 +24,14 @@ export class LightShow {
     // sources: event-plaza waterfront (front beams) + SkyPark top searchlights
     this.src = [];
     for (let i = 0; i < 10; i++) this.src.push({ x: 194, y: 1.5, z: 5 + i * 20, kind: 0, i });
-    for (let i = 0; i < 4; i++) this.src.push({ x: 270 + (i % 2 ? 12 : -12), y: 206, z: -90 + i * 90 + 20, kind: 1, i });
+    for (let i = 0; i < 8; i++) this.src.push({ x: 270 + (i % 2 ? 14 : -14), y: 206, z: -80 + i * 42, kind: 1, i });
     this.m = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.e = new THREE.Euler(); this.p = new THREE.Vector3(); this.s = new THREE.Vector3(); this.c = new THREE.Color();
   }
 
   update(dt, night) {
     this.t += dt;
+    // MBS facade: lit windows fade in with the night
+    if (this.facade) this.facade.emissiveIntensity = Math.pow(Math.min(1, night * 1.3), 2) * 1.6;
     const on = night > 0.5;
     this.mesh.visible = on;
     if (!on) return;
@@ -44,7 +47,8 @@ export class LightShow {
         pitch = 0.18 + 0.5 * (0.5 + 0.5 * Math.sin(t * 0.8 + s.i * 0.7)) + (ph > 0.5 ? 0.3 : 0);
         len = 340; rad = 2.4 + burst * 1.2;
       } else {
-        yaw = t * 0.4 + s.i; pitch = 1.1 + 0.25 * Math.sin(t * 0.6 + s.i); len = 420; rad = 3.2;
+        // SkyPark searchlights: pairs sweep in a cross-fan, narrow and tall
+        yaw = Math.sin(t * 0.35 + s.i * 0.8) * 1.2 + (s.i % 2 ? Math.PI / 2 : -Math.PI / 2); pitch = 1.0 + 0.3 * Math.sin(t * 0.6 + s.i); len = 460; rad = 1.8 + 0.8 * burst;
       }
       // direction from yaw/pitch: horizontal dir (-cos, 0, sin)?  yaw measured from +z toward -x
       const dx = -Math.sin(yaw) * Math.cos(pitch), dy = Math.sin(pitch), dz = Math.cos(yaw) * Math.cos(pitch);

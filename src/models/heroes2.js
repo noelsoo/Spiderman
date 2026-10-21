@@ -64,15 +64,15 @@ export function buildWolverine() {
   const YEL = '#f2c213', BLU = '#16348c';
   const torsoTex = drawTex('wolvTorso', 512, 512, (ctx, W, H) => {
     ctx.fillStyle = BLU; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = YEL; ctx.beginPath(); ctx.moveTo(W * 0.31, 0); ctx.lineTo(W * 0.69, 0); ctx.quadraticCurveTo(W * 0.72, H * 0.5, W * 0.66, H); ctx.lineTo(W * 0.34, H); ctx.quadraticCurveTo(W * 0.28, H * 0.5, W * 0.31, 0); ctx.fill();
+    ctx.fillStyle = YEL; ctx.beginPath(); ctx.moveTo(W * 0.38, 0); ctx.lineTo(W * 0.62, 0); ctx.quadraticCurveTo(W * 0.6, H * 0.5, W * 0.57, H); ctx.lineTo(W * 0.43, H); ctx.quadraticCurveTo(W * 0.4, H * 0.5, W * 0.38, 0); ctx.fill();
     ctx.fillStyle = '#0a0a10';
     for (const sd of [-1, 1]) for (let i = 0; i < 6; i++) {
-      const y = H * (0.07 + i * 0.145), ex = W * 0.5 + sd * W * (0.20 - i * 0.004), tx = W * 0.5 + sd * W * (0.075 + (i % 2) * 0.03);
+      const y = H * (0.07 + i * 0.145), ex = W * 0.5 + sd * W * (0.115 - i * 0.003), tx = W * 0.5 + sd * W * (0.06 + (i % 2) * 0.02);
       ctx.beginPath(); ctx.moveTo(ex, y - 13); ctx.quadraticCurveTo((ex + tx) / 2, y + 2, tx, y + 14); ctx.quadraticCurveTo((ex + tx) / 2, y + 12, ex, y + 16); ctx.fill();
     }
   }, { offsetX: 0.5 });
   const blue = cloth(0x1a3a96), yellow = cloth(0xf2c213, { roughness: 0.5 });
-  const torso = cloth(0xffffff, { map: torsoTex });
+  const torso = cloth(0xffffff, { map: torsoTex, normalScale: new V2(0.3, 0.3) });
   const skin = std(0xd8a27c, { roughness: 0.65 });
   const info = buildBody(model, {
     mats: { default: blue, chest: torso, abdomen: torso, pelvis: blue, neck: skin, head: skin, shoulder: blue, upperArm: blue, foreArm: blue, hand: yellow, thigh: blue, shin: blue, foot: yellow },

@@ -819,3 +819,87 @@ export function antiStreakTexture() {
     for (let i = 0; i < 40; i++) { ctx.fillStyle = `rgba(160,190,215,${0.05 + r() * 0.1})`; ctx.fillRect(r() * W, r() * H, 6 + r() * 30, 2 + r() * 10); }
   });
 }
+
+// ================================================================== anatomy v3: muscle-shaped limbs, hands, feet
+// radius multipliers along a limb (t = 0 at the joint, 1 at the next joint) and forward/back offsets (fraction of radius)
+const MUSCLE = {
+  arm:   { r: [[0, 0.86], [0.1, 1.0], [0.3, 1.14], [0.55, 1.04], [0.8, 0.9], [1, 0.9]], z: [[0, 0], [0.3, 0.14], [0.6, 0.06], [1, 0]] },
+  fore:  { r: [[0, 1.0], [0.18, 1.12], [0.4, 1.0], [0.75, 0.78], [1, 0.74]], z: [[0, 0.02], [0.2, 0.08], [1, 0]] },
+  thigh: { r: [[0, 0.98], [0.25, 1.12], [0.5, 1.04], [0.8, 0.88], [1, 0.84]], z: [[0, 0], [0.3, 0.1], [1, 0.02]] },
+  shin:  { r: [[0, 0.9], [0.22, 1.14], [0.45, 0.98], [0.8, 0.72], [1, 0.7]], z: [[0, 0], [0.22, -0.2], [0.5, -0.1], [1, 0]] },
+};
+function keyLerp(keys, t) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const a = keys[i - 1], b = keys[i], u = (t - a[0]) / (b[0] - a[0]); return a[1] + (b[1] - a[1]) * (u * u * (3 - 2 * u)); }
+  return keys[keys.length - 1][1];
+}
+/** Anatomical limb hanging down -Y from the joint to y=-len: deltoid/bicep, forearm flare, quad, calf. kind: arm|fore|thigh|shin. m = muscularity (0.5 lean .. 1.5 heavy). */
+export function muscleLimb(kind, len, r0, r1, m = 1, seg = 14) {
+  return G(`mus${kind}${len}_${r0}_${r1}_${m}_${seg}`, () => {
+    const P = MUSCLE[kind];
+    const pts = [], zs = [];
+    const N = 16;
+    const c0 = r0 * 0.5, c1 = r1 * 0.5;
+    pts.push(new V2(0.0001, -len - c1)); zs.push(0);
+    pts.push(new V2(r1 * 0.72, -len - c1 * 0.68)); zs.push(0);
+    for (let i = N; i >= 0; i--) {
+      const t = i / N;
+      const mult = 1 + (keyLerp(P.r, t) - 1) * m;
+      pts.push(new V2(THREE.MathUtils.lerp(r0, r1, t) * mult, -len * t)); zs.push(keyLerp(P.z, t) * m * THREE.MathUtils.lerp(r0, r1, t));
+    }
+    pts.push(new V2(r0 * 0.74, c0 * 0.66)); zs.push(0);
+    pts.push(new V2(0.0001, c0)); zs.push(0);
+    const g = new THREE.LatheGeometry(pts, seg);
+    // lathe vertex order: ring by ring (pts.length rings, seg+1 verts each)
+    const pos = g.attributes.position;
+    for (let ring = 0; ring < pts.length; ring++) for (let s = 0; s <= seg; s++) { const i = ring * (seg + 1) + s; pos.setZ(i, pos.getZ(i) + zs[ring]); }
+    return g;
+  });
+}
+
+/** One merged hand: palm + 4 two-segment fingers + thumb, relaxed/curled slightly. size = [hx, hy, hz] half-extents of the palm. Hangs down -Y from y=0 (wrist). */
+export function handGeo(hx, hy, hz, fingers = true, curl = 0.35, seg = 6) {
+  return mergeParts(`hand${hx.toFixed(4)}_${hy.toFixed(4)}_${hz.toFixed(4)}_${fingers}_${curl}_${seg}`, (() => {
+    const parts = [{ geo: new THREE.SphereGeometry(1, seg + 4, seg + 2), pos: [0, -hy * 0.9, 0], scale: [hx, hy * 0.95, hz * 0.62] }];
+    if (!fingers) return parts;
+    const fr = hx * 0.22;
+    const lens = [0.8, 1.0, 0.95, 0.72];
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * hx * 0.5;
+      const l1 = hy * 0.62 * lens[i], l2 = hy * 0.5 * lens[i];
+      const a1 = -(0.2 + curl * 0.55 + i * 0.04), a2 = a1 - 0.5 - curl * 0.6;
+      const y0 = -hy * 1.55, z0 = hz * 0.05;
+      const cap1 = new THREE.CapsuleGeometry(fr, l1, 2, seg);
+      parts.push({ geo: cap1, pos: [x, y0 - Math.cos(a1) * l1 * 0.5, z0 - Math.sin(a1) * l1 * 0.5], rot: [a1, 0, 0] });
+      const ey = y0 - Math.cos(a1) * l1, ez = z0 - Math.sin(a1) * l1;
+      parts.push({ geo: new THREE.CapsuleGeometry(fr * 0.92, l2, 2, seg), pos: [x, ey - Math.cos(a2) * l2 * 0.5, ez - Math.sin(a2) * l2 * 0.5], rot: [a2, 0, 0] });
+    }
+    parts.push({ geo: new THREE.CapsuleGeometry(fr * 1.15, hy * 0.7, 2, seg), pos: [hx * 0.95, -hy * 1.1, hz * 0.3], rot: [-0.7, 0, 0.55] });
+    return parts;
+  })());
+}
+
+/** Shoe/foot: heel + arch + toe box + ankle, one merged geometry. Origin at the ankle joint (y=0), toes toward +Z, sole at y = -h. */
+export function footGeo(w, h, l, seg = 10) {
+  return mergeParts(`foot${w.toFixed(4)}_${h.toFixed(4)}_${l.toFixed(4)}_${seg}`, [
+    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.55, -l * 0.28], scale: [w * 0.82, h * 0.5, l * 0.36] },
+    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.62, l * 0.12], scale: [w, h * 0.38, l * 0.5] },
+    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.66, l * 0.5], scale: [w * 0.9, h * 0.3, l * 0.3] },
+    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.28, -l * 0.08], scale: [w * 0.7, h * 0.55, l * 0.3] },
+  ]);
+}
+
+/** Deform a (cloned) lathe/profile geometry in place. fn(x, y, z) -> [x, y, z]. Re-computes normals and welds the lathe seam. */
+export function deformLathe(geo, seg, fn) {
+  const g = geo.clone();
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) { const o = fn(pos.getX(i), pos.getY(i), pos.getZ(i)); pos.setXYZ(i, o[0], o[1], o[2]); }
+  g.computeVertexNormals();
+  const n = g.attributes.normal, rows = pos.count / (seg + 1);
+  for (let r = 0; r < rows; r++) {
+    const a = r * (seg + 1), b = a + seg;
+    const x = n.getX(a) + n.getX(b), y = n.getY(a) + n.getY(b), z = n.getZ(a) + n.getZ(b), l = Math.hypot(x, y, z) || 1;
+    n.setXYZ(a, x / l, y / l, z / l); n.setXYZ(b, x / l, y / l, z / l);
+  }
+  return g;
+}

@@ -1,7 +1,7 @@
 // CBD supertalls, Marina Bay Financial Centre / Marina One and generic city blocks.
 import * as THREE from 'three';
 import { Bucket } from '../geo.js';
-import { STYLES } from '../materials.js';
+import { STYLES, addSgMaterials } from '../materials.js';
 import { emitBox, addBox, lightBox, roofClutter, simpleBuilding } from './builders.js';
 import { cells, WEST_X, WEST_Z, AVE } from './layout.js';
 
@@ -126,7 +126,13 @@ export function supertall(ctx, rng, o) {
   if (o.name) ctx.landmarks[o.name] = new THREE.Vector3(cx, 0, cz);
 }
 
+// HDB colour bands (tints multiplied into the cream facade) and shophouse pastels
+const HDB_TINTS = [[1, 0.97, 0.9], [0.78, 0.9, 1.0], [1.0, 0.82, 0.8], [0.98, 0.93, 0.7], [0.82, 0.95, 0.85], [0.92, 0.86, 1.0]];
+const SHOP_TINTS = [[1, 0.82, 0.86], [0.8, 0.95, 0.95], [1, 0.95, 0.7], [0.85, 0.88, 1], [0.95, 0.85, 0.7]];
+const pick = (rng, a) => a[(rng() * a.length) | 0];
+
 function fillCell(ctx, rng, c, prof) {
+  if (ctx.T?.ensureSg) addSgMaterials(ctx.T, ctx.M);
   const w = c.x1 - c.x0, d = c.z1 - c.z0;
   if (w < 20 || d < 20) return;
   // paved plaza under the whole block
@@ -147,14 +153,19 @@ function fillCell(ctx, rng, c, prof) {
     const inset = 1 + rng() * 3;
     const h = prof.h0 + rng() * (prof.h1 - prof.h0);
     const style = h > prof.glassAbove ? prof.glass[(rng() * prof.glass.length) | 0] : prof.low[(rng() * prof.low.length) | 0];
-    simpleBuilding(ctx, rng, lx0 + inset, lz0 + inset, lx0 + lw - inset, lz0 + ld - inset, h, style, { id: 'blk' });
+    let st2 = style, col;
+    if (ctx.M.hdb && prof.res) {
+      if (h < 26 && rng() < 0.7) { st2 = 'shophouse'; col = pick(rng, SHOP_TINTS); }
+      else if (h < prof.res && rng() < 0.55) { st2 = 'hdb'; col = pick(rng, HDB_TINTS); }
+    }
+    simpleBuilding(ctx, rng, lx0 + inset, lz0 + inset, lx0 + lw - inset, lz0 + ld - inset, h, st2, { id: 'blk', col });
     if (h > 120) nightLines(ctx, lx0 + inset, lz0 + inset, lx0 + lw - inset, lz0 + ld - inset, 0, h, [0.9, 0.85, 0.6], { corners: false });
   }
 }
 
 const P_CBD = (k) => ({ h0: 110 + k * 40, h1: 190 + k * 70, glassAbove: 40, glass: ['glassBlue', 'glassTeal', 'glassSteel'], low: ['glassSteel'], park: 0.04 });
-const P_MID = { h0: 35, h1: 100, glassAbove: 60, glass: ['glassSteel', 'glassBlue'], low: ['concrete', 'limestone', 'concrete'], park: 0.12 };
-const P_LOW = { h0: 14, h1: 55, glassAbove: 90, glass: ['glassSteel'], low: ['concrete', 'limestone', 'concrete', 'limestone'], park: 0.2 };
+const P_MID = { h0: 35, h1: 100, glassAbove: 60, glass: ['glassSteel', 'glassBlue'], low: ['concrete', 'limestone', 'concrete'], park: 0.12, res: 60 };
+const P_LOW = { h0: 14, h1: 55, glassAbove: 90, glass: ['glassSteel'], low: ['concrete', 'limestone', 'concrete', 'limestone'], park: 0.2, res: 80 };
 
 export function buildCity(ctx) {
   const rng = ctx.rng;

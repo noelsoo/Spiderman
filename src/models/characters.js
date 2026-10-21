@@ -4,7 +4,7 @@ import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import { buildMjolnir } from './mjolnir.js';
 import {
   G, std, metal, glow, glowInstance, symMat, limbGeo, profileGeo, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo,
-  mergeParts, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
+  mergeParts, deformLathe, muscleLimb, handGeo, footGeo, rng, webTexture, emblemTexture, camoTexture, leopardTexture, eyeGeo, Tendril,
   M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, scaleMaps, armorMaps, arcTexture, thorDiscTexture, capeTexture, tornShortsTexture, veinNormal, symEmblemTexture, antiStreakTexture, drawTex, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
@@ -97,19 +97,44 @@ export function buildBody(model, s) {
   P(model, j[J.H], sphereGeo(1, seg(18, 10), seg(12, 7)), mt('pelvis'), { slot: sl('pelvis'), pos: [0, 0.0, 0], scale: [pel[0] * k * 0.5, pel[1] * k * 0.5, pel[2] * k * 0.5] });
   // abdomen
   const abPts = [[-0.1, 0.0001], [-0.08, 0.125 * wR], [0.0, 0.14 * wR], [0.1, 0.125 * wR], [0.2, 0.14 * wR], [0.26, 0.1 * wR]].map(([y, r]) => [y * k, r * k]);
-  const abdomen = P(model, j[J.SP], profileGeo(key + 'ab', abPts, seg(20, 10), 16), mt('abdomen'), { slot: sl('abdomen'), scale: [sx, 1, sz] });
+  const NS = seg(26, 12), PEC = T.pec ?? 0.13, RIB = T.ribs ?? 0.05;
+  // abdomen: ab grooves (linea alba + rows) and obliques
+  const abG = G(key + 'abS', () => deformLathe(profileGeo(key + 'ab', abPts, seg(20, 10), 16), seg(20, 10), (x, y, z) => {
+    const r = Math.hypot(x, z) || 1e-4, f = Math.max(0, z / r), gy = Math.exp(-((((y / k) - 0.1) / 0.1) ** 2));
+    const groove = Math.exp(-(((x / r) / 0.1) ** 2)) * f * f, rows = 0.5 + 0.5 * Math.cos(((y / k) - 0.0) / 0.055 * Math.PI * 2);
+    const side = Math.exp(-(((Math.abs(x) / r - 0.9) / 0.25) ** 2)) * (1 - f * f);
+    const m = 1 - (0.028 * groove + 0.014 * groove * rows) * (RIB > 0 ? 1 : 0) + 0.03 * side * gy;
+    return [x * m, y, z * m];
+  }));
+  const abdomen = P(model, j[J.SP], abG, mt('abdomen'), { slot: sl('abdomen'), scale: [sx, 1, sz] });
   // chest
   const chPts = [[-0.08, 0.0001], [-0.06, 0.118 * wR], [0.05, 0.138 * wR + 0.0 * cR], [0.15, 0.158 * cR], [0.24, 0.178 * cR], [0.29, 0.178 * cR], [0.325, 0.14 * cR], [0.36, 0.085 * cR], [0.395, 0.05 * cR], [0.415, 0.0001]].map(([y, r]) => [y * k, r * k]);
-  P(model, j[J.CH], profileGeo(key + 'ch', chPts, seg(26, 12), 22), mt('chest'), { slot: sl('chest'), scale: [sx, 1, sz] });
+  // chest: pecs with a sternum groove, rib flare, lat taper
+  const chG = G(key + 'chS', () => deformLathe(profileGeo(key + 'ch', chPts, NS, 22), NS, (x, y, z) => {
+    const r = Math.hypot(x, z) || 1e-4, f = Math.max(0, z / r), yk = y / k;
+    const gy = Math.exp(-(((yk - 0.215) / 0.075) ** 2)), gx = Math.exp(-(((Math.abs(x) / r - 0.62) / 0.3) ** 2));
+    const groove = Math.exp(-(((x / r) / 0.12) ** 2)) * f * f * Math.exp(-(((yk - 0.2) / 0.11) ** 2));
+    const ribs = Math.exp(-(((yk - 0.08) / 0.09) ** 2)) * RIB;
+    const m = 1 + PEC * gy * gx * f * f - 0.035 * groove + ribs * (1 - f * f * 0.5);
+    return [x * m, y, z * m];
+  }));
+  P(model, j[J.CH], chG, mt('chest'), { slot: sl('chest'), scale: [sx, 1, sz] });
   const chestRad = (y) => ({ rx: radiusAt(chPts, y) * sx, rz: radiusAt(chPts, y) * sz });
 
   // neck + head
   const H = s.head || {};
   const hR = H.R ?? d.headR, hsx = H.sx ?? 0.92, hsy = H.sy ?? 1.05, hsz = H.sz ?? 1.0;
-  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k, (s.neckR ?? 0.05) * 1.15 * k, d.neck * 2.2, seg(12, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.3, 0] });
+  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k * 0.92, (s.neckR ?? 0.05) * 1.28 * k, d.neck * 2.0, seg(14, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.05, 0] });
   const y0 = hR * hsy * 0.95;
   const head = P(model, j[J.HD], sphereGeo(1, seg(32, 14), seg(24, 10)), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
   const headInfo = { R: hR, sx: hsx, sy: hsy, sz: hsz, y0 };
+  // trapezius slopes from the neck to the shoulders; lats flare under the arms
+  const TR = s.traps ?? 1, LAT = s.lats ?? 1;
+  const nR = (s.neckR ?? 0.05) * k;
+  for (const sd of [1, -1]) {
+    P(model, j[J.CH], sphereGeo(1, seg(14, 8), seg(10, 6)), mt('chest'), { slot: sl('chest'), pos: [sd * (nR * 1.35 + 0.035 * k), d.chest * 0.93, -0.012 * k], rot: [0, 0, -sd * 0.62], scale: [0.085 * k * TR, 0.028 * k * TR, 0.058 * k * sz * 1.1] });
+    if (LAT > 0) P(model, j[J.CH], sphereGeo(1, seg(14, 8), seg(10, 6)), mt('chest'), { slot: sl('chest'), pos: [sd * 0.152 * k * sx * cR, 0.1 * k, -0.035 * k * sz], rot: [0, 0, sd * 0.12], scale: [0.04 * k * LAT, 0.115 * k, 0.07 * k * sz] });
+  }
 
   // arms
   const A = s.arm || {};
@@ -118,11 +143,13 @@ export function buildBody(model, s) {
   const hand = s.hand || [0.045, 0.055, 0.05];
   for (const side of [1, -1]) {
     const sh = j[side > 0 ? J.AL : J.AR], el = j[side > 0 ? J.EL : J.ER], wr = j[side > 0 ? J.WL : J.WR];
-    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.15, 0.015 * k, 0], scale: [u0 * sb * 1.15, u0 * sb * 1.1, u0 * sb * 1.1] });
-    P(model, sh, limbGeo(d.upper, u0, u1, A.ub ?? 0.14, 0.3, SL), mt('upperArm'), { slot: sl('upperArm') });
-    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 1.02, u1 * 1.02, u1 * 1.02] });
-    P(model, el, limbGeo(d.fore, f0, f1, A.fb ?? 0.18, 0.28, SL), mt('foreArm'), { slot: sl('foreArm') });
-    P(model, wr, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.5, 0.0], scale: [hand[0] * k, hand[1] * k, hand[2] * k] });
+    const MU = s.muscle ?? 1;
+    // deltoid: teardrop cap over the shoulder, blends into the upper arm
+    if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.22, -0.012 * k, -0.004 * k], rot: [0, 0, -side * 0.18], scale: [u0 * sb * 1.12, u0 * sb * 1.55, u0 * sb * 1.2] });
+    P(model, sh, muscleLimb('arm', d.upper, u0, u1, MU, SL), mt('upperArm'), { slot: sl('upperArm') });
+    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 0.95, u1 * 1.0, u1 * 0.95] });
+    P(model, el, muscleLimb('fore', d.fore, f0 * 1.08, f1, MU, SL), mt('foreArm'), { slot: sl('foreArm') });
+    P(model, wr, handGeo(hand[0] * k * 0.92, hand[1] * k * 1.12, hand[2] * k * 1.0, s.fingers !== false, s.fist ?? 0.35), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.15, 0.0] });
   }
   // legs
   const L = s.leg || {};
@@ -130,10 +157,11 @@ export function buildBody(model, s) {
   const foot = s.foot || [0.055, 0.045, 0.14];
   for (const side of [1, -1]) {
     const th = j[side > 0 ? J.TL : J.TR], kn = j[side > 0 ? J.KL : J.KR], ft = j[side > 0 ? J.FL : J.FR];
-    P(model, th, limbGeo(d.thigh, t0, t1, L.tb ?? 0.1, 0.3, SL), mt('thigh'), { slot: sl('thigh') });
-    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 1.02, t1 * 1.02, t1 * 1.02] });
-    P(model, kn, limbGeo(d.shin, s0, s1, L.sb ?? 0.14, 0.25, SL), mt('shin'), { slot: sl('shin') });
-    P(model, ft, sphereGeo(1, seg(14, 8), seg(10, 7)), mt('foot'), { slot: sl('foot'), pos: [0, -d.footH * 0.5 + foot[1] * k * 0.4, foot[2] * k * 0.32], scale: [foot[0] * k, foot[1] * k + 0.01, foot[2] * k] });
+    const MU = s.muscle ?? 1;
+    P(model, th, muscleLimb('thigh', d.thigh, t0 * 1.04, t1, MU, SL), mt('thigh'), { slot: sl('thigh') });
+    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 0.9, t1 * 1.0, t1 * 0.95] });
+    P(model, kn, muscleLimb('shin', d.shin, s0 * 1.05, s1, MU, SL), mt('shin'), { slot: sl('shin') });
+    P(model, ft, footGeo(foot[0] * k * 1.05, d.footH * 1.02, foot[2] * k * 0.95, seg(12, 8)), mt('foot'), { slot: sl('foot'), pos: [0, 0, foot[2] * k * 0.2] });
   }
   return { headInfo, chestRad, head, abdomen, hr: hR };
 }
@@ -167,7 +195,7 @@ export function finish(model, variant) {
 const SPIDER_VARIANTS = () => {
   const nS = new V2(0.85, 0.85);
   const suit = (kind, o = {}) => withRim(phys(0xffffff, {
-    map: webTexture(kind), normalMap: webNormal(kind), normalScale: nS, roughness: 0.5, metalness: 0.06,
+    map: webTexture(kind), normalMap: webNormal(kind), normalScale: new V2(1.25, 1.25), roughness: 0.5, metalness: 0.06,
     sheen: 1, sheenRoughness: 0.45, sheenColor: new THREE.Color(0x8fa2ff), clearcoat: 0.18, clearcoatRoughness: 0.45, ...o,
   }), 0xa8c0ff, 0.16);
   const sym = (id, kind = 'black') => symMat({ id, map: webTexture(kind), normalMap: webNormal(kind), normalScale: 1.1, color: 0xffffff });
@@ -203,7 +231,7 @@ export function buildSpiderMan(opts = {}) {
     head: { R: 0.108, sx: 0.9, sy: 1.08, sz: 1.0 },
     arm: { u0: 0.047, u1: 0.037, f0: 0.039, f1: 0.03, ub: 0.1, fb: 0.14 },
     leg: { t0: 0.082, t1: 0.054, s0: 0.054, s1: 0.036, tb: 0.1, sb: 0.12 },
-    foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045],
+    foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045], fingers: false,
     pelvis: [0.34, 0.2, 0.24],
   });
   addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0.008 });
@@ -403,7 +431,7 @@ export function buildIronMan() {
 
 // ================================================================== HULK
 export function buildHulk() {
-  const dims = makeDims(1.42, { headR: 0.098, neck: 0.1 });
+  const dims = makeDims(1.42, { headR: 0.098, neck: 0.15 });
   const rig = buildRig(dims, 1.0);
   const model = new ProcModel('hulk', rig, { prof: { stance: 'hulk', cadence: 0.78, stride: 1.05, armSwing: 1.0, lean: 1.25, bob: 2.0, flipDodge: false, throwStyle: 'two', wide: 0.12, tempo: 0.9, knuckle: true } });
   const sm_ = skinMaps('#5ba83f', '#245a22', 6);
@@ -413,30 +441,28 @@ export function buildHulk() {
   const shorts = std(0xffffff, { map: tornShortsTexture(), roughness: 0.88, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
   const info = buildBody(model, {
     mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin },
-    torso: { sx: 1.62, sz: 0.95, chestR: 1.38, waistR: 1.05 },
+    muscle: 1.3, traps: 0.55, torso: { sx: 1.5, sz: 0.9, chestR: 1.3, waistR: 0.9 },
     head: { R: 0.098, sx: 1.0, sy: 0.98, sz: 1.04 },
-    arm: { u0: 0.062, u1: 0.05, f0: 0.054, f1: 0.042, ub: 0.3, fb: 0.35, shoulder: 1.55 },
+    arm: { u0: 0.062, u1: 0.05, f0: 0.054, f1: 0.042, ub: 0.3, fb: 0.35, shoulder: 1.0 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.28, sb: 0.3 },
-    armM: 1.75, foreM: 1.95, legM: 1.2, neckR: 0.075,
+    armM: 1.35, foreM: 1.55, legM: 1.2, neckR: 0.085, pec: 0.2,
     foot: [0.062, 0.046, 0.15], hand: [0.058, 0.07, 0.07], pelvis: [0.42, 0.22, 0.28],
   });
   const k = dims.k, hj = model.j[J.HD], H = info.headInfo;
   // shorts: lathe skirt over hips and thighs
-  const shortsGeo = profileGeo('hulkshorts', [[-0.22, 0.17], [-0.2, 0.2], [0.0, 0.2], [0.1, 0.17], [0.13, 0.0001]].map(([y, r]) => [y * k, r * k]), 18, 12);
-  P(model, model.j[J.H], shortsGeo, shorts, { scale: [1.5, 1, 0.95] });
-  const flap = G('hulkflap', () => { const g = new THREE.ConeGeometry(0.05 * k, 0.12 * k, 3); g.rotateX(Math.PI); return g; });
-  for (const [x, z, r] of [[0.16, 0.0, 0.2], [-0.17, 0.02, -0.25], [0.0, 0.2, 0], [0.05, -0.2, 0.1]]) P(model, model.j[J.H], flap, shorts, { pos: [x * k * 1.2, -0.26 * k, z * k], rot: [0, 0, r] });
-  P(model, model.j[J.TL], cylGeo(0.088 * k, 0.1 * k, 0.17 * k, 12), shorts, { pos: [0, -0.1 * k, 0] });
-  P(model, model.j[J.TR], cylGeo(0.088 * k, 0.1 * k, 0.17 * k, 12), shorts, { pos: [0, -0.1 * k, 0] });
-  // frayed thigh hems on the shorts
-  const fr = [], rf = rng(17);
-  for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; fr.push({ geo: coneGeo(0.016 * k, (0.04 + rf() * 0.05) * k, 3), pos: [Math.cos(a) * 0.097 * k, -0.19 * k, Math.sin(a) * 0.097 * k], rot: [Math.PI + (rf() - 0.5) * 0.4, 0, (rf() - 0.5) * 0.4] }); }
-  for (const jt of [J.TL, J.TR]) P(model, model.j[jt], mergeParts('hulkfray' + k, fr), shorts, { cast: false });
+  const shortsGeo = G('hulkshorts2', () => deformLathe(profileGeo('hulkshortsP', [[-0.27, 0.178], [-0.2, 0.19], [-0.05, 0.19], [0.06, 0.158], [0.12, 0.15], [0.135, 0.0001]].map(([y, r]) => [y * k, r * k]), 20, 14), 20, (x, y, z) => {
+    const a = Math.atan2(z, x), low = Math.max(0, (-0.17 * k - y) / (0.1 * k)); // torn, ragged lower hem
+    return [x, y + low * 0.045 * k * (Math.sin(a * 5 + 1) + 0.6 * Math.sin(a * 11)), z];
+  }));
+  P(model, model.j[J.H], shortsGeo, shorts, { scale: [1.32, 1, 1.0] });
+  for (const jt of [J.TL, J.TR]) P(model, model.j[jt], G('hulkleg', () => deformLathe(profileGeo('hulklegP', [[-0.2, 0.1], [-0.12, 0.112], [0.02, 0.112], [0.05, 0.0001]].map(([y, r]) => [y * k, r * k]), 16, 10), 16, (x, y, z) => {
+    const a = Math.atan2(z, x), low = Math.max(0, (-0.12 * k - y) / (0.08 * k));
+    return [x, y + low * 0.04 * k * (Math.sin(a * 4 + 2) + 0.5 * Math.sin(a * 9)), z];
+  })), shorts, { pos: [0, -0.02 * k, 0] });
   // pec/ab definition
   const cr = info.chestRad(0.2 * k);
   for (const s of [1, -1]) P(model, model.j[J.CH], sphereGeo(1, 14, 10), skinD, { pos: [s * cr.rx * 0.42, 0.2 * k, cr.rz * 0.58], scale: [0.095 * k, 0.07 * k, 0.07 * k] });
   // trapezius
-  P(model, model.j[J.CH], sphereGeo(1, 12, 8), skin, { pos: [0, 0.33 * k, -0.03 * k], scale: [0.19 * k, 0.06 * k, 0.11 * k] });
   // head details: brow, jaw, hair
   const hr = H.R;
   P(model, hj, sphereGeo(1, 12, 8), skinD, { pos: [0, H.y0 - hr * 0.55, hr * 0.5], scale: [hr * 0.82, hr * 0.5, hr * 0.62] }); // jaw
@@ -473,11 +499,11 @@ export function buildThor() {
   const tsm = scaleMaps('#15171f', '#4a5266', 10); tsm.map.repeat.set(3, 3); tsm.normal.repeat.set(3, 3);
   const suit = withRim(phys(0xffffff, { map: tsm.map, normalMap: tsm.normal, normalScale: new V2(0.9, 0.9), roughness: 0.5, metalness: 0.45, clearcoat: 0.25, clearcoatRoughness: 0.4, sheen: 0.5, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x6a8cff) }), 0x9fc0ff, 0.14);
   const leather = std(0x3a2a20, { roughness: 0.75, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9) });
-  const silver = withRim(phys(0xb8bec8, { roughness: 0.28, metalness: 0.95, clearcoat: 0.5, clearcoatRoughness: 0.15, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.4, 0.4) }), 0xffffff, 0.12);
+  const silver = withRim(phys(0xc4cad4, { roughness: 0.34, metalness: 0.75, clearcoat: 0.5, clearcoatRoughness: 0.15, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.4, 0.4) }), 0xffffff, 0.12);
   const skin = std(0xe0b090, { roughness: 0.62 });
   const info = buildBody(model, {
     mats: { default: suit, chest: suit, abdomen: suit, pelvis: leather, neck: skin, head: skin, shoulder: silver, upperArm: suit, foreArm: suit, hand: leather, thigh: suit, shin: leather, foot: leather },
-    torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
+    muscle: 1.1, torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
     head: { R: 0.108, sx: 0.9, sy: 1.1, sz: 1.0 },
     arm: { u0: 0.058, u1: 0.046, f0: 0.046, f1: 0.036, ub: 0.14, fb: 0.15 },
     leg: { t0: 0.09, t1: 0.062, s0: 0.062, s1: 0.042, tb: 0.1, sb: 0.12 },
@@ -487,13 +513,17 @@ export function buildThor() {
   // chest armour plate + discs
   const cr = info.chestRad(0.2 * k);
   const platePts = [[0.0, 0.0001], [0.02, 0.16], [0.1, 0.175], [0.22, 0.19], [0.31, 0.175], [0.345, 0.06], [0.355, 0.0001]].map(([y, r]) => [y * k, r * k * 1.02]);
-  P(model, cj, profileGeo('thorplate', platePts, 22, 18), silver, { scale: [1.4, 1, 0.88], pos: [0, 0.0, 0] });
+  P(model, cj, G('thorplateS', () => deformLathe(profileGeo('thorplate', platePts, 22, 18), 22, (x, y, z) => {
+    const r = Math.hypot(x, z) || 1e-4, f = Math.max(0, z / r), yk = y / k;
+    const m = 1 + 0.12 * Math.exp(-(((yk - 0.22) / 0.07) ** 2)) * Math.exp(-(((Math.abs(x) / r - 0.62) / 0.3) ** 2)) * f * f - 0.03 * Math.exp(-(((x / r) / 0.12) ** 2)) * f * f;
+    return [x * m, y, z * m];
+  })), silver, { scale: [1.4, 1, 0.88], pos: [0, 0.0, 0] });
   const disc = G('thordisc', () => new THREE.CylinderGeometry(0.036 * k, 0.036 * k, 0.014, 14));
   const discParts = [];
   for (const [yy, xs] of [[0.27, [-0.09, 0, 0.09]], [0.19, [-0.12, -0.04, 0.04, 0.12]], [0.11, [-0.07, 0.07]]]) for (const x of xs) {
     const rxx = radiusAt(platePts, yy * k) * 1.4, rzz = radiusAt(platePts, yy * k) * 0.88;
     const ang = Math.asin(clamp((x * k) / rxx, -0.95, 0.95));
-    discParts.push({ geo: disc, pos: [Math.sin(ang) * rxx, yy * k, Math.cos(ang) * rzz + 0.002], rot: [Math.PI / 2, 0, 0], });
+    discParts.push({ geo: disc, pos: [Math.sin(ang) * rxx * 1.03, yy * k, Math.cos(ang) * rzz * 1.1 + 0.004], rot: [Math.PI / 2, 0, 0], });
     const last = discParts[discParts.length - 1];
     // tilt to face outward
     last.rot = [Math.PI / 2, 0, 0];
@@ -629,7 +659,7 @@ export function buildSymbiote(cfg = {}) {
   const sym = symMat(symOpt);
   const info = buildBody(model, {
     mats: { default: sym },
-    torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
+    muscle: 1.25, torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
     head: { R: HR, sx: anti ? 0.98 : 1.25, sy: 1.0, sz: anti ? 1.0 : 1.1 },
     arm: { u0: 0.06, u1: 0.048, f0: 0.052, f1: 0.04, ub: 0.28, fb: 0.3, shoulder: 1.45 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.25, sb: 0.28 },
