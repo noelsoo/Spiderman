@@ -82,13 +82,17 @@ export class Ped {
     this.anim = { state: 'idle', t: 0, speed: 0, blend: 0 };
     this.threat = new THREE.Vector3(); this.fireT = rnd(0.6, 1.4); this.atkT = 0; this.strafe = Math.random() < 0.5 ? -1 : 1; this.strafeT = 0;
     this.fightT = 0; this.leaveT = 0; this.y0 = 0;
-    this.model = buildCharacter(cop ? 'cop' : 'civilian', { variant: idx });
+    // region picks the ethnic mix and the cultural clothing (Singapore: Chinese / Malay / Indian / other); lod is by quality tier
+    const region = this.game.world?.id === 'singapore' ? 'sg' : 'nyc';
+    const lod = (this.game.settings?.quality ?? 'high') === 'low' ? 'low' : 'high';
+    this.model = buildCharacter(cop ? 'cop' : 'civilian', { variant: idx, region, lod });
     const mh = this.model.height || H;
-    this.k = H / mh; this.mh = mh;
+    // every person is normalised to H, then scaled by a per-person height factor (shorter / taller people)
+    this.k = (H * (this.model.hf ?? 1)) / mh; this.mh = mh;
     this.root = new THREE.Group(); this.root.rotation.order = 'YXZ';
     this.root.add(this.model.group);
     this.root.scale.setScalar(this.k);
-    this.model.group.position.set(0, -mh * 0.5, 0);
+    this.model.group.position.set(0, -(H * 0.5) / this.k, 0); // feet on the ground whatever the height factor
     this.root.visible = false;
     this.game.scene.add(this.root);
   }
@@ -206,7 +210,7 @@ export class Peds {
       p.pos.set(x, onBlock(c, zAxis) ? 0.15 : 0, z);
       p.vel.set(0, 0, 0); p.hp = p.maxHp = 40; p.dead = false; p.deadT = 0; p.active = true; p.hidden = false;
       p.state = Math.random() < 0.12 ? 'idle' : 'walk'; p.stateT = rnd(1, 4);
-      p.speedWalk = rnd(1.25, 1.8); p.tumble = 0; p.airTime = 0; p.carCd = 0; p.yaw = Math.atan2(zAxis ? 0 : p.dir, zAxis ? p.dir : 0);
+      p.speedWalk = rnd(1.25, 1.8) * (p.model.look?.speedK ?? 1); p.tumble = 0; p.airTime = 0; p.carCd = 0; p.yaw = Math.atan2(zAxis ? 0 : p.dir, zAxis ? p.dir : 0);
       p.model.setTint?.(0xffffff, 0);
       p.setAnim('idle', 0);
       p.root.visible = true;
@@ -231,7 +235,7 @@ export class Peds {
       p.pos.set(x, sgOnWalk(ln, c) ? 0.15 : 0, z);
       p.vel.set(0, 0, 0); p.hp = p.maxHp = 40; p.dead = false; p.deadT = 0; p.active = true; p.hidden = false;
       p.state = Math.random() < 0.12 ? 'idle' : 'walk'; p.stateT = rnd(1, 4);
-      p.speedWalk = rnd(1.25, 1.8); p.tumble = 0; p.airTime = 0; p.carCd = 0; p.yaw = Math.atan2(zAxis ? 0 : p.dir, zAxis ? p.dir : 0);
+      p.speedWalk = rnd(1.25, 1.8) * (p.model.look?.speedK ?? 1); p.tumble = 0; p.airTime = 0; p.carCd = 0; p.yaw = Math.atan2(zAxis ? 0 : p.dir, zAxis ? p.dir : 0);
       p.model.setTint?.(0xffffff, 0);
       p.setAnim('idle', 0);
       p.root.visible = true;
@@ -489,7 +493,7 @@ export class Peds {
     this._settleToLine(p, dt);
     const heading = p.axisZ ? (p.dir > 0 ? 0 : Math.PI) : (p.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     p.yaw += wrapPi(heading - p.yaw) * Math.min(1, 10 * dt);
-    p.setAnim('run', fleeing ? 6.2 : 1.7);
+    p.setAnim('run', fleeing ? 6.2 : p.speedWalk * 1.06); // gait follows the person's real ground speed (no foot sliding, natural variation)
     // sidewalk height
     const hy = SGP ? (p.line && sgOnWalk(p.line, p.axisZ ? p.pos.z : p.pos.x) ? 0.15 : 0) : (onBlock(p.axisZ ? p.pos.z : p.pos.x, p.axisZ) ? 0.15 : 0);
     p.pos.y += (hy - p.pos.y) * Math.min(1, 12 * dt);
@@ -710,6 +714,9 @@ export class Peds {
   // ===================================================================== visuals
   _syncModel(p, dt, d) {
     const r = p.root;
+    // far people stop casting shadows (one draw call fewer each in the shadow pass)
+    const cs = d < 42;
+    if (p._cs !== cs) { p._cs = cs; const mm = p.model.mesh; if (mm && p.model.lod !== 'low') mm.castShadow = cs; }
     // animation LOD: far peds update at half rate
     p._lodT = (p._lodT || 0) + dt;
     const lodStep = d > 55 ? 0.12 : d > 28 ? 0.05 : 0;
