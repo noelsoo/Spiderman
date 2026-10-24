@@ -903,3 +903,6 @@ export function deformLathe(geo, seg, fn) {
   }
   return g;
 }
+
+// exports for face.js (canvas/normal-map helpers shared with the head builder)
+export { canvas as mkCanvas, tex as mkTex, ntex as mkNormalTex, heightToNormal, heightOf, texCache as sharedTexCache };

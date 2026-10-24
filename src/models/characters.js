@@ -8,7 +8,11 @@ import {
   M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, scaleMaps, armorMaps, arcTexture, thorDiscTexture, capeTexture, tornShortsTexture, veinNormal, symEmblemTexture, antiStreakTexture, drawTex, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
+import { skullPoint, SKULL_DEFAULT, skullGeo, shellGeo, tab, ribbonGeo, skullMetres, faceMaterial, hairMaterial, earsGeo } from './face.js';
+
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
+const _dv = new V3(), _sv = new V3();
+const sm01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
 
 // ------------------------------------------------------------------ helpers
@@ -34,13 +38,41 @@ export function radiusAt(pts, y) {
   return pts[pts.length - 1][1];
 }
 
+/** finely tessellated star-shaped polygon (polar grid about the centroid), non-indexed, CCW seen from +z.
+ *  ring = null: filled lens at z = depth. ring = { grow, zIn, zOut }: chamfered bezel from the outline (z = zIn) out to grow x (z = zOut). */
+function polarLens(pts, depth, ring = null, N = 28, rings = 5) {
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const bound = (th) => {
+    const dx = Math.cos(th), dy = Math.sin(th); let best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length], ex = x2 - x1, ey = y2 - y1, den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((x1 - cx) * ey - (y1 - cy) * ex) / den, u = ((x1 - cx) * dy - (y1 - cy) * dx) / den;
+      if (t > 0 && u >= 0 && u <= 1) best = Math.min(best, t);
+    }
+    return best;
+  };
+  const rad = []; for (let i = 0; i < N; i++) rad.push(bound((i / N) * Math.PI * 2));
+  const R = ring ? 1 : rings;
+  const P = (i, j) => {
+    const th = ((i % N) / N) * Math.PI * 2, f = j / R, r = ring ? rad[i % N] * (1 + (ring.grow - 1) * f) : f * rad[i % N];
+    return [cx + Math.cos(th) * r, cy + Math.sin(th) * r, ring ? lerp(ring.zIn, ring.zOut, f) : depth];
+  };
+  const out = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < R; j++) {
+    const a = P(i, j), b = P(i + 1, j), c = P(i, j + 1), d = P(i + 1, j + 1);
+    if (j === 0 && !ring) out.push(...a, ...c, ...d); else out.push(...a, ...c, ...b, ...b, ...c, ...d);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3)); return g;
+}
+
 /** extruded eye shape wrapped onto an ellipsoid head. side +1 = character's left (+X) */
 export function eyeWrap(kind, side, head, o = {}) {
   const { dx = 0, dy = 0, grow = 1, lift = 0.004, depth = 0.006 } = o;
-  const { R, sx, sy, sz, y0 } = head;
-  const key = `eyew${kind}${side}${R}${sx}${sy}${sz}${y0}${dx}${dy}${grow}${lift}${depth}`;
+  const { R, sx, sy, sz, y0, skull } = head;
+  const key = `eyew${kind}${side}${R}${sx}${sy}${sz}${y0}${dx}${dy}${grow}${lift}${depth}${o.ring ? JSON.stringify(o.ring) : ''}${skull ? JSON.stringify(skull, (k, v) => (k === 'pts' ? undefined : v)) : ''}`;
   return G(key, () => {
-    const g = eyeGeo(kind, depth).clone();
+    const g = skull && skull.sock ? polarLens(skull.sock.pts, depth, o.ring || null) : eyeGeo(kind, depth).clone();
     const pos = g.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       let x = pos.getX(i) * grow + dx, y = pos.getY(i) * grow + dy;
@@ -49,7 +81,11 @@ export function eyeWrap(kind, side, head, o = {}) {
       const phi = x / (R * sx);
       const sinT = clamp(y / (R * sy), -0.97, 0.97), cosT = Math.sqrt(1 - sinT * sinT);
       const r = R * (1 + (lift + t) / R);
-      pos.setXYZ(i, sx * Math.sin(phi) * cosT * r, y0 + sy * sinT * r, sz * Math.cos(phi) * cosT * r);
+      if (skull) {
+        skullPoint(_dv.set(Math.sin(phi) * cosT, sinT, Math.cos(phi) * cosT), { ...SKULL_DEFAULT, ...skull }, _sv);
+        const q = 1 + (lift + t) / R;
+        pos.setXYZ(i, sx * _sv.x * R * q, y0 + sy * _sv.y * R * q, sz * _sv.z * R * q);
+      } else pos.setXYZ(i, sx * Math.sin(phi) * cosT * r, y0 + sy * sinT * r, sz * Math.cos(phi) * cosT * r);
     }
     if (side < 0) { // restore winding
       for (let i = 0; i < pos.count; i += 3) {
@@ -124,10 +160,10 @@ export function buildBody(model, s) {
   // neck + head
   const H = s.head || {};
   const hR = H.R ?? d.headR, hsx = H.sx ?? 0.92, hsy = H.sy ?? 1.05, hsz = H.sz ?? 1.0;
-  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k * 0.92, (s.neckR ?? 0.05) * 1.28 * k, d.neck * 2.0, seg(14, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.05, 0] });
+  P(model, j[J.NK], cylGeo((s.neckR ?? 0.05) * k * 0.92, (s.neckR ?? 0.05) * 1.28 * k, d.neck * 2.0 + hR * 0.8, seg(14, 8)), mt('neck'), { slot: sl('neck'), pos: [0, d.neck * 0.05 + hR * 0.4, 0] });
   const y0 = hR * hsy * 0.95;
-  const head = P(model, j[J.HD], sphereGeo(1, seg(32, 14), seg(24, 10)), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
-  const headInfo = { R: hR, sx: hsx, sy: hsy, sz: hsz, y0 };
+  const head = P(model, j[J.HD], s.headGeo || sphereGeo(1, seg(32, 14), seg(24, 10)), mt('head'), { slot: sl('head'), pos: [0, y0, 0], scale: [hR * hsx, hR * hsy, hR * hsz] });
+  const headInfo = { R: hR, sx: hsx, sy: hsy, sz: hsz, y0, skull: s.skull || null };
   // trapezius slopes from the neck to the shoulders; lats flare under the arms
   const TR = s.traps ?? 1, LAT = s.lats ?? 1;
   const nR = (s.neckR ?? 0.05) * k;
@@ -170,7 +206,8 @@ export function addEyes(model, headInfo, kind, mat, rimMat, o = {}) {
   const hj = model.j[J.HD];
   for (const side of [1, -1]) {
     P(model, hj, eyeWrap(kind, side, headInfo, { lift: 0.006, depth: 0.004, ...o }), mat, { slot: o.slot ?? 'eyes', cast: false });
-    if (rimMat) P(model, hj, eyeWrap(kind, side, headInfo, { lift: 0.002, depth: 0.004, grow: o.rimGrow ?? 1.2, dx: o.rimDx ?? -0.004, dy: o.rimDy ?? 0.0 }), rimMat, { slot: 'rim', cast: false });
+    if (rimMat && headInfo.skull?.sock) P(model, hj, eyeWrap(kind, side, headInfo, { lift: o.lift ?? 0, depth: 0, ring: { grow: o.rimGrow ?? 1.18, zIn: o.bezel ?? 0.0035, zOut: 0 } }), rimMat, { slot: 'rim', cast: false });
+    else if (rimMat) P(model, hj, eyeWrap(kind, side, headInfo, { lift: (o.lift ?? 0.006) - 0.004, depth: 0.004, grow: o.rimGrow ?? 1.2, dx: o.rimDx ?? -0.004, dy: o.rimDy ?? 0.0 }), rimMat, { slot: 'rim', cast: false });
   }
 }
 
@@ -184,6 +221,29 @@ export function addFace(model, H, o = {}) {
   if (skin && o.nose !== false) P(model, hj, sphereGeo(1, 10, 8), skin, { pos: [0, H.y0 - R * 0.12, R * H.sz * 0.97], scale: [R * 0.14, R * 0.2, R * 0.2] });
   if (skin && o.ears !== false) for (const sd of [1, -1]) P(model, hj, sphereGeo(1, 8, 6), skin, { pos: [sd * R * H.sx * 0.97, H.y0 - R * 0.02, -R * 0.05], scale: [R * 0.1, R * 0.22, R * 0.15] });
   return mat;
+}
+
+/** displaced-skull head for a bare-faced hero. Returns the buildBody options (headGeo, skull, material) */
+export function skullHead(key, skull, faceOpts) {
+  return { headGeo: skullGeo(skull, key), skull, mat: faceMaterial(faceOpts) };
+}
+/** hair / beard / cowl patch hugging the skull. o = shellGeo options. */
+export function patch(model, H, key, o, mat, extra = {}) {
+  const g = shellGeo(H.skull, key + H.R + H.sx, o);
+  return P(model, model.j[J.HD], g, mat, { pos: [0, H.y0, 0], scale: [H.R * H.sx, H.R * H.sy, H.R * H.sz], cast: extra.cast ?? false });
+}
+/** a hair strand ribbon falling from the scalp at azimuth a, running down `len` metres. */
+export function strand(model, H, key, a, lat0, len, mat, o = {}) {
+  const th = o.thick ?? 0.06, w0 = o.w0 ?? 0.012, w1 = o.w1 ?? 0.02, ox = o.ox ?? 0, oz = o.oz ?? 0;
+  const p0 = skullMetres(H, H.skull, a, lat0, th), p1 = skullMetres(H, H.skull, a, o.latMid ?? -0.35, th + 0.1);
+  const sa = Math.sin(a), ca = Math.cos(a);
+  const p2 = [p1.x + sa * 0.012 + ox * 0.5, p1.y - len * 0.5, p1.z + ca * 0.008 + oz * 0.5 - (ca < 0 ? 0.01 : 0)];
+  const p3 = [p1.x + sa * 0.02 + ox, p1.y - len, p1.z + ca * 0.012 + oz - (ca < 0 ? 0.018 : 0)];
+  const g = ribbonGeo(key + a.toFixed(2) + lat0 + len + w0 + w1, [[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z], p2, p3], w0, w1, o.mid ?? 0.2);
+  return P(model, model.j[J.HD], g, mat, { pos: [0, H.y0, 0], cast: false });
+}
+export function addEars(model, H, skin) {
+  return P(model, model.j[J.HD], earsGeo(H, H.skull), skin, { pos: [0, H.y0, 0], cast: false });
 }
 export function finish(model, variant) {
   if (variant && model.variants) model.setVariant(variant);
@@ -224,7 +284,11 @@ export function buildSpiderMan(opts = {}) {
   const model = new ProcModel('spiderman', rig, { prof: { stance: 'ready', cadence: 1.05, stride: 1.05, lean: 1.1, flipDodge: true, shoot: 'web', aimStyle: 'web' } });
   model.variants = SPIDER_VARIANTS();
   const v0 = model.variants.classic;
+  const SPpts = [[0.006, -0.026], [0.060, -0.016], [0.108, 0.026], [0.100, 0.056], [0.046, 0.040], [0.006, 0.012]];
+  const SPskull = { brow: 0.025, socket: 0, lid: 0, nose: 0.05, noseW: 1.3, cheek: 0.03, taper: 0.2, jawBone: 0.02, chin: 0.035, lips: 0, muzzle: 0, hollow: 0.15, back: 0.03, fore: 0.01, temple: 0.01,
+    sock: { pts: SPpts, depth: 0, soft: 0.009, R: 0.108, sx: 0.9, sy: 1.08 } };
   const info = buildBody(model, {
+    headGeo: skullGeo(SPskull, 'spider'), skull: SPskull,
     mats: { ...v0, pelvis: v0.legs, default: v0.arms },
     slots: { pelvis: 'legs', abdomen: 'torso', chest: 'torso', neck: 'head', shoulder: 'arms', upperArm: 'arms', foreArm: 'arms', hand: 'gloves', thigh: 'legs', shin: 'legs', foot: 'boots' },
     torso: { sx: 1.22, sz: 0.74, chestR: 1.02, waistR: 0.86 },
@@ -234,7 +298,7 @@ export function buildSpiderMan(opts = {}) {
     foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045], fingers: false,
     pelvis: [0.34, 0.2, 0.24],
   });
-  addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0.008 });
+  addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0, lift: 0.0006, rimGrow: 1.2, bezel: 0.004 });
   // chest + back emblem
   const cr = info.chestRad(0.2 * dims.k);
   P(model, model.j[J.CH], curvedPlane(0.2 * dims.k * 1.55, 0.22 * dims.k * 1.5, cr.rx, cr.rz, 0.003), v0.emblem, { slot: 'emblem', pos: [0, 0.2 * dims.k, 0], cast: false });
@@ -366,7 +430,9 @@ export function buildIronMan() {
   const red = withRim(phys(0xa50e18, { map: pm.map, roughness: 0.3, metalness: 0.88, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.4, sheenColor: new THREE.Color(0xff6a50), sheenRoughness: 0.3 }), 0xffc9a0, 0.14);
   const gold = withRim(phys(0xe0aa3a, { map: pm.map, roughness: 0.26, metalness: 0.96, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.7, clearcoatRoughness: 0.08 }), 0xfff0c0, 0.12);
   const dark = std(0x24242a, { metalness: 0.7, roughness: 0.45 });
+  const IMskull = { brow: 0.02, socket: 0, lid: 0, nose: 0.1, noseW: 1.2, cheek: 0.03, taper: 0.26, jawBone: 0.03, chin: 0.06, lips: 0, muzzle: 0.01, hollow: 0.1, back: 0.03, fore: 0.01, temple: 0.01 };
   const info = buildBody(model, {
+    headGeo: skullGeo(IMskull, 'ironman'), skull: IMskull,
     mats: { default: red, abdomen: red, pelvis: gold, neck: dark, head: red, shoulder: red, upperArm: red, foreArm: gold, hand: gold, thigh: gold, shin: red, foot: red, chest: red },
     torso: { sx: 1.3, sz: 0.86, chestR: 1.12, waistR: 1.0 },
     head: { R: 0.11, sx: 0.88, sy: 1.1, sz: 1.0 },
@@ -375,10 +441,15 @@ export function buildIronMan() {
     foot: [0.06, 0.05, 0.15], hand: [0.045, 0.055, 0.05], pelvis: [0.36, 0.2, 0.26], armM: 1.1, legM: 1.12,
   });
   const hj = model.j[J.HD], H = info.headInfo;
-  // faceplate + eye slits
-  P(model, hj, G('imface', () => new THREE.SphereGeometry(1, 18, 14, Math.PI / 2 - 0.6, 1.2, 0.62, 1.9)), gold, { pos: [0, H.y0, 0], scale: [H.R * H.sx * 1.04, H.R * H.sy * 1.03, H.R * H.sz * 1.04] });
-  const eyeM = glow(0xcfefff, 3);
-  for (const s of [1, -1]) P(model, hj, boxGeo(0.045, 0.012, 0.01), eyeM, { pos: [s * 0.036, H.y0 + 0.02, H.R * H.sz * 0.93], rot: [0, s * 0.35, -s * 0.18], cast: false });
+  // faceplate (gold) moulded over the skull, glowing angled eye slits, mouth seam, brow crest
+  patch(model, H, 'imface', { aMin: -1.0, aMax: 1.0, na: seg(26, 16), nb: 14, top: (a) => 0.46 - 0.32 * Math.abs(a) ** 2, bot: tab([[0, -1.12], [0.5, -1.0], [1.0, -0.55]]), thick: () => 0.045 }, gold, { cast: true });
+  const eyeM = glow(0xcfefff, 3), seamM = std(0x15151a, { roughness: 0.5 });
+  const slitC = (a) => 0.035 + 0.075 * (Math.abs(a) - 0.1) / 0.42;
+  for (const s of [1, -1]) {
+    patch(model, H, 'imslit' + s, { aMin: s > 0 ? 0.1 : -0.52, aMax: s > 0 ? 0.52 : -0.1, na: 8, nb: 2, top: (a) => slitC(a) + 0.024, bot: (a) => slitC(a) - 0.022, thick: () => 0.052 }, eyeM);
+    patch(model, H, 'imcheek' + s, { aMin: s > 0 ? 0.05 : -0.5, aMax: s > 0 ? 0.5 : -0.05, na: 8, nb: 1, top: (a) => -0.4 - 0.1 * Math.abs(a), bot: (a) => -0.415 - 0.1 * Math.abs(a), thick: () => 0.052 }, seamM);
+  }
+  patch(model, H, 'immouth', { aMin: -0.34, aMax: 0.34, na: 10, nb: 1, top: () => -0.495, bot: () => -0.515, thick: () => 0.052 }, seamM);
   P(model, hj, boxGeo(0.02, 0.03, 0.14), red, { pos: [0, H.y0 + H.R * 0.95, -0.01] });
   // arc reactor
   const cj = model.j[J.CH], cr = info.chestRad(0.22);
@@ -393,8 +464,6 @@ export function buildIronMan() {
   // chest gold trim: two curved side plates + collar
   for (const s of [1, -1]) P(model, cj, sphereGeo(1, 12, 8), gold, { pos: [s * cr.rx * 0.78, 0.12, cr.rz * 0.45], scale: [0.055, 0.1, 0.05], rot: [0, s * 0.5, s * 0.25] });
   P(model, model.j[J.NK], cylGeo(0.062 * dims.k, 0.07 * dims.k, 0.05, seg(14, 8)), gold, { pos: [0, 0.0, 0] });
-  // jaw plates + helmet crest
-  for (const s of [1, -1]) P(model, hj, sphereGeo(1, 10, 8), gold, { pos: [s * H.R * 0.58, H.y0 - H.R * 0.4, H.R * 0.62], scale: [H.R * 0.4, H.R * 0.5, H.R * 0.45] });
   // elbow + knee caps, shin guards
   for (const s of [1, -1]) {
     P(model, model.j[s > 0 ? J.EL : J.ER], sphereGeo(1, 12, 8), gold, { pos: [0, 0, -0.01], scale: [0.058, 0.05, 0.062] });
@@ -405,6 +474,14 @@ export function buildIronMan() {
   // shoulders (pauldrons)
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.AL : J.AR], sphereGeo(0.092, 14, 10), red, { pos: [s * 0.02, 0.02, 0], scale: [1.1, 0.9, 1.05] });
   // knee + elbow gold caps
+  // repulsor palms: emissive arc disc in a gold ring, flush with each palm (palms face the thighs)
+  const palmDisc = G('imPalmDisc', () => new THREE.CircleGeometry(0.026, 20)), palmRing = G('imPalmRing', () => new THREE.TorusGeometry(0.03, 0.0055, 6, 20));
+  const palmGlow = M2('imPalmGlow', () => new THREE.MeshBasicMaterial({ map: arcTexture(), toneMapped: false, color: new THREE.Color(1.9, 2.2, 2.5) }));
+  for (const s2 of [1, -1]) {
+    const wj = model.j[s2 > 0 ? J.WL : J.WR], dir = s2 > 0 ? -1 : 1;
+    P(model, wj, palmDisc, palmGlow, { pos: [dir * 0.0415, -dims.hand * 0.5, 0.004], rot: [0, dir * Math.PI / 2, 0], cast: false });
+    P(model, wj, palmRing, gold, { pos: [dir * 0.0405, -dims.hand * 0.5, 0.004], rot: [0, dir * Math.PI / 2, 0], cast: false });
+  }
   // thrusters (per-instance glow so we can drive intensity)
   const gm = glowInstance(0x9fe3ff, 2.4, { opacity: 0.4 });
   const mk = (joint, pos, r, sc = [1, 1, 1]) => { const m = new THREE.Mesh(sphereGeo(r, 12, 8), gm); m.position.set(...pos); m.scale.set(...sc); joint.add(m); m.renderOrder = 3; return m; };
@@ -431,7 +508,7 @@ export function buildIronMan() {
 
 // ================================================================== HULK
 export function buildHulk() {
-  const dims = makeDims(1.42, { headR: 0.098, neck: 0.15 });
+  const dims = makeDims(1.42, { headR: 0.115, neck: 0.1 });
   const rig = buildRig(dims, 1.0);
   const model = new ProcModel('hulk', rig, { prof: { stance: 'hulk', cadence: 0.78, stride: 1.05, armSwing: 1.0, lean: 1.25, bob: 2.0, flipDodge: false, throwStyle: 'two', wide: 0.12, tempo: 0.9, knuckle: true } });
   const sm_ = skinMaps('#5ba83f', '#245a22', 6);
@@ -439,13 +516,16 @@ export function buildHulk() {
   const skin = withRim(phys(0xffffff, { map: sm_.map, normalMap: sm_.normal, normalScale: new V2(1.1, 1.1), roughness: 0.52, metalness: 0.0, sheen: 0.9, sheenRoughness: 0.4, sheenColor: new THREE.Color(0xc8ff90), clearcoat: 0.18, clearcoatRoughness: 0.45 }), 0xb8ff9a, 0.12);
   const skinD = std(0x3f8530, { roughness: 0.6, normalMap: sm_.normal, normalScale: new V2(0.8, 0.8) });
   const shorts = std(0xffffff, { map: tornShortsTexture(), roughness: 0.88, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
+  const HLd = skullHead('hulk', { brow: 0.15, browLat: 0.2, socket: 0.085, lid: 0.03, nose: 0.17, noseW: 1.5, cheek: 0.09, taper: 0.03, jawFlare: 0.2, hollow: 0.2, jawBone: 0.12, chin: 0.12, chinW: 0.42, muzzle: 0.06, lips: 1.2, fore: 0.0, back: 0.03, chinW2: 0 },
+    { skin: '#58a23f', shade: '#2b6226', iris: '#a6e65e', pupil: '#102208', sclera: '#dfe9bd', brow: '#0f220c', lip: '#2c6a2a', mood: 'angry', lid: 0.5, browW: 0.08, teeth: true, age: 0.9, blush: 0, bag: 0.1, eyeSize: 1.35, seed: 21, rough: 0.5 });
   const info = buildBody(model, {
-    mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin },
-    muscle: 1.3, traps: 0.55, torso: { sx: 1.5, sz: 0.9, chestR: 1.3, waistR: 0.9 },
-    head: { R: 0.098, sx: 1.0, sy: 0.98, sz: 1.04 },
+    headGeo: HLd.headGeo, skull: HLd.skull,
+    mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin, head: HLd.mat },
+    muscle: 1.3, traps: 0.95, torso: { sx: 1.5, sz: 0.9, chestR: 1.3, waistR: 0.9 },
+    head: { R: 0.115, sx: 1.1, sy: 0.98, sz: 1.04 },
     arm: { u0: 0.062, u1: 0.05, f0: 0.054, f1: 0.042, ub: 0.3, fb: 0.35, shoulder: 1.0 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.28, sb: 0.3 },
-    armM: 1.35, foreM: 1.55, legM: 1.2, neckR: 0.085, pec: 0.2,
+    armM: 1.35, foreM: 1.55, legM: 1.2, neckR: 0.068, pec: 0.2,
     foot: [0.062, 0.046, 0.15], hand: [0.058, 0.07, 0.07], pelvis: [0.42, 0.22, 0.28],
   });
   const k = dims.k, hj = model.j[J.HD], H = info.headInfo;
@@ -463,28 +543,19 @@ export function buildHulk() {
   const cr = info.chestRad(0.2 * k);
   for (const s of [1, -1]) P(model, model.j[J.CH], sphereGeo(1, 14, 10), skinD, { pos: [s * cr.rx * 0.42, 0.2 * k, cr.rz * 0.58], scale: [0.095 * k, 0.07 * k, 0.07 * k] });
   // trapezius
-  // head details: brow, jaw, hair
+  // head: shaggy black hair, ears; the face itself (brow, jaw, scowl, teeth) is the displaced skull + painted texture
   const hr = H.R;
-  P(model, hj, sphereGeo(1, 12, 8), skinD, { pos: [0, H.y0 - hr * 0.55, hr * 0.5], scale: [hr * 0.82, hr * 0.5, hr * 0.62] }); // jaw
-  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.9, hr * 0.28, hr * 0.5), skinD, { pos: [s * hr * 0.42, H.y0 + hr * 0.22, hr * 0.8], rot: [0.0, 0, -s * 0.38] }); // angry brow
-  const eyeM = glow(0xffffff, 1.6);
-  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.34, hr * 0.12, hr * 0.12), eyeM, { pos: [s * hr * 0.42, H.y0 + hr * 0.05, hr * 0.86], rot: [0, s * 0.2, -s * 0.3], cast: false });
-  P(model, hj, boxGeo(hr * 0.7, hr * 0.12, hr * 0.12), std(0x1c2a18), { pos: [0, H.y0 - hr * 0.5, hr * 0.92] }); // mouth
-  const tt = [];
-  for (let i = 0; i < 8; i++) { const u = i / 7 * 2 - 1; tt.push({ geo: coneGeo(0.007, 0.022, 4), pos: [u * hr * 0.3, H.y0 - hr * 0.44 + u * u * 0.01, hr * 0.97], rot: [Math.PI + 0.1, 0, 0] }); tt.push({ geo: coneGeo(0.006, 0.016, 4), pos: [u * hr * 0.28, H.y0 - hr * 0.58 - u * u * 0.01, hr * 0.96], rot: [-0.1, 0, 0] }); }
-  P(model, hj, mergeParts('hulkteeth' + hr, tt), std(0xe8e4d0, { roughness: 0.4 }), { cast: false });
-  P(model, hj, sphereGeo(1, 10, 8), skinD, { pos: [0, H.y0 + hr * 0.36, hr * 0.9], scale: [hr * 0.9, hr * 0.16, hr * 0.3] }); // heavy brow ridge
-  const hairM = std(0x15150f, { roughness: 0.9 });
-  P(model, hj, G('hulkhair', () => new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.52)), hairM, { pos: [0, H.y0 + hr * 0.12, -hr * 0.1], scale: [hr * 1.06, hr * 1.04, hr * 1.12], rot: [-0.25, 0, 0] });
-  // face: painted angry eyes/mouth + nose + ears
-  addFace(model, H, { tex: { skin: '#4f9d3b', iris: '#7fd05a', brow: '#17300f', lip: '#1c3a14', mood: 'angry', brows: false }, skin: skinD });
+  const hairM = hairMaterial('#17170f', { hi: '#4a4a3c', seed: 8, sheen: 0x8899aa, rough: 0.7 });
+  patch(model, H, 'hulkhair', { na: seg(36, 22), nb: 10, top: () => Math.PI / 2, bot: tab([[0, 0.5], [0.6, 0.46], [1.0, 0.26], [1.4, 0.06], [1.9, -0.12], [3.14, -0.3]]), pw: 1.1,
+    thick: (a, l, t) => 0.05 + 0.035 * t + 0.02 * Math.sin(a * 9 + t * 5) * t, post: (p, a, l, t) => { p.y -= 0.1 * t * t * (0.5 + 0.5 * Math.sin(a * 13)); } }, hairM, { cast: true });
+  addEars(model, H, skinD);
   // abs
   const absP = [];
   for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) absP.push({ geo: sphereGeo(1, 10, 8), pos: [sd * 0.045 * k, -0.04 * k + i * 0.065 * k, 0.13 * k], scale: [0.05 * k, 0.034 * k, 0.03 * k] });
   P(model, model.j[J.SP], mergeParts('hulkabs' + k, absP), skinD, {});
   // wild hair spikes
   const hs = [];
-  for (let i = 0; i < 16; i++) { const a = (i / 15 - 0.5) * 3.0; hs.push({ geo: coneGeo(0.03, 0.09 + (i % 3) * 0.02, 5), pos: [Math.sin(a) * hr * 0.9, H.y0 + hr * 0.75 + Math.cos(a * 2) * 0.01, -Math.cos(a) * hr * 0.35], rot: [-0.5 + Math.cos(a) * 0.2, 0, -Math.sin(a) * 0.7] }); }
+  for (let i = 0; i < 11; i++) { const a = (i / 10 - 0.5) * 2.6; hs.push({ geo: coneGeo(0.028, 0.06 + (i % 3) * 0.015, 5), pos: [Math.sin(a) * hr * 0.9, H.y0 + hr * 0.75 + Math.cos(a * 2) * 0.01, -Math.cos(a) * hr * 0.35], rot: [-0.5 + Math.cos(a) * 0.2, 0, -Math.sin(a) * 0.7] }); }
   P(model, hj, mergeParts('hulkspikes' + hr, hs), hairM, {});
   // fists knuckles
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.WL : J.WR], sphereGeo(1, 10, 8), skinD, { pos: [0, -dims.hand * 0.78, 0.045 * k], scale: [0.06 * k, 0.035 * k, 0.04 * k] });
@@ -501,8 +572,11 @@ export function buildThor() {
   const leather = std(0x3a2a20, { roughness: 0.75, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9) });
   const silver = withRim(phys(0xc4cad4, { roughness: 0.34, metalness: 0.75, clearcoat: 0.5, clearcoatRoughness: 0.15, normalMap: grainNormal('brushed', 3, 1.0), normalScale: new V2(0.4, 0.4) }), 0xffffff, 0.12);
   const skin = std(0xe0b090, { roughness: 0.62 });
+  const THd = skullHead('thor', { brow: 0.065, jawBone: 0.05, chin: 0.09, chinW: 0.3, taper: 0.17, cheek: 0.05, nose: 0.2, socket: 0.055 },
+    { skin: '#e0b090', iris: '#4f95d8', brow: '#a47d2e', lip: '#a8564e', mood: 'smirk', stubble: 0.25, browW: 0.05, seed: 11, eyeSize: 1.3 });
   const info = buildBody(model, {
-    mats: { default: suit, chest: suit, abdomen: suit, pelvis: leather, neck: skin, head: skin, shoulder: silver, upperArm: suit, foreArm: suit, hand: leather, thigh: suit, shin: leather, foot: leather },
+    headGeo: THd.headGeo, skull: THd.skull,
+    mats: { default: suit, chest: suit, abdomen: suit, pelvis: leather, neck: skin, head: THd.mat, shoulder: silver, upperArm: suit, foreArm: suit, hand: leather, thigh: suit, shin: leather, foot: leather },
     muscle: 1.1, torso: { sx: 1.38, sz: 0.82, chestR: 1.12, waistR: 0.95 },
     head: { R: 0.108, sx: 0.9, sy: 1.1, sz: 1.0 },
     arm: { u0: 0.058, u1: 0.046, f0: 0.046, f1: 0.036, ub: 0.14, fb: 0.15 },
@@ -534,21 +608,22 @@ export function buildThor() {
   P(model, model.j[J.SP], boxGeo(0.07 * k, 0.07 * k, 0.03), silver, { pos: [0, 0.05 * k, 0.125 * k] });
   // bracers
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.EL : J.ER], limbGeo(0.17 * k, 0.047 * k, 0.04 * k, 0.04, 0.4), silver, { pos: [0, -0.07 * k, 0] });
-  // hair + beard
-  const hair = std(0xd2a947, { roughness: 0.75 });
+  // hair (cap + long strands past the shoulders) and a full beard with moustache
   const hr = H.R;
-  P(model, hj, G('thorhairc', () => new THREE.SphereGeometry(1, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.5)), hair, { pos: [0, H.y0 + hr * 0.12, -hr * 0.1], rot: [-0.42, 0, 0], scale: [hr * 1.07, hr * 1.1, hr * 1.12] });
-  const strands = [];
-  for (let i = 0; i < 7; i++) { const a = (i / 6 - 0.5) * 2.0; strands.push({ geo: capsuleGeo(0.022, 0.2, 3, 6), pos: [Math.sin(a) * hr * 0.95, H.y0 - hr * 0.5 - 0.02 * Math.abs(a), -Math.cos(a) * hr * 0.9], rot: [0.12, 0, -Math.sin(a) * 0.15], scale: [1.3, 0.55 - Math.abs(a) * 0.1, 1] }); }
-  P(model, hj, mergeParts('thorstrands' + hr, strands), hair, {});
-  P(model, hj, sphereGeo(1, 12, 8), hair, { pos: [0, H.y0 - hr * 0.7, hr * 0.42], scale: [hr * 0.55, hr * 0.3, hr * 0.45] }); // beard
-  addFace(model, H, { tex: { skin: '#e0b090', iris: '#5aa0e8', brow: '#a8802c', lip: '#a8564e', mood: 'smirk', stubble: 0.5 }, skin });
-  for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.5, hr * 0.07, hr * 0.12), hair, { pos: [s * hr * 0.4, H.y0 + hr * 0.27, hr * 0.86], rot: [0.0, s * 0.25, -s * 0.12] }); // brow ridge
+  const hair = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3 }), hairD = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3, dbl: true });
+  patch(model, H, 'thorcap', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, 0.66], [0.5, 0.6], [0.9, 0.34], [1.25, 0.02], [1.8, -0.3], [3.14, -0.3]]), pw: 1.15,
+    thick: (a, l, t) => 0.045 + 0.05 * t + 0.014 * Math.sin(a * 7 + t * 4) * t,
+    post: (p, a, l, t) => { const k = sm01(1.1, 1.9, Math.abs(a)); p.y -= (2.6 + 0.35 * Math.sin(a * 17)) * sm01(0.72, 1, t) * k; p.x *= 1 + 0.12 * t * k; p.z -= 0.1 * t * k; } }, hair, { cast: true });
+  const beardTop = tab([[0, -0.6], [0.3, -0.57], [0.6, -0.44], [1.0, -0.18], [1.45, 0.02]]), beardBot = tab([[0, -1.04], [0.5, -0.98], [1.0, -0.82], [1.45, -0.5]]);
+  patch(model, H, 'thorbeard', { aMin: -1.45, aMax: 1.45, na: seg(30, 18), nb: 10, top: beardTop, bot: beardBot, pw: 1.1, thick: (a, l, t) => 0.04 + 0.05 * t, post: (p, a, l, t) => { p.y -= 0.34 * t * t * (1 - Math.abs(a) / 1.7); p.z += 0.05 * t * (1 - Math.abs(a) / 1.6); } }, hair, { cast: true });
+  patch(model, H, 'thorstache', { aMin: -0.52, aMax: 0.52, na: 12, nb: 4, top: () => -0.4, bot: tab([[0, -0.49], [0.3, -0.47], [0.52, -0.5]]), thick: () => 0.05 }, hair);
+  addEars(model, H, skin);
+
   // shoulder cape clasps
   for (const s of [1, -1]) P(model, cj, sphereGeo(0.032, 8, 6), silver, { pos: [s * 0.2 * k, 0.35 * k, -0.02 * k] });
 
   // ---- cape: one cloth mesh driven by a lagged chain
-  const R = 9, C = 4, capeLen = 1.1 * k, capeW0 = 0.46 * k, capeW1 = 0.8 * k;
+  const R = 10, C = 14, capeLen = 1.1 * k, capeW0 = 0.46 * k, capeW1 = 0.8 * k;
   const cgeo = new THREE.PlaneGeometry(1, 1, C, R);
   const cmat = std(0xffffff, { map: capeTexture(), roughness: 0.82, side: THREE.DoubleSide, metalness: 0.0, normalMap: fabricNormal(10, 0.5, 'capefab'), normalScale: new V2(0.6, 0.6) });
   const cape = new THREE.Mesh(cgeo, cmat); cape.frustumCulled = false; cape.castShadow = true;
@@ -584,7 +659,8 @@ export function buildThor() {
       const w = lerp(capeW0, capeW1, j / R) * (1 + 0.1 * Math.sin(c.tm * 3 + j) * speedK);
       for (let i = 0; i <= C; i++) {
         const u = i / C * 2 - 1;
-        const billow = -(1 - u * u) * 0.05 * k * Math.sin((j / R) * Math.PI) * (1 + speedK * 1.5) - Math.abs(u) * 0.02 * (j / R);
+        const fold = Math.sin(u * 10.2 + 0.7 + Math.sin(c.tm * 1.7 + j * 0.5) * 0.15 * speedK) * 0.026 * k * Math.pow(j / R, 0.7) * (1 - 0.35 * u * u) * (1 + speedK * 0.8);
+        const billow = -(1 - u * u) * 0.05 * k * Math.sin((j / R) * Math.PI) * (1 + speedK * 1.5) - Math.abs(u) * 0.02 * (j / R) + fold;
         const idx = j * (C + 1) + i;
         pos.setXYZ(idx, cp[j * 3] + u * w * 0.5 * Math.cos(rol[j]), cp[j * 3 + 1], cp[j * 3 + 2] + billow - (Math.sin(c.tm * 5 + j * 1.2 + u * 2) * 0.012 * speedK * (j / R)));
       }

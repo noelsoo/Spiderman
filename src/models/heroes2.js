@@ -5,7 +5,8 @@ import {
   G, std, metal, glow, glowInstance, phys, withRim, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo, mergeParts, rng, seg,
   fabricNormal, grainNormal, scaleMaps, capChestTexture, capStripesTexture, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
 } from './common.js';
-import { P, addHook, buildBody, addFace, finish, curvedPlane } from './characters.js';
+import { P, addHook, buildBody, addFace, finish, curvedPlane, skullHead, patch, strand, addEars } from './characters.js';
+import { tab, hairMaterial, skullMetres } from './face.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
@@ -15,7 +16,7 @@ const leather = (color, o = {}) => std(color, { roughness: 0.7, normalMap: grain
 
 /** lagged-chain cloth panel (cape / coat tail / hair curtain) hung from `joint`. Same secondary motion as Thor's cape. */
 function addCloth(model, joint, o) {
-  const { R = 8, C = 3, len, w0, w1, anchor, mat, resp = 1, base = 0.12, billow = 0.05, k = 1 } = o;
+  const { R = 8, C = 3, len, w0, w1, anchor, mat, resp = 1, base = 0.12, billow = 0.05, k = 1, folds = 0, foldN = 9 } = o;
   const geo = new THREE.PlaneGeometry(1, 1, C, R);
   const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.castShadow = true;
   joint.add(mesh); model.parts.push(mesh); mesh.userData.mat = mat;
@@ -45,7 +46,7 @@ function addCloth(model, joint, o) {
       const w = lerp(w0, w1, j / R) * (1 + 0.1 * Math.sin(c.tm * 3 + j + o.ph) * speedK);
       for (let i = 0; i <= C; i++) {
         const u = i / C * 2 - 1;
-        const bl = -(1 - u * u) * billow * k * Math.sin((j / R) * Math.PI) * (1 + speedK * 1.5) - Math.abs(u) * 0.02 * (j / R);
+        const bl = -(1 - u * u) * billow * k * Math.sin((j / R) * Math.PI) * (1 + speedK * 1.5) - Math.abs(u) * 0.02 * (j / R) + folds * k * Math.sin(u * foldN + 0.8 + Math.sin(c.tm * 1.9 + j * 0.5 + o.ph) * 0.15 * speedK) * Math.pow(j / R, 0.7) * (1 - 0.35 * u * u) * (1 + speedK * 0.8);
         pos.setXYZ(j * (C + 1) + i, cp[j * 3] + u * w * 0.5 * Math.cos(rol[j]), cp[j * 3 + 1], cp[j * 3 + 2] + bl - Math.sin(c.tm * 5 + j * 1.2 + u * 2) * 0.012 * speedK * (j / R));
       }
     }
@@ -54,6 +55,7 @@ function addCloth(model, joint, o) {
   return mesh;
 }
 const phase = () => Math.random() * 6;
+const sm01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // ================================================================== WOLVERINE
 export function buildWolverine() {
@@ -74,8 +76,11 @@ export function buildWolverine() {
   const blue = cloth(0x1a3a96), yellow = cloth(0xf2c213, { roughness: 0.5 });
   const torso = cloth(0xffffff, { map: torsoTex, normalScale: new V2(0.3, 0.3) });
   const skin = std(0xd8a27c, { roughness: 0.65 });
+  const WLd = skullHead('wolv', { brow: 0.05, jawBone: 0.07, chin: 0.1, chinW: 0.3, taper: 0.12, cheek: 0.055, nose: 0.2, jawFlare: 0.05, muzzle: 0.03 },
+    { skin: '#d8a27c', iris: '#5a3a22', brow: '#2a1a10', lip: '#8a4a40', mood: 'angry', stubble: 0.5, browW: 0.05, lid: 0.3, seed: 31, eyeSize: 1.25 });
   const info = buildBody(model, {
-    mats: { default: blue, chest: torso, abdomen: torso, pelvis: blue, neck: skin, head: skin, shoulder: blue, upperArm: blue, foreArm: blue, hand: yellow, thigh: blue, shin: blue, foot: yellow },
+    headGeo: WLd.headGeo, skull: WLd.skull,
+    mats: { default: blue, chest: torso, abdomen: torso, pelvis: blue, neck: skin, head: WLd.mat, shoulder: blue, upperArm: blue, foreArm: blue, hand: yellow, thigh: blue, shin: blue, foot: yellow },
     torso: { sx: 1.52, sz: 0.96, chestR: 1.14, waistR: 1.0 },
     head: { R: 0.108, sx: 0.95, sy: 1.04, sz: 1.02 },
     arm: { u0: 0.058, u1: 0.05, f0: 0.05, f1: 0.042, ub: 0.2, fb: 0.22 },
@@ -83,18 +88,18 @@ export function buildWolverine() {
     foot: [0.06, 0.05, 0.15], hand: [0.05, 0.058, 0.055], pelvis: [0.4, 0.22, 0.28], armM: 1.12, legM: 1.05, neckR: 0.065,
   });
   const hj = model.j[J.HD], cj = model.j[J.CH], H = info.headInfo, hr = H.R;
-  // mask / cowl: covers everything above the mouth, with swept-back "ears"
+  // cowl: covers the skull down to the nose bridge, frames the face with two swept-back fins; white angled lenses; sideburns
   const cowl = phys(0x142a78, { roughness: 0.5, ...fab('wolvmask', 5), sheen: 0.7, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x6a8cff) });
-  P(model, hj, G('wolvcowl' + seg(24, 12), () => new THREE.SphereGeometry(1, seg(28, 12), seg(20, 9), 0, Math.PI * 2, 0, Math.PI * 0.645)), cowl,
-    { pos: [0, H.y0, 0], scale: [hr * H.sx * 1.035, hr * H.sy * 1.03, hr * H.sz * 1.04] });
+  patch(model, H, 'wolvcowl', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, -0.12], [0.35, -0.15], [0.8, -0.36], [1.3, -0.34], [2.0, -0.5], [3.14, -0.56]]), thick: () => 0.04 }, cowl, { cast: true });
   const earG = G('wolvear', () => { const g = new THREE.ConeGeometry(0.036, 0.19, 5); g.translate(0, 0.095, 0); return g; });
+  const lensM = glow(0xffffff, 1.8);
+  const lensC = (a) => lerp(0.035, 0.115, (Math.abs(a) - 0.1) / 0.5), lensH = (a) => 0.078 * Math.sqrt(Math.max(0.02, 1 - ((Math.abs(a) - 0.36) / 0.27) ** 2));
   for (const s of [1, -1]) {
     P(model, hj, earG, cowl, { pos: [s * hr * 0.86, H.y0 + hr * 0.5, -hr * 0.12], rot: [-0.75, 0, -s * 0.62], scale: [1, 1, 0.8] });
-    P(model, hj, boxGeo(hr * 0.42, hr * 0.1, hr * 0.12), glow(0xffffff, 1.8), { pos: [s * hr * 0.42, H.y0 + hr * 0.07, hr * H.sz * 0.97], rot: [-0.05, s * 0.32, -s * 0.38], cast: false }); // angled lenses
-    P(model, hj, boxGeo(hr * 0.2, hr * 0.5, hr * 0.14), std(0x2a1a10, { roughness: 0.9 }), { pos: [s * hr * 0.9, H.y0 - hr * 0.3, hr * 0.28], rot: [0, s * 0.25, 0] }); // mutton chops
+    patch(model, H, 'wolvlens' + s, { aMin: s > 0 ? 0.1 : -0.64, aMax: s > 0 ? 0.64 : -0.1, na: 12, nb: 5, top: (a) => lensC(a) + lensH(a), bot: (a) => lensC(a) - lensH(a) * 0.75, thick: () => 0.052 }, lensM);
+    patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 1.05 : -1.45, aMax: s > 0 ? 1.45 : -1.05, na: 8, nb: 8, top: () => -0.12, bot: (a) => lerp(-0.62, -0.42, (Math.abs(a) - 1.05) / 0.4), thick: () => 0.05 }, hairMaterial('#2a1a10', { hi: '#5a3a22', seed: 9, rough: 0.75, sheen: 0x555555 }));
   }
-  addFace(model, H, { tex: { skin: '#d8a27c', eyes: false, brows: false, mood: 'angry', lip: '#8a4a40', stubble: 0.8 }, skin, nose: false, ears: false, t0: 0.5, t1: 0.82 });
-  P(model, hj, G('wolvchin', () => new THREE.SphereGeometry(1, 12, 8)), skin, { pos: [0, H.y0 - hr * 0.78, hr * 0.5], scale: [hr * 0.42, hr * 0.3, hr * 0.38] }); // jaw
+  addEars(model, H, skin);
   // belt + buckle, boots, cuffs
   P(model, model.j[J.SP], cylGeo(0.16 * k, 0.165 * k, 0.06 * k, seg(18, 10)), yellow, { pos: [0, 0.05 * k, 0], scale: [1.36, 1, 0.9] });
   P(model, model.j[J.SP], boxGeo(0.07 * k, 0.07 * k, 0.03), metal(0xcfa23a, { roughness: 0.3 }), { pos: [0, 0.05 * k, 0.14 * k] });
@@ -142,8 +147,11 @@ export function buildCaptain() {
   const gloveM = leather(0x4a2c18, { roughness: 0.62 });
   const navy = cloth(0x1a2a6c);
   const skin = std(0xe3b490, { roughness: 0.62 });
+  const CPd = skullHead('cap', { brow: 0.05, jawBone: 0.065, chin: 0.1, chinW: 0.3, taper: 0.14, cheek: 0.05, nose: 0.19, socket: 0.05 },
+    { skin: '#e3b490', iris: '#4a80c8', brow: '#6a4a24', lip: '#b0605a', mood: 'stern', stubble: 0.12, browW: 0.05, seed: 41, eyeSize: 1.3 });
   const info = buildBody(model, {
-    mats: { default: scaleMat, chest: scaleMat, abdomen: stripes, pelvis: navy, neck: skin, head: skin, shoulder: scaleMat, upperArm: scaleMat, foreArm: scaleMat, hand: gloveM, thigh: navy, shin: red, foot: gloveM },
+    headGeo: CPd.headGeo, skull: CPd.skull,
+    mats: { default: scaleMat, chest: scaleMat, abdomen: stripes, pelvis: navy, neck: skin, head: CPd.mat, shoulder: scaleMat, upperArm: scaleMat, foreArm: scaleMat, hand: gloveM, thigh: navy, shin: red, foot: gloveM },
     torso: { sx: 1.46, sz: 0.86, chestR: 1.16, waistR: 0.9 },
     head: { R: 0.108, sx: 0.92, sy: 1.08, sz: 1.0 },
     arm: { u0: 0.058, u1: 0.047, f0: 0.047, f1: 0.037, ub: 0.14, fb: 0.14 },
@@ -172,19 +180,20 @@ export function buildCaptain() {
     P(model, model.j[s > 0 ? J.EL : J.ER], cylGeo(0.05 * k, 0.042 * k, dims.fore * 0.38, seg(12, 8)), red, { pos: [0, -dims.fore * 0.82, 0] }); // gauntlet
     P(model, model.j[s > 0 ? J.KL : J.KR], cylGeo(0.066 * k, 0.052 * k, dims.shin * 0.5, seg(12, 8)), red, { pos: [0, -dims.shin * 0.7, 0] }); // boot
   }
-  // cowl: crown cap + side/back ring with open face, wings, 'A'
+  // cowl: scale-mail hood with an open face, white wings, forehead 'A' and a leather chin strap
   const cowl = withRim(phys(0x16286a, { roughness: 0.45, metalness: 0.2, ...fab('capcowl', 5), clearcoat: 0.3 }), 0x9fc0ff, 0.1);
-  const sx = hr * H.sx * 1.04, sy = hr * H.sy * 1.03, sz = hr * H.sz * 1.04;
-  P(model, hj, G('capcowl1' + seg(24, 12), () => new THREE.SphereGeometry(1, seg(28, 12), seg(10, 6), 0, Math.PI * 2, 0, Math.PI * 0.37)), cowl, { pos: [0, H.y0, 0], scale: [sx, sy, sz] });
-  P(model, hj, G('capcowl2' + seg(24, 12), () => new THREE.SphereGeometry(1, seg(28, 12), seg(10, 6), Math.PI / 2 + 0.85, Math.PI * 2 - 1.7, Math.PI * 0.37, Math.PI * 0.5)), cowl, { pos: [0, H.y0, 0], scale: [sx * 0.995, sy * 0.995, sz * 0.995] });
+  patch(model, H, 'capcowl', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, 0.36], [0.5, 0.24], [0.85, 0.02], [1.2, -0.08], [1.6, -0.5], [3.14, -0.64]]), thick: () => 0.04 }, cowl, { cast: true });
   const A = drawTex('capA', 128, 128, (ctx, W, Hh) => {
     ctx.fillStyle = '#f4f4f4'; ctx.font = 'bold 100px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('A', W / 2, Hh / 2 + 6);
   }, { clamp: true });
-  P(model, hj, faceShell(1, 0.22, 0.2, 0.36), std(0xffffff, { map: A, transparent: true, alphaTest: 0.3, roughness: 0.5, depthWrite: false }), { pos: [0, H.y0, 0], scale: [sx * 1.004, sy * 1.004, sz * 1.004], cast: false });
+  patch(model, H, 'capA', { aMin: -0.3, aMax: 0.3, na: 8, nb: 6, top: () => 0.86, bot: () => 0.5, thick: () => 0.065 }, std(0xffffff, { map: A, transparent: true, alphaTest: 0.3, roughness: 0.5, depthWrite: false }));
+  const jl = tab([[0, -0.97], [0.4, -0.92], [0.8, -0.76], [1.2, -0.42], [1.45, -0.12]]);
+  patch(model, H, 'capstrap', { aMin: -1.45, aMax: 1.45, na: 28, nb: 2, top: (a) => jl(a) + 0.09, bot: (a) => jl(a) - 0.09, thick: () => 0.03 }, leather(0x7a5430, { roughness: 0.6 }), { cast: true });
+  P(model, hj, boxGeo(hr * 0.2, hr * 0.17, hr * 0.06), metal(0xc9a74a, { roughness: 0.3 }), { pos: [0, H.y0 - hr * H.sy * 0.97 * 0.8, hr * H.sz * 0.62], rot: [0.55, 0, 0] });
   const wing = G('capwing', () => { const g = new THREE.ConeGeometry(0.03, 0.14, 3); g.translate(0, 0.07, 0); g.scale(1, 1, 0.25); return g; });
   const white = std(0xf0f0f0, { roughness: 0.4 });
   for (const s of [1, -1]) for (let i = 0; i < 2; i++) P(model, hj, wing, white, { pos: [s * hr * 0.98, H.y0 + hr * (0.18 + i * 0.12), -hr * 0.1 - i * 0.02], rot: [-0.9 + i * 0.3, 0, -s * (1.3 + i * 0.25)] });
-  addFace(model, H, { tex: { skin: '#e3b490', iris: '#4a80c8', brow: '#6a4a24', lip: '#b0605a', mood: 'calm' }, skin, ears: false, phi: 0.7, t0: 0.38 });
+  addEars(model, H, skin);
 
   // ---- shield on the left forearm
   const sMat = withRim(phys(0xffffff, { map: shieldTexture(), roughness: 0.28, metalness: 0.7, clearcoat: 0.7, clearcoatRoughness: 0.12, side: THREE.DoubleSide }), 0xffffff, 0.12);
@@ -225,10 +234,31 @@ export function buildHawkeye() {
   const model = new ProcModel('hawkeye', rig, { prof: { stance: 'ready', cadence: 1.08, stride: 1.05, armSwing: 1.0, lean: 1.15, shoot: 'bow', aimStyle: 'bow', alignHand: 'none', flipDodge: true } });
   const k = dims.k;
   const purple = cloth(0x4a2a8c), black = cloth(0x15151c), plum = cloth(0x32205f);
+  // stitched leather panels (seams, piping, dashed topstitching); front centre = texture x 0.5
+  const stitchTex = (name, base, dark, thread, seams) => drawTex(name, 512, 512, (ctx, W, Hh) => {
+    ctx.fillStyle = base; ctx.fillRect(0, 0, W, Hh); const r = rng(9);
+    for (let i = 0; i < 2600; i++) { ctx.fillStyle = r() < 0.5 ? 'rgba(0,0,0,0.09)' : 'rgba(255,255,255,0.05)'; ctx.fillRect(r() * W, r() * Hh, 2 + r() * 6, 1 + r() * 4); }
+    const line = (x0, y0, x1, y1) => {
+      ctx.strokeStyle = dark; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      ctx.strokeStyle = thread; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
+      const dx = y1 - y0, dy = x0 - x1, l = Math.hypot(dx, dy) || 1;
+      for (const o of [-8, 8]) { ctx.beginPath(); ctx.moveTo(x0 + dx / l * o, y0 + dy / l * o); ctx.lineTo(x1 + dx / l * o, y1 + dy / l * o); ctx.stroke(); }
+      ctx.setLineDash([]);
+    };
+    for (const f of seams) line(W * (0.5 + f), 0, W * (0.5 + f), Hh);
+    line(0, Hh * 0.34, W, Hh * 0.34); line(0, Hh * 0.7, W, Hh * 0.7);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, W, 6); ctx.fillRect(0, Hh - 6, W, 6);
+  }, { offsetX: 0.5 });
+  const leatherPanel = (name, base, dark, thread, seams) => phys(0xffffff, { map: stitchTex(name, base, dark, thread, seams), roughness: 0.6, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9), sheen: 0.3, sheenColor: new THREE.Color(0xb090ff) });
+  const vest = leatherPanel('hawkVest', '#4a2a8c', '#1d1040', '#d8c8ff', [0, -0.22, 0.22, -0.4, 0.4]);
+  const tac = leatherPanel('hawkTac', '#1b1b22', '#08080c', '#8a8a9a', [0, -0.25, 0.25]);
   const skin = std(0xdcae8c, { roughness: 0.65 });
   const lthr = leather(0x2a2018);
+  const HKd = skullHead('hawk', { brow: 0.055, jawBone: 0.07, chin: 0.09, chinW: 0.28, taper: 0.17, cheek: 0.05, nose: 0.2 },
+    { skin: '#dcae8c', iris: '#6b8f5c', brow: '#2a1d14', lip: '#9a5048', mood: 'smirk', stubble: 0.8, browW: 0.048, seed: 51, eyeSize: 1.25 });
   const info = buildBody(model, {
-    mats: { default: black, chest: purple, abdomen: black, pelvis: black, neck: skin, head: skin, shoulder: purple, upperArm: purple, foreArm: black, hand: lthr, thigh: black, shin: black, foot: lthr },
+    headGeo: HKd.headGeo, skull: HKd.skull,
+    mats: { default: black, chest: vest, abdomen: tac, pelvis: black, neck: skin, head: HKd.mat, shoulder: purple, upperArm: purple, foreArm: black, hand: lthr, thigh: black, shin: black, foot: lthr },
     torso: { sx: 1.3, sz: 0.8, chestR: 1.08, waistR: 0.9 },
     head: { R: 0.108, sx: 0.92, sy: 1.08, sz: 1.0 },
     arm: { u0: 0.052, u1: 0.043, f0: 0.044, f1: 0.035, ub: 0.1, fb: 0.1 },
@@ -236,22 +266,37 @@ export function buildHawkeye() {
     foot: [0.058, 0.05, 0.15], hand: [0.042, 0.054, 0.05], pelvis: [0.37, 0.2, 0.26],
   });
   const hj = model.j[J.HD], cj = model.j[J.CH], H = info.headInfo, hr = H.R;
-  // face + sunglasses + short hair
-  addFace(model, H, { tex: { skin: '#dcae8c', eyes: false, brows: false, mood: 'smirk', stubble: 0.7, lip: '#9a5048' }, skin });
-  const lens = phys(0x0a1018, { roughness: 0.08, metalness: 0.9, clearcoat: 1, clearcoatRoughness: 0.02 });
-  for (const s of [1, -1]) P(model, hj, G('hawkLens', () => { const g = new THREE.SphereGeometry(1, 14, 10); return g; }), lens, { pos: [s * hr * 0.4, H.y0 + hr * 0.08, hr * H.sz * 0.9], scale: [hr * 0.36, hr * 0.2, hr * 0.12], rot: [0, s * 0.25, -s * 0.06], cast: false });
-  P(model, hj, boxGeo(hr * 0.2, hr * 0.04, hr * 0.04), black, { pos: [0, H.y0 + hr * 0.12, hr * 0.96] });
-  const hair = std(0x2a1d14, { roughness: 0.8 });
-  P(model, hj, G('hawkhair', () => new THREE.SphereGeometry(1, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.46)), hair, { pos: [0, H.y0 + hr * 0.14, -hr * 0.06], rot: [-0.2, 0, 0], scale: [hr * 1.05, hr * 1.06, hr * 1.1] });
-  // chest harness straps (diagonal) + belt
-  const strapGeo = G('hawkstrap', () => new THREE.BoxGeometry(0.035 * k, 0.5 * k, 0.012));
+  // sunglasses (lens + frame patches on the skull, bridge, temple arms) and short cropped hair
+  const lens = std(0x0b1118, { roughness: 0.12, metalness: 0.35, emissive: 0x0a1624, emissiveIntensity: 1 });
+  const frameM = std(0x07070a, { roughness: 0.35 });
+  const lc = (a) => lerp(0.035, 0.05, (Math.abs(a) - 0.08) / 0.55), lh = (a, g) => (0.125 + g) * Math.pow(Math.max(0, 1 - Math.pow(Math.abs((Math.abs(a) - 0.36) / (0.3 + g * 1.4)), 3.2)), 0.5);
+  for (const s of [1, -1]) {
+    patch(model, H, 'hawkframe' + s, { aMin: s > 0 ? 0.03 : -0.7, aMax: s > 0 ? 0.7 : -0.03, na: 14, nb: 6, top: (a) => lc(a) + lh(a, 0.02), bot: (a) => lc(a) - lh(a, 0.02) * 0.9, thick: () => 0.062 }, frameM);
+    patch(model, H, 'hawklens' + s, { aMin: s > 0 ? 0.06 : -0.67, aMax: s > 0 ? 0.67 : -0.06, na: 14, nb: 6, top: (a) => lc(a) + lh(a, 0), bot: (a) => lc(a) - lh(a, 0) * 0.9, thick: () => 0.072 }, lens);
+    patch(model, H, 'hawkarm' + s, { aMin: s > 0 ? 0.6 : -1.55, aMax: s > 0 ? 1.55 : -0.6, na: 8, nb: 1, top: () => 0.075, bot: () => 0.03, thick: () => 0.058 }, frameM);
+  }
+  P(model, hj, boxGeo(hr * 0.16, hr * 0.035, hr * 0.05), frameM, { pos: [0, H.y0 + hr * 0.12, hr * H.sz * 1.0], cast: false });
+  const hairM = hairMaterial('#2a1d14', { hi: '#5a4028', seed: 13, rough: 0.7, sheen: 0x665544 });
+  patch(model, H, 'hawkhair', { na: seg(40, 24), nb: 12, top: () => Math.PI / 2, bot: tab([[0, 0.62], [0.5, 0.57], [0.9, 0.34], [1.3, 0.1], [1.8, -0.1], [3.14, -0.28]]), thick: (a, l, t) => 0.04 + 0.014 * Math.sin(a * 9) * t }, hairM, { cast: true });
+  addEars(model, H, skin);
+  // bandolier: a tilted leather band wrapped round the torso (right shoulder to left hip), buckle, plus the belt
   const cr = info.chestRad(0.2 * k);
-  for (const s of [1, -1]) P(model, cj, strapGeo, lthr, { pos: [s * cr.rx * 0.28, 0.16 * k, cr.rz * 0.99], rot: [0, 0, s * 0.42] });
-  P(model, cj, boxGeo(0.1 * k, 0.16 * k, 0.012), plum, { pos: [0, 0.22 * k, cr.rz + 0.004], cast: false });
+  const bandG = G('hawkband' + k, () => { const g = new THREE.TorusGeometry(1, 0.0125, 6, 40); g.scale(1, 1, 1); return g; });
+  const bandRx = cr.rx * 1.04, bandRz = cr.rz * 1.06;
+  const band = P(model, cj, bandG, lthr, { pos: [0, 0.2 * k, 0], rot: [Math.PI / 2, 0.0, 0.0] });
+  band.rotation.set(Math.PI / 2, 0, 0); band.scale.set(bandRx, bandRz, 0.9); band.rotateOnWorldAxis(new V3(0, 0, 1), -0.6);
+  P(model, cj, boxGeo(0.034 * k, 0.04 * k, 0.014), metal(0xb8a060, { roughness: 0.3 }), { pos: [-cr.rx * 0.2, 0.19 * k + 0.05 * k, cr.rz * 1.02], rot: [0, 0, -0.6], cast: false });
   P(model, model.j[J.SP], cylGeo(0.14 * k, 0.15 * k, 0.05 * k, seg(16, 10)), lthr, { pos: [0, 0.055 * k, 0], scale: [1.28, 1, 0.82] });
+  P(model, model.j[J.SP], boxGeo(0.045 * k, 0.04 * k, 0.014), metal(0xb8a060, { roughness: 0.3 }), { pos: [0, 0.055 * k, 0.123 * k], cast: false });
   for (const s of [1, -1]) {
     P(model, model.j[s > 0 ? J.KL : J.KR], sphereGeo(1, 10, 8), purple, { pos: [0, 0.0, 0.03], scale: [0.05 * k, 0.06 * k, 0.04 * k] });
-    P(model, model.j[s > 0 ? J.EL : J.ER], cylGeo(0.047 * k, 0.041 * k, dims.fore * 0.5, seg(12, 8)), lthr, { pos: [0, -dims.fore * 0.6, 0] }); // bracers
+    const el = model.j[s > 0 ? J.EL : J.ER], big = s > 0; // left (bow) arm gets the full archer's arm guard
+    const gl = dims.fore * (big ? 0.82 : 0.5);
+    P(model, el, cylGeo(0.047 * k, 0.041 * k, gl, seg(12, 8)), lthr, { pos: [0, -dims.fore * (big ? 0.5 : 0.6), 0] }); // bracers
+    if (big) {
+      P(model, el, G('hawkguardplate', () => new THREE.CylinderGeometry(0.0515 * k, 0.0455 * k, dims.fore * 0.5, 12, 1, true, -0.9, 1.8)), leather(0x3a2a1c, { roughness: 0.55 }), { pos: [0, -dims.fore * 0.45, 0], rot: [0, Math.PI / 2 * 0 + 0, 0] }); // outer plate
+      for (const y of [0.22, 0.48, 0.74]) { P(model, el, cylGeo(0.0525 * k, 0.0525 * k, 0.012 * k, seg(12, 8)), lthr, { pos: [0, -dims.fore * y, 0] }); P(model, el, boxGeo(0.014 * k, 0.018 * k, 0.01), metal(0xb8a060, { roughness: 0.3 }), { pos: [0.0, -dims.fore * y, 0.052 * k], cast: false }); }
+    }
   }
   // quiver + arrows on the back
   const quiver = new THREE.Group(); quiver.position.set(0.04 * k, 0.18 * k, -0.15 * k); quiver.rotation.set(0.15, 0, -0.45); cj.add(quiver);
@@ -259,6 +304,8 @@ export function buildHawkeye() {
   const arrowParts = [], shaft = cylGeo(0.0045, 0.0045, 0.3 * k, 5), fl = coneGeo(0.016, 0.05, 3);
   for (let i = 0; i < 6; i++) { const a = i * 1.05, r = 0.02 * k; arrowParts.push({ geo: shaft, pos: [Math.cos(a) * r, 0.37 * k, Math.sin(a) * r] }, { geo: fl, pos: [Math.cos(a) * r, 0.5 * k, Math.sin(a) * r], rot: [0, a, 0] }); }
   const arrowsM = new THREE.Mesh(mergeParts('hawkQuiverArrows' + k, arrowParts), std(0xd8d0b8, { roughness: 0.6 })); arrowsM.castShadow = true; quiver.add(arrowsM); model.parts.push(arrowsM); arrowsM.userData.mat = arrowsM.material;
+  for (const [y, w] of [[0.1, 0.0], [-0.18, 0.0]]) { const rg = new THREE.Mesh(cylGeo(0.0525 * k - y * 0.02, 0.0525 * k - y * 0.02, 0.02 * k, seg(12, 8)), std(0x1a120c, { roughness: 0.6 })); rg.position.y = y * k; quiver.add(rg); model.parts.push(rg); rg.userData.mat = rg.material; }
+  const rimQ = new THREE.Mesh(G('hawkqrim', () => new THREE.TorusGeometry(0.05 * k, 0.007, 6, 14)), metal(0xb8a060, { roughness: 0.3 })); rimQ.rotation.x = Math.PI / 2; rimQ.position.y = 0.25 * k; quiver.add(rimQ); model.parts.push(rimQ); rimQ.userData.mat = rimQ.material;
   const strapQ = new THREE.Mesh(boxGeo(0.03 * k, 0.55 * k, 0.012), lthr); strapQ.position.set(0, 0.25 * k, -0.01); strapQ.rotation.z = 0.0;
   // ---- bow in the left hand
   const bowG = new THREE.Group(); model.handL.add(bowG);
@@ -305,11 +352,41 @@ export function buildScarlet() {
   const model = new ProcModel('scarlet', rig, { prof: { stance: 'relaxed', cadence: 1.0, stride: 0.98, armSwing: 0.9, lean: 1.05, flyStyle: 'witch', hover: 'witch', castStyle: 'hex', shoot: 'palm', aimStyle: 'gun', flipDodge: true } });
   const k = dims.k;
   const crimson = cloth(0x9a0f26, { roughness: 0.45, sheen: 0.8, sheenColor: new THREE.Color(0xff6070) });
-  const dark = cloth(0x5a0a18), coatM = cloth(0x6e0b1c, { side: THREE.DoubleSide, roughness: 0.7 });
+  const dark = cloth(0x5a0a18);
+  // corset: panelled crimson leather with gold topstitching, front lacing, boning seams (front centre = texture x 0.5)
+  const corsetTex = drawTex('scCorset', 512, 512, (ctx, W, Hh) => {
+    const g = ctx.createLinearGradient(0, 0, 0, Hh); g.addColorStop(0, '#7c0c1f'); g.addColorStop(0.5, '#a1122a'); g.addColorStop(1, '#6f0a1b'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
+    const r = rng(5); for (let i = 0; i < 2200; i++) { ctx.fillStyle = r() < 0.5 ? 'rgba(0,0,0,0.07)' : 'rgba(255,120,120,0.05)'; ctx.fillRect(r() * W, r() * Hh, 2 + r() * 5, 2 + r() * 5); }
+    const seams = [-0.42, -0.3, -0.17, -0.07, 0.07, 0.17, 0.3, 0.42];
+    for (const f of seams) {
+      const x = W * (0.5 + f);
+      ctx.strokeStyle = 'rgba(25,0,4,0.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, Hh); ctx.stroke();
+      ctx.strokeStyle = 'rgba(224,176,80,0.95)'; ctx.lineWidth = 2; ctx.setLineDash([7, 5]);
+      for (const o of [-6, 6]) { ctx.beginPath(); ctx.moveTo(x + o, 0); ctx.lineTo(x + o, Hh); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    // lacing
+    ctx.fillStyle = 'rgba(20,0,4,0.9)'; ctx.fillRect(W * 0.5 - 16, 0, 32, Hh);
+    ctx.strokeStyle = '#d9b25a'; ctx.lineWidth = 3;
+    for (let y = 8; y < Hh; y += 26) { ctx.beginPath(); ctx.moveTo(W * 0.5 - 14, y); ctx.lineTo(W * 0.5 + 14, y + 22); ctx.moveTo(W * 0.5 + 14, y); ctx.lineTo(W * 0.5 - 14, y + 22); ctx.stroke(); ctx.fillStyle = '#e8c870'; ctx.beginPath(); ctx.arc(W * 0.5 - 15, y, 3, 0, 6.3); ctx.arc(W * 0.5 + 15, y, 3, 0, 6.3); ctx.fill(); }
+    // edge trims
+    ctx.fillStyle = 'rgba(214,168,70,0.95)'; ctx.fillRect(0, 0, W, 10); ctx.fillRect(0, Hh - 10, W, 10);
+  }, { offsetX: 0.5 });
+  const corset = phys(0xffffff, { map: corsetTex, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.35, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.7, 0.7), sheen: 0.4, sheenColor: new THREE.Color(0xff6070) });
+  const capeMat = phys(0xffffff, { map: drawTex('scCape', 256, 256, (ctx, W, Hh) => {
+    const g = ctx.createLinearGradient(0, 0, 0, Hh); g.addColorStop(0, '#6a0c1c'); g.addColorStop(0.5, '#8a1026'); g.addColorStop(1, '#a8142c'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
+    for (let i = 0; i < 12; i++) { const x = (i + 0.5) / 12 * W, f = ctx.createLinearGradient(x - 10, 0, x + 10, 0); f.addColorStop(0, 'rgba(0,0,0,0)'); f.addColorStop(0.5, i & 1 ? 'rgba(0,0,0,0.22)' : 'rgba(255,110,110,0.14)'); f.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = f; ctx.fillRect(x - 10, 0, 20, Hh); }
+    ctx.fillStyle = 'rgba(40,0,6,0.5)'; ctx.fillRect(0, Hh - 18, W, 18); ctx.fillStyle = 'rgba(214,168,70,0.85)'; ctx.fillRect(0, Hh - 20, W, 2.5);
+    ctx.strokeStyle = 'rgba(214,168,70,0.7)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(0, Hh - 26); ctx.lineTo(W, Hh - 26); ctx.stroke(); ctx.setLineDash([]);
+  }), roughness: 0.62, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xff5060), side: THREE.DoubleSide, normalMap: fabricNormal(8, 0.5, 'sccapefab'), normalScale: new V2(0.5, 0.5) });
+  const coatM = capeMat;
   const skin = std(0xf0cdb4, { roughness: 0.6 });
   const lthr = leather(0x2a0d10);
+  const SCd = skullHead('scarlet', { brow: 0.028, socket: 0.045, lid: 0.012, nose: 0.15, noseW: 0.8, cheek: 0.055, taper: 0.3, jawBone: 0.0, chin: 0.05, chinW: 0.22, muzzle: 0.02, lips: 1.4 },
+    { skin: '#f0cdb4', iris: '#4a8a58', brow: '#5a2414', lip: '#b8383e', mood: 'calm', female: true, eyeSize: 1.4, browW: 0.04, blush: 0.2, seed: 61, bag: 0.05 });
   const info = buildBody(model, {
-    mats: { default: crimson, chest: crimson, abdomen: dark, pelvis: dark, neck: skin, head: skin, shoulder: crimson, upperArm: crimson, foreArm: crimson, hand: dark, thigh: crimson, shin: lthr, foot: lthr },
+    headGeo: SCd.headGeo, skull: SCd.skull,
+    mats: { default: crimson, chest: corset, abdomen: corset, pelvis: dark, neck: skin, head: SCd.mat, shoulder: crimson, upperArm: crimson, foreArm: crimson, hand: lthr, thigh: crimson, shin: lthr, foot: lthr },
     torso: { sx: 1.08, sz: 0.74, chestR: 1.0, waistR: 0.82 },
     head: { R: 0.106, sx: 0.88, sy: 1.08, sz: 0.98 },
     arm: { u0: 0.042, u1: 0.034, f0: 0.034, f1: 0.027, ub: 0.06, fb: 0.08 },
@@ -317,29 +394,39 @@ export function buildScarlet() {
     foot: [0.05, 0.045, 0.14], hand: [0.036, 0.05, 0.044], pelvis: [0.38, 0.2, 0.26], neckR: 0.038,
   });
   const hj = model.j[J.HD], cj = model.j[J.CH], H = info.headInfo, hr = H.R;
-  addFace(model, H, { tex: { skin: '#f0cdb4', iris: '#4a8a58', brow: '#5a2414', lip: '#b8383e', mood: 'calm' }, skin });
-  // hair
-  const hairM = phys(0x7a2c18, { roughness: 0.5, sheen: 1, sheenRoughness: 0.4, sheenColor: new THREE.Color(0xff8a50) });
-  P(model, hj, G('scHair', () => new THREE.SphereGeometry(1, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55)), hairM, { pos: [0, H.y0 + hr * 0.08, -hr * 0.08], rot: [-0.3, 0, 0], scale: [hr * H.sx * 1.1, hr * 1.1, hr * 1.14] });
-  const locks = []; for (const s of [1, -1]) for (let i = 0; i < 3; i++) locks.push({ geo: capsuleGeo(0.02, 0.2 + i * 0.05, 3, 6), pos: [s * (hr * 0.92 - i * 0.012), H.y0 - hr * 0.25 - i * 0.04, hr * (0.2 - i * 0.25)], rot: [0.1, 0, s * 0.06] });
-  P(model, hj, mergeParts('scLocks' + hr, locks), hairM, {});
-  addCloth(model, hj, { R: 7, C: 3, len: 0.34 * k, w0: 0.17 * k, w1: 0.2 * k, anchor: new V3(0, H.y0 + hr * 0.45, -hr * 0.85), mat: std(0x7a2c18, { roughness: 0.55, side: THREE.DoubleSide }), resp: 0.8, base: 0.1, billow: 0.03, ph: phase() });
-  // tiara: pointed crown
-  const gold = metal(0xb08a3a, { roughness: 0.28 });
+  // hair: auburn, centre-parted, falling past the shoulders with face-framing locks
+  const hairM = hairMaterial('#8a2a16', { hi: '#e0602e', seed: 17, sheen: 0xff8a50, rough: 0.45 });
+  patch(model, H, 'schair', { na: seg(44, 26), nb: 16, top: () => Math.PI / 2, bot: tab([[0, 0.58], [0.45, 0.5], [0.85, 0.08], [1.2, -0.3], [1.8, -0.45], [3.14, -0.5]]), pw: 1.1,
+    thick: (a, l, t) => 0.045 + 0.06 * t + 0.012 * Math.sin(a * 11 + t * 3) * t,
+    post: (p, a, l, t) => { const k = sm01(0.7, 1.5, Math.abs(a)), d = sm01(0.7, 1, t) * k; p.y -= (3.4 + 0.3 * Math.sin(a * 15)) * d; p.x += Math.sin(t * 7 + a * 2) * 0.05 * d; p.x *= 1 + 0.08 * d; p.z += (Math.abs(a) < 1.5 ? 0.1 : -0.06) * d; } }, hairM, { cast: true });
+  addEars(model, H, skin);
+  // tiara: gold circlet with a crown of points across the brow
+  const gold = phys(0xd2a23c, { roughness: 0.3, metalness: 0.8, emissive: 0x2a1a06, emissiveIntensity: 1 });
+  patch(model, H, 'sctiara', { aMin: -1.35, aMax: 1.35, na: 26, nb: 2, top: (a) => 0.72 - 0.25 * (Math.abs(a) / 1.35) ** 2, bot: (a) => 0.6 - 0.28 * (Math.abs(a) / 1.35) ** 2, thick: () => 0.085 }, gold, { cast: true });
   const tp = [];
-  for (let i = 0; i < 7; i++) { const u = i / 6 * 2 - 1, a = u * 1.0; const h = 0.07 * (1 - Math.abs(u) * 0.55); tp.push({ geo: coneGeo(0.016, h, 4), pos: [Math.sin(a) * hr * H.sx * 1.0, H.y0 + hr * 0.62 + h / 2 - Math.abs(u) * 0.02, Math.cos(a) * hr * H.sz * 0.96 - 0.015], rot: [0.35 - Math.abs(u) * 0.2, 0, -Math.sin(a) * 0.45] }); }
-  P(model, hj, mergeParts('scCrown' + hr, tp), gold, {});
-  P(model, hj, G('scBand', () => new THREE.TorusGeometry(1, 0.045, 6, 20, Math.PI * 1.2)), gold, { pos: [0, H.y0 + hr * 0.6, -hr * 0.02], scale: [hr * H.sx * 1.0, hr * 1.0, hr * H.sz * 1.0], rot: [Math.PI / 2 + 0.3, 0, Math.PI * 0.4 + Math.PI * 1.0 - 0.0] });
-  // bodice, belt, shoulder collar
-  P(model, model.j[J.SP], cylGeo(0.12 * k, 0.13 * k, 0.05 * k, seg(16, 10)), lthr, { pos: [0, 0.06 * k, 0], scale: [1.1, 1, 0.78] });
-  P(model, cj, G('scCollar' + seg(16, 10), () => new THREE.CylinderGeometry(0.1, 0.16, 0.08, seg(16, 10), 1, true)), coatM, { pos: [0, 0.37 * k, -0.02 * k], scale: [1.1 * k, k, 0.8 * k] });
+  for (let i = 0; i < 9; i++) {
+    const u = i / 8 * 2 - 1, a = u * 1.15, lat = 0.72 - 0.25 * (Math.abs(a) / 1.35) ** 2;
+    const pnt = skullMetres(H, H.skull, a, lat, 0.085), h = 0.04 * (1 - Math.abs(u) * 0.55);
+    tp.push({ geo: coneGeo(0.012, h, 4), pos: [pnt.x, pnt.y + h * 0.5, pnt.z], rot: [Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.4] });
+  }
+  P(model, hj, mergeParts('scCrown2' + hr, tp), gold, { pos: [0, H.y0, 0] });
+  const gem = glow(0xff2040, 1.6);
+  P(model, hj, sphereGeo(0.011, 8, 6), gem, { pos: [0, H.y0 + hr * H.sy * 0.66 * 0.97, hr * H.sz * 0.9], cast: false });
+  // belt, standing collar, long gloves with flared cuffs and gold buckles
+  const goldTrim = metal(0xd2a23c, { roughness: 0.3 });
+  P(model, model.j[J.SP], cylGeo(0.118 * k, 0.126 * k, 0.03 * k, seg(16, 10)), lthr, { pos: [0, 0.015 * k, 0], scale: [1.1, 1, 0.78] });
+  P(model, model.j[J.SP], boxGeo(0.045 * k, 0.04 * k, 0.014), goldTrim, { pos: [0, 0.015 * k, 0.098 * k] });
+  P(model, cj, G('scCollar2' + seg(16, 10), () => new THREE.CylinderGeometry(0.07, 0.115, 0.12, seg(16, 10), 1, true, Math.PI * 0.2, Math.PI * 1.6)), coatM, { pos: [0, 0.37 * k, -0.025 * k], scale: [1.05 * k, k, 0.78 * k], cast: false });
   for (const s of [1, -1]) {
-    P(model, model.j[s > 0 ? J.EL : J.ER], cylGeo(0.036 * k, 0.03 * k, dims.fore * 0.45, seg(12, 8)), lthr, { pos: [0, -dims.fore * 0.6, 0] }); // gauntlets
+    const el = model.j[s > 0 ? J.EL : J.ER];
+    P(model, el, cylGeo(0.036 * k, 0.029 * k, dims.fore * 0.72, seg(12, 8)), lthr, { pos: [0, -dims.fore * 0.52, 0] }); // long glove
+    P(model, el, cylGeo(0.053 * k, 0.038 * k, 0.07 * k, seg(12, 8)), lthr, { pos: [0, -dims.fore * 0.14, 0] }); // flared cuff
+    P(model, el, cylGeo(0.0385 * k, 0.0385 * k, 0.012 * k, seg(12, 8)), goldTrim, { pos: [0, -dims.fore * 0.3, 0] }); // buckle band
+    P(model, el, cylGeo(0.033 * k, 0.033 * k, 0.012 * k, seg(12, 8)), goldTrim, { pos: [0, -dims.fore * 0.62, 0] });
     P(model, model.j[s > 0 ? J.KL : J.KR], cylGeo(0.058 * k, 0.045 * k, dims.shin * 0.5, seg(12, 8)), lthr, { pos: [0, -dims.shin * 0.7, 0] }); // boots
   }
-  // coat tails (secondary motion)
-  for (const s of [1, -1]) addCloth(model, model.j[J.H], { R: 7, C: 3, len: 0.72 * k, w0: 0.17 * k, w1: 0.26 * k, anchor: new V3(s * 0.11 * k, 0.04 * k, -0.09 * k), mat: coatM, resp: 0.9, base: 0.1, billow: 0.05, ph: phase(), k });
-  addCloth(model, cj, { R: 9, C: 4, len: 0.62 * k, w0: 0.26 * k, w1: 0.34 * k, anchor: new V3(0, 0.33 * k, -0.12 * k), mat: coatM, resp: 1, base: 0.12, billow: 0.05, ph: phase(), k });
+  // long cape with sculpted folds (secondary motion via the lagged chain)
+  addCloth(model, cj, { R: 12, C: 16, len: 1.02 * k, w0: 0.3 * k, w1: 0.74 * k, anchor: new V3(0, 0.34 * k, -0.125 * k), mat: coatM, resp: 1, base: 0.1, billow: 0.06, folds: 0.03, foldN: 11, ph: phase(), k });
   // ---- hex magic: halos, cores, wisps (per-instance additive materials)
   const halo = glowInstance(0xff1830, 2.0, { opacity: 0 }), core = glowInstance(0xff7080, 2.6, { opacity: 0 }), wispM = glowInstance(0xff3040, 2.4, { opacity: 0 });
   const hl = [], wisps = [];
