@@ -4,7 +4,7 @@ Paste the "Starting prompt" section into a new chat to continue. Everything else
 
 ## Starting prompt
 
-> Continue work on the Spider-Man: Symbiote City game. Repo `noelsoo/Spiderman`, branch `claude/sharp-turing-uf9t1w`. Read `docs/HANDOVER.md` and `docs/ARCHITECTURE.md` first. Develop on that branch, commit and push when done, and do not open a pull request unless I ask. Start with the "Next steps" list in the handover.
+> Continue work on the Spider-Man: Symbiote City game. Repo `noelsoo/Spiderman`, branch `claude/elegant-heisenberg-e10osz`. Read `docs/HANDOVER.md` and `docs/ARCHITECTURE.md` first. Develop on that branch, commit and push when done, and do not open a pull request unless I ask. Start with the "Next steps" list in the handover.
 
 ## Project in one paragraph
 
@@ -13,7 +13,7 @@ A fan-made open-world superhero game inspired by Marvel's Spider-Man 2 (PS5). th
 ## Where things are
 
 - Repo: https://github.com/noelsoo/Spiderman
-- Branch: `claude/sharp-turing-uf9t1w` (everything is pushed; no pull request opened)
+- Branch: `claude/elegant-heisenberg-e10osz` (everything is pushed; no pull request opened)
 - Playable build (Claude artifact, private): https://claude.ai/artifact/XunNf47u7mQeViiiuS69aP (version 9 at time of writing)
 - Run locally: `npm install && npm run build && npx vite preview --port 8080 --host`, then open http://localhost:8080. Port 5173 was blocked on the user's machine, so use 8080 or any free port.
 - Desktop app: `cd desktop && npm install && npm start`
@@ -26,7 +26,14 @@ Working and verified in headless tests: all 11 heroes clear goon fights, all 10 
 Heroes (`HERO_ORDER`): spiderman, ironman, hulk, thor, wolverine, captain, hawkeye, scarlet, venom, carnage, antivenom.
 
 Recent work, newest first:
-1. Swing pose tweaks and bigger Venom eyes; thinner Anti-Venom tendril.
+1. Realism and powers pass (Sonnet agents, merged on `claude/elegant-heisenberg-e10osz`):
+   - Marina Bay Sands rebuilt (`src/world/sg/landmarks.js`): curved leaning tower legs, ship-shaped SkyPark with cantilever bow, pool, railings and trees, wavy Shoppes roof, shared glass facade material, bigger light show. Landing on the deck verified at y 205.
+   - New powers. Scarlet Witch: tendril combo, Chaos Lift and Crush (hold ability), Mind Control (hold ability2), Reality Warp dome (special while flying). Iron Man: thruster combo, smart shoulder lasers (hold special), Iron Legion drones (hold ability), Nano Shield (hold dodge on ground), air dash, ground pound. Hawkeye: 11 trick arrows with tap/double-tap/hold quick-select, multi-nock, airborne focus-mark volley, roll and vault. Wolverine: claw trails, pounce, Fastball throw, pin takedown, Feral Sense and Roar (holds), claw-climb any wall, visible regeneration. Helpers in `src/heroes/mystic/`, `ironman/`, `hawkeye/`, `wolverine/`. Several taps now fire on release so the hold variants work.
+   - Hero models: `muscleLimb`, `handGeo`, `footGeo`, `deformLathe` in `src/models/common.js`; shared head builder `src/models/face.js` (faces, hair, beards, cowls); costume detail for Scarlet Witch, Hawkeye, Thor, Captain, Wolverine. Viewer: `node tools/viewer/shot.mjs <heroes> <view> out.png`.
+   - Peds are one SkinnedMesh each with a cloth atlas and a map-dependent ethnic mix; cars lofted from cross-sections (7 calls each); new 12 m bus (MTA / SBS livery, 4% share).
+   - Surfaces: cracked asphalt, slab pavements, weathering, anti-tiling shader, HDB and shophouse facades in Singapore, aerial shadow frustum.
+   - Draw calls: shops culled beyond about 150 m, merged 3x3 far-LOD blocks. All measured spots now 143 to 243 calls.
+2. Swing pose tweaks and bigger Venom eyes; thinner Anti-Venom tendril.
 2. Black-pixel fix. Root cause: pooled tendril tube geometry in `src/heroes/spider/tendrils.js` had no `normal` attribute, so the lit material produced NaN and black pixels, which bloom spread. Normals are now written every frame.
 3. New home screen (`src/ui/hud.js`, `src/ui/campaign-ui.js`, `src/ui/menu.css`): SVG logo, left menu, controller badge, hero cards with stat panel, map choice cards, fade into gameplay.
 4. Singapore map wired in (`settings.map`, reload-based switch via `Game.switchMap`, `sm-open` sessionStorage flag).
@@ -73,14 +80,14 @@ Full contracts are in `docs/ARCHITECTURE.md` (v1 to v3 plus Map v3). Key points:
 
 ## Next steps (priority order)
 
-1. **Get the user's answer on "viewmodel"** (open since two turns ago). They asked for the viewmodel to be improved twice. Ask what they see: screen going black when cars pass, hero's hands/arms, weapon in hand, or camera clipping. The camera work done so far (sphere-cast, hero close fade, car-lift, occluder hiding) may not address their meaning.
-2. **Symbiote heroes still need real work.** The user said Venom, Carnage and Anti-Venom "still need work". The last pass only made small tweaks, because the models already had marbled skin, tendrils, blades, teeth and tongue. Ask for a screenshot or specifics (shape, colour, animation, powers). Candidates: stronger silhouette per hero, distinct idle/run/attack animation sets, more visible power effects, Anti-Venom tendril still glows too bright up close.
-3. **Untested items from the menu and map work:** PS4 pad navigation on the new title screen; the `sm-open` map-switch reload flow end to end in a real browser; the Settings > Gameplay "Free Roam map" row (the agent's regex check returned false, probably a case issue, never re-run); menu shots at 800 and 390 widths for map choice and campaign were not viewed.
-4. **Singapore rough edges:** Merlion tail hard to read, rain trees blobby, Shoppes podium is a plain slab, rain look never reviewed, highway intersections have no signal lamps (fallback phase), ejected-driver animation assumes a left-side seat, `layout.js`/`roads.js` comments describe the lane model backwards (true left-hand traffic is implemented), gun shops still use New York names, swing not re-verified on the final Singapore build. Campaign objectives in `src/campaign/objectives.js` are New York only; Campaign is gated to New York in the menu.
-5. **Police near the player showed 0 in the big New York tests.** Confirm police spawn at wanted level in the bigger map (Singapore at wanted 3 produced 7 cops, so likely fine, but not shown on New York).
-6. **Performance:** peds and vehicles are now culled, but there is still headroom to look at (instancing for peds/cars, shared materials). Aerial views are the worst case. Target was under 350 draw calls.
-7. **Optional:** a HUD rage bar for black-suit Spider-Man from `player.rage` / `player.raging` (requested by the black-suit work); New York `World` has no `id`, add `id: 'nyc'` for consistency; aerial skyline cylinder shows pale cutouts and near/far LOD tiles differ in colour from very high up.
-8. Run the full regression before shipping (hero fight sim for all 11 heroes, missions 1 to 10, drive/steal, shops, DS4), then commit, push and republish the artifact.
+1. **Faces still stylised:** Hulk's head looks small, Wolverine's cowl has a brick-like texture and block sideburns, Captain America's wings are flat cones, Scarlet Witch's tiara reads as a crown. Hair is textured sheets.
+2. **Viewmodel question still open** from the earlier session: ask what the user sees (screen going black near cars, hands, weapon, camera clipping).
+3. **Symbiote heroes** (Venom, Carnage, Anti-Venom) were not touched by the face pass; the user wanted more work on them.
+4. **Shop culling lives in `src/main.js`** but belongs in `src/weapons`; shops pop out at 150 to 190 m, pop-in not reviewed by eye.
+5. **Iron Man's drones do not draw aggro** (enemies always target the player); micro-missiles overshoot under 10 m.
+6. **Singapore rough edges:** Merlion tail, rain trees, highway signal lamps, gun shop names, campaign is New York only, lane comments in `layout.js`/`roads.js` are backwards.
+7. **Untested:** PS4 pad navigation on the title screen, map-switch reload flow in a real browser, police spawn at wanted level on New York.
+8. **Optional:** black-suit rage bar on the HUD, `id: 'nyc'` on the New York `World`.
 
 ## User preferences to respect
 
@@ -88,7 +95,7 @@ Direct answers, no preamble or wrap-up. British English, SGD, metric. Short para
 
 ## Commit conventions
 
-Develop on `claude/sharp-turing-uf9t1w`. Push with `git push -u origin claude/sharp-turing-uf9t1w`. End commit messages with:
+Develop on `claude/elegant-heisenberg-e10osz`. Push with `git push -u origin claude/elegant-heisenberg-e10osz`. End commit messages with:
 
 ```
 Co-Authored-By: Claude <noreply@anthropic.com>
