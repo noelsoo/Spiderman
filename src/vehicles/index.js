@@ -8,7 +8,7 @@
 //   Drive-by shooting lives in weapons.updateDriving() (RMB/L1 aim, LMB/R1 fire; this file only suppresses cam auto-recenter while aiming).
 import * as THREE from 'three';
 import { L, inWater } from '../world/city.js';
-import { KINDS, SPECS, PAINTS, VAN_PAINTS, TAXI_YELLOW, POLICE_WHITE, CarModel, CarInstancer, initCarAssets } from './models.js';
+import { KINDS, SPECS, PAINTS, VAN_PAINTS, TAXI_YELLOW, POLICE_WHITE, CarModel, BusModel, CarInstancer, initCarAssets } from './models.js';
 import { Vehicle } from './Vehicle.js';
 import { initAI, driveAI, randomLanePlacement, randomCurbPlacement, snapToLane, axisZ, setTrafficWorld } from './traffic.js';
 import { inWater as sgInWater } from '../world/sg/layout.js';
@@ -63,12 +63,12 @@ export class Vehicles {
     this.root = new THREE.Group(); this.root.name = 'vehicles';
     g.scene.add(this.root);
 
-    const mix = [['sedan', 0.34], ['taxi', 0.16], ['suv', 0.2], ['sports', 0.08], ['van', 0.12], ['police', 0.04]];
+    const mix = [['sedan', 0.30], ['taxi', 0.16], ['suv', 0.2], ['sports', 0.08], ['van', 0.12], ['police', 0.04], ['bus', 0.04]];
     const pickKind = () => { let r = Math.random(), s = 0; for (const [k, w] of mix) { s += w; if (r <= s) return k; } return 'sedan'; };
     let id = 0;
     for (let i = 0; i < N; i++) {
       const v = new Vehicle(this, pickKind(), id++);
-      v.parked = i < N * 0.3 && v.kind !== 'police' && v.kind !== 'taxi';
+      v.parked = i < N * 0.3 && v.kind !== 'police' && v.kind !== 'taxi' && v.kind !== 'bus';
       this._addVehicle(v);
     }
     for (let i = 0; i < POLICE_RESERVE; i++) {
@@ -95,6 +95,7 @@ export class Vehicles {
   _pickColor(v) {
     if (v.kind === 'taxi') return TAXI_YELLOW;
     if (v.kind === 'police') return POLICE_WHITE;
+    if (v.kind === 'bus') return 0xffffff;
     const pal = v.kind === 'van' ? VAN_PAINTS : PAINTS;
     return pal[(Math.random() * pal.length) | 0];
   }
@@ -148,7 +149,8 @@ export class Vehicles {
       for (const c of this.list) {
         if (c === v || !c.active) continue;
         const dx = c.pos.x - p.x, dz = c.pos.z - p.z;
-        if (dx * dx + dz * dz < 40) { clear = false; break; }
+        const need = Math.max(6.3, (v.spec.L + c.spec.L) * 0.5 + 0.8);
+        if (dx * dx + dz * dz < need * need) { clear = false; break; }
       }
       if (!clear) continue;
       this._releaseModel(v);
@@ -268,7 +270,8 @@ export class Vehicles {
     p.vel.set(0, 0, 0);
     const cam = g.cam;
     this._camSave = { d: cam.targetDistance, h: cam.heightOffset, s: cam.shoulder };
-    cam.targetDistance = 8.5; cam.heightOffset = 2.2; cam.shoulder = 0;
+    const big = v.spec.L > 8;   // buses: pull the camera back and up so it clears the roof
+    cam.targetDistance = big ? 15 : 8.5; cam.heightOffset = big ? 4 : 2.2; cam.shoulder = 0;
     this._lookIdle = 0;
     g.audio?.play?.('door');
     g.events.emit('vehicle:enter', { vehicle: v, stolen: !!stolen });
@@ -669,7 +672,7 @@ export class Vehicles {
       cam.pitch += (-0.17 - cam.pitch) * k;
     }
     cam.fovKick = clamp((Math.abs(v.speed) - 30) * 0.2, 0, 8) * 0.5 + (c.hb && Math.abs(v.slip) > 3 ? 1.5 : 0);
-    cam.targetDistance = 8.5 + Math.min(2.5, Math.abs(v.speed) * 0.04);
+    cam.targetDistance = (v.spec.L > 8 ? 15 : 8.5) + Math.min(2.5, Math.abs(v.speed) * 0.04);
   }
 
   _driveFeedback(dt) {
@@ -992,7 +995,7 @@ export class Vehicles {
   // ===================================================================== rendering: instanced far LOD / full near models
   _acquireModel(kind) {
     const pool = this._modelPool[kind] || (this._modelPool[kind] = []);
-    return pool.pop() || new CarModel(kind);
+    return pool.pop() || (kind === 'bus' ? new BusModel() : new CarModel(kind));
   }
   _attachModel(v) {
     if (v.model) return;
