@@ -365,7 +365,20 @@ class Game {
       sph.center.set(pos.x, pos.y + r * 0.5, pos.z); sph.radius = r;
       if (dx * dx + dz * dz > far * far || !fr.intersectsSphere(sph)) hide(obj);
     };
-    for (const v of this.vehicles.list ?? []) if (v.active && v !== this.vehicles.driving) cullOut(v.group, v.pos, 4, 400);
+    for (const v of this.vehicles.list ?? []) if (v.active && v !== this.vehicles.driving) cullOut(v.group, v.pos, v.spec?.L > 8 ? 8 : 4, 400);
+    // weapon storefronts are ~75 draw calls each (racks of gun meshes + a hologram): only draw them when reasonably close
+    for (const s of this.weapons?.shops ?? []) {
+      if (!s.group || !s.group.visible) continue;
+      const dx = s.pos.x - cp.x, dz = s.pos.z - cp.z, lim = s._shown ? 190 : 150;
+      const d2 = dx * dx + dz * dz;
+      s._shown = d2 < lim * lim;
+      if (!s._shown) { hide(s.group); continue; }
+      // the gun racks on the back wall are ~10 meshes each: tiny at distance, so only draw them up close
+      if (!s._racks) s._racks = s.group.children.filter((c) => c.isGroup && c.position.y < 4 && c.children[0]?.name?.startsWith('gun:')).map((c) => c.children[0]);
+      const rk = d2 < (s._rk ? 80 : 65) ** 2;
+      s._rk = rk;
+      for (const r of s._racks) if (!rk && r.visible) hide(r);
+    }
     for (const p of this.peds.list ?? []) if (p.active && p.root) cullOut(p.root, p.pos, 1.6, 160);
     for (const e of this.enemies.list ?? []) if (e.root) cullOut(e.root, e.pos, (e.height ?? 2) + 1, 600);
     const near = (e, r) => { const dx = cp.x - e.pos.x, dz = cp.z - e.pos.z, dy = cp.y - (e.pos.y + 1); return dx * dx + dz * dz < r * r && Math.abs(dy) < 1.6; };

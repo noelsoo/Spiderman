@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { isSg } from './traffic.js';
 
-export const KINDS = ['sedan', 'taxi', 'suv', 'sports', 'police', 'van'];
+export const KINDS = ['sedan', 'taxi', 'suv', 'sports', 'police', 'van', 'bus'];
 
 /** Gameplay + collision spec per kind. vmax m/s, accel m/s^2 (at standstill), brake m/s^2, grip 1 = normal. */
 export const SPECS = {
@@ -18,12 +18,15 @@ export const SPECS = {
   sports: { L: 4.4, W: 1.95, H: 1.29, wb: 2.65, wr: 0.35, ww: 0.32, vmax: 60, accel: 11.5, brake: 28, grip: 1.55, mass: 1300, hp: 85, mesh: 'sports' },
   police: { L: 4.9, W: 1.9, H: 1.5, wb: 2.9, wr: 0.35, ww: 0.25, vmax: 50, accel: 9.5, brake: 25, grip: 1.3, mass: 1800, hp: 130, mesh: 'sedan' },
   van:    { L: 5.4, W: 2.0, H: 2.3, wb: 3.3, wr: 0.38, ww: 0.26, vmax: 32, accel: 4.6, brake: 18, grip: 0.9, mass: 2600, hp: 150, mesh: 'van' },
+  // 12 m single-deck city bus: heavy, slow to accelerate, wide turning circle
+  bus:    { L: 12, W: 2.55, H: 3.15, wb: 5.9, wr: 0.5, ww: 0.3, vmax: 22, accel: 2.6, brake: 11, grip: 0.8, mass: 12000, hp: 420, mesh: 'bus' },
 };
 for (const k of KINDS) {
   const s = SPECS[k];
   s.R = s.W / 2 - 0.05;                       // collision sphere radius
   const reach = s.L / 2 - s.R;
-  s.cols = [-reach, 0, reach];                // sphere offsets along the car axis
+  const nc = Math.max(3, Math.ceil((s.L - 2 * s.R) / (2 * s.R)) + 1);   // enough spheres to cover the length (3 for cars, 5 for the bus)
+  s.cols = Array.from({ length: nc }, (_, i) => -reach + (2 * reach * i) / (nc - 1));   // sphere offsets along the car axis
   s.half = new THREE.Vector2(s.W / 2, s.L / 2);
 }
 
@@ -46,6 +49,7 @@ const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
 /** Deterministic body style for a kind + paint, so the near model and the far instanced LOD always agree. */
 export function styleFor(kind, hex) {
   const mesh = SPECS[kind].mesh;
+  if (mesh === 'bus') return 'bus';
   const h = (((hex >> 16) & 255) * 31 + ((hex >> 8) & 255) * 17 + (hex & 255) * 7) % 10;
   if (kind === 'sedan') return h < 4 ? 'hatch' : 'sedan';
   if (kind === 'van') return h % 2 === 1 ? 'minibus' : 'van';
@@ -697,6 +701,7 @@ function buildGeometries(style, spec, kind) {
 function trimFor(G, plateVar) { return G.trims[plateVar] || (G.trims[plateVar] = buildTrim(G.h, G.kind, plateVar).geometry(G.sx, G.sz)); }
 const lodCache = new Map();
 function lodGeometry(style, spec) {
+  if (spec.mesh === 'bus') return busLod();
   const key = `${style}|${spec.wr}|${spec.W}|${spec.L}`;
   let g = lodCache.get(key);
   if (!g) { g = buildGeometries(style, spec, spec.mesh === 'sedan' ? 'sedan' : spec.mesh === 'van' ? 'van' : spec.mesh).lod; lodCache.set(key, g); }
@@ -844,3 +849,125 @@ export class CarInstancer {
 }
 
 export const assets = () => A;
+
+// ------------------------------------------------------------------ city bus (12 m, boxy: MTA blue/white in New York, SBS purple/white in Singapore)
+const busGeo = {};
+const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+function busColors() {
+  return A.sg
+    ? { body: lin(0xe9e9ee), band: lin(0x5a2a8c), band2: lin(0xc8102e), roof: lin(0xd4d6dc) }
+    : { body: lin(0xe6e8ec), band: lin(0x0b3a8f), band2: lin(0xf2b600), roof: lin(0xd0d3d8) };
+}
+const BUS = { W: 2.55, L: 12, H: 3.15, y0: 0.5, zF: 6, zR: -6, wzF: 3.3, wzR: -2.6, glass0: 1.38, glass1: 2.78 };
+function buildBusGeometries() {
+  if (busGeo.body) return busGeo;
+  const C = busColors(), W = BUS.W, hx = W / 2, H = BUS.H, y0 = BUS.y0, GL = [0.03, 0.045, 0.06];
+  const P = new Boxes(), G = new Boxes(), T = new Boxes(), Lo = new Boxes(), Lb = new Boxes();
+  const bodyH = H - y0;
+  // main hull, rounded roof edges (two angled slabs), lower skirt band + thin accent line
+  P.box(W, bodyH - 0.2, BUS.L - 0.3, 0, y0 + (bodyH - 0.2) / 2, 0, C.body);
+  P.box(W - 0.3, 0.3, BUS.L - 0.3, 0, H - 0.17, 0, C.roof);
+  for (const sx of [-1, 1]) P.box(0.34, 0.34, BUS.L - 0.3, sx * (hx - 0.12), H - 0.2, 0, C.body, { rz: sx * Math.PI / 4 });
+  P.box(W - 0.2, bodyH - 0.3, 0.3, 0, y0 + (bodyH - 0.3) / 2 + 0.05, BUS.zF - 0.15, C.body);          // front cap
+  P.box(W - 0.2, bodyH - 0.3, 0.3, 0, y0 + (bodyH - 0.3) / 2 + 0.05, BUS.zR + 0.15, C.body);          // rear cap
+  for (const sx of [-1, 1]) {
+    P.box(0.04, 0.62, BUS.L - 0.34, sx * (hx + 0.005), y0 + 0.33, 0, C.band);
+    P.box(0.04, 0.09, BUS.L - 0.34, sx * (hx + 0.005), y0 + 0.74, 0, C.band2);
+    P.box(0.04, 0.12, BUS.L - 0.34, sx * (hx + 0.005), BUS.glass0 - 0.1, 0, C.band);              // belt line under the windows
+  }
+  P.box(W - 0.1, 0.5, 0.05, 0, y0 + 0.3, BUS.zF + 0.005, C.band);                                  // front skirt
+  P.box(W - 0.1, 0.5, 0.05, 0, y0 + 0.3, BUS.zR - 0.005, C.band);
+  // windows: continuous dark band with pillars; doors (front and rear-centre) as darker glass panels
+  const gh = BUS.glass1 - BUS.glass0, gy = (BUS.glass0 + BUS.glass1) / 2;
+  for (const sx of [-1, 1]) {
+    G.box(0.05, gh, 9.9, sx * (hx + 0.012), gy, -0.4, GL);
+    for (let i = 0; i <= 7; i++) { const z = -5.2 + i * 1.3; P.box(0.07, gh + 0.06, 0.1, sx * (hx + 0.016), gy, z, C.body); }
+  }
+  G.box(W - 0.3, 1.45, 0.05, 0, 2.08, BUS.zF + 0.015, GL);                                           // windscreen
+  G.box(W - 0.5, 0.7, 0.05, 0, 1.95, BUS.zR - 0.015, GL);                                             // rear window
+  P.box(0.07, 1.5, 0.1, 0, 2.08, BUS.zF + 0.02, C.body);                                             // windscreen centre post
+  // trim: bumpers, wheel arches, roof AC pod, mirrors, door seams
+  T.box(W - 0.05, 0.22, 0.2, 0, y0 + 0.05, BUS.zF + 0.05, BLACK);
+  T.box(W - 0.05, 0.22, 0.2, 0, y0 + 0.05, BUS.zR - 0.05, BLACK);
+  T.box(1.3, 0.3, 0.06, 0, y0 + 0.62, BUS.zF + 0.035, GREY);                                         // grille
+  T.box(1.2, 0.3, 0.05, 0, y0 + 0.62, BUS.zR - 0.03, GREY);                                           // engine louvres
+  for (const sx of [-1, 1]) {
+    for (const wz of [BUS.wzF, BUS.wzR]) T.box(0.07, 1.0, 1.35, sx * (hx + 0.02), 0.62, wz, BLACK);
+    T.box(0.1, 0.55, 0.05, sx * (hx + 0.02), 0.5 + 1.0, BUS.zF - 0.5, BLACK);                         // door seams, front door
+    T.box(0.35, 0.5, 0.06, sx * (hx + 0.28), 2.35, BUS.zF - 0.4, BLACK, { ry: sx * 0.15 });            // mirror
+  }
+  T.box(1.6, 0.34, 3.2, 0, H + 0.1, -3.4, GREY);
+  T.box(1.0, 0.2, 1.6, 0, H + 0.05, 1.6, GREY);
+  // lamps
+  const HEAD = [3.0, 2.9, 2.5], DEST = [2.4, 1.1, 0.12];
+  for (const sx of [-1, 1]) Lo.box(0.4, 0.16, 0.05, sx * 0.95, y0 + 0.5, BUS.zF + 0.045, HEAD);
+  Lo.box(1.6, 0.2, 0.05, 0, 3.0, BUS.zF + 0.02, DEST);                                                // destination sign
+  Lo.box(1.0, 0.18, 0.05, 0, 2.95, BUS.zR - 0.02, DEST);
+  const tails = (b, on) => { const R = on ? [4.2, 0.1, 0.07] : [0.62, 0.035, 0.03]; for (const sx of [-1, 1]) { b.box(0.22, 0.5, 0.05, sx * 1.1, 1.0, BUS.zR - 0.04, R); b.box(0.2, 0.14, 0.05, sx * 1.1, 1.38, BUS.zR - 0.04, on ? [2.0, 0.9, 0.1] : [0.55, 0.25, 0.02]); } };
+  tails(Lo, false); tails(Lb, true);
+  for (const sx of [-1, 1]) Lb.box(0.4, 0.16, 0.05, sx * 0.95, y0 + 0.5, BUS.zF + 0.045, HEAD);
+  Lb.box(1.6, 0.2, 0.05, 0, 3.0, BUS.zF + 0.02, DEST); Lb.box(1.0, 0.18, 0.05, 0, 2.95, BUS.zR - 0.02, DEST);
+  busGeo.body = P.geometry(1, 1); busGeo.glass = G.geometry(1, 1); busGeo.trim = T.geometry(1, 1);
+  busGeo.lampOff = Lo.geometry(1, 1); busGeo.lampOn = Lb.geometry(1, 1);
+  busGeo.wheel = wheelGeometry(0.5, 0.3);
+  busGeo.pair = (() => { const a = busGeo.wheel.clone(), b = busGeo.wheel.clone(); const x = hx - 0.2; a.translate(x, 0, 0); b.translate(-x, 0, 0); return mergeGeometries([a, b], false); })();
+  return busGeo;
+}
+let busLodG = null;
+function busLod() {
+  if (busLodG) return busLodG;
+  const C = busColors(), parts = [];
+  const bx = (w, h, d, x, y, z, col) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); parts.push(colored(plain(g), new THREE.Color().setRGB(col[0], col[1], col[2]))); };
+  bx(BUS.W, BUS.H - BUS.y0, BUS.L, 0, BUS.y0 + (BUS.H - BUS.y0) / 2, 0, C.body);
+  for (const sx of [-1, 1]) {
+    bx(0.04, 0.62, BUS.L - 0.3, sx * (BUS.W / 2 + 0.01), BUS.y0 + 0.33, 0, C.band);
+    bx(0.05, BUS.glass1 - BUS.glass0, 9.9, sx * (BUS.W / 2 + 0.012), (BUS.glass0 + BUS.glass1) / 2, -0.4, [0.03, 0.045, 0.06]);
+    for (const wz of [BUS.wzF, BUS.wzR]) { const g = new THREE.CylinderGeometry(0.5, 0.5, 0.35, 7); g.rotateZ(Math.PI / 2); g.translate(sx * (BUS.W / 2 - 0.15), 0.5, wz); parts.push(colored(plain(g), 0x0b0b0c)); }
+  }
+  bx(BUS.W - 0.3, 1.45, 0.05, 0, 2.08, BUS.zF + 0.02, [0.03, 0.045, 0.06]);
+  busLodG = mergeGeometries(parts, false);
+  return busLodG;
+}
+
+export class BusModel {
+  constructor() {
+    const kind = 'bus', spec = SPECS.bus;
+    this.kind = kind; this.spec = spec;
+    const G = buildBusGeometries();
+    this.root = new THREE.Group();
+    this.paintMat = BusModel._paint ||= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2 });
+    const shadow = A.quality === 'high' || A.quality === 'ultra';
+    const mk = (geo, mat, cast = false) => { const m = new THREE.Mesh(geo, mat); m.castShadow = cast && shadow; this.root.add(m); return m; };
+    this.body = mk(G.body, this.paintMat, true);
+    this.paintMeshes = [this.body];
+    this.glass = mk(G.glass, A.glass);
+    this.trim = mk(G.trim, A.trim);
+    this.head = mk(G.lampOff, A.lamp);
+    this.tail = this.head; this.lights = this.head;
+    this.braking = false;
+    this.steerPivots = []; this.wheels = [];
+    for (const sx of [1, -1]) {
+      const m = new THREE.Mesh(G.wheel, A.wheel);
+      const piv = new THREE.Group(); piv.add(m); piv.position.set(sx * (BUS.W / 2 - 0.2), spec.wr, BUS.wzF);
+      this.root.add(piv); this.steerPivots.push(piv); this.wheels.push(m);
+    }
+    const rear = new THREE.Mesh(G.pair, A.wheel); rear.position.set(0, spec.wr, BUS.wzR); this.root.add(rear); this.wheels.push(rear);
+    this.extras = {};
+    this.spin = 0;
+  }
+  setPaint() { /* single livery per map */ }
+  setCharred(on) { this.body.material = on ? A.charred : this.paintMat; if (on) this.setBrake(false); }
+  setBrake(on) {
+    if (on === this.braking) return;
+    this.braking = on;
+    const G = buildBusGeometries();
+    this.head.geometry = on ? G.lampOn : G.lampOff;
+  }
+  wheelsUpdate(steer, dist) {
+    this.spin += dist / this.spec.wr;
+    for (const p of this.steerPivots) p.rotation.y = -steer;
+    for (const w of this.wheels) w.rotation.x = this.spin;
+  }
+  siren() {}
+}
+
