@@ -632,9 +632,24 @@ export class IronMan extends Hero {
         origin.addScaledVector(g.cam.right, side * 0.5);
         // pop up and outward first, homing takes over (anticipation: a visible puff at each launcher)
         const launch = new THREE.Vector3(side * 0.7 + rand(-0.25, 0.25), 1.1 + rand(0, 0.5), rand(-0.2, 0.2)).applyAxisAngle(UPV, this.yaw).add(aimDir.clone().multiplyScalar(0.6)).normalize().multiplyScalar(26);
+        // close targets (< 10 m): skip the pop-up arc and launch straight at them, with a much tighter turn rate
+        let close = false;
+        if (target?.alive) {
+          const tc = target.center ?? target.pos;
+          if (tc.distanceTo(origin) < 10) { close = true; launch.copy(tc).sub(origin).normalize().multiplyScalar(26); }
+        }
         g.combat?.projectile?.({
           pos: origin, vel: launch, damage: MISSILE_DMG * this.dmgMul, radius: 0.5, life: 4, color: 0xffaa44, size: 0.25,
-          kind: 'missile', team: 'player', homing: target, source: this, turn: locked ? 5 : 3.5,
+          kind: 'missile', team: 'player', homing: target, source: this, turn: close ? 14 : (locked ? 5 : 3.5),
+          update: target ? (pr, dt) => {
+            // terminal guidance: inside 14 m steer hard onto the target so the missile cannot orbit or overshoot it
+            const h = pr.homing; if (!h || h.alive === false) return;
+            const tc = h.center ?? h.pos, d = tc.distanceTo(pr.pos);
+            if (d > 14) return;
+            _a.subVectors(tc, pr.pos).normalize();
+            const sp = pr.vel.length();
+            pr.vel.normalize().lerp(_a, Math.min(1, 12 * dt)).normalize().multiplyScalar(Math.min(sp, Math.max(16, d * 5)));
+          } : undefined,
           onHit: (tg, proj) => this._missileBoom(proj?.pos ?? origin, tg),
           onExpire: (proj) => this._missileBoom(proj?.pos ?? origin, null),
         });

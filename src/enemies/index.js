@@ -45,6 +45,29 @@ export class EnemyManager {
     this.running = false;
     this._travelT = 0;
     this.zone = new THREE.Vector3();
+    this.decoys = [];          // temporary taunt targets: { pos, center, radius, priority, alive, ... } (empty = feature off)
+  }
+
+  // ===================================================================== decoys / taunt targets
+  /** Register a temporary target. `radius` is the taunt range around it; higher `priority` wins over nearer. Returns d. */
+  addDecoy(d) {
+    if (!d.center) d.center = d.pos;
+    d.radius = d.radius ?? 25; d.priority = d.priority ?? 0; d.isDecoy = true;
+    if (!this.decoys.includes(d)) this.decoys.push(d);
+    return d;
+  }
+  removeDecoy(d) { const i = this.decoys.indexOf(d); if (i >= 0) this.decoys.splice(i, 1); }
+  /** Best decoy for an enemy at (x,z): highest priority, then nearest, within the decoy's radius. Bosses never use one. */
+  pickDecoy(e) {
+    if (!this.decoys.length || e.isBoss) return null;
+    let best = null, bp = -Infinity, bd = Infinity;
+    for (const d of this.decoys) {
+      if (d.alive === false || d.dead) continue;
+      const dx = d.pos.x - e.pos.x, dz = d.pos.z - e.pos.z, dd = dx * dx + dz * dz;
+      if (dd > d.radius * d.radius) continue;
+      if (d.priority > bp || (d.priority === bp && dd < bd)) { best = d; bp = d.priority; bd = dd; }
+    }
+    return best;
   }
 
   // ===================================================================== lifecycle
@@ -54,6 +77,7 @@ export class EnemyManager {
     for (const o of this.orbs) o.mesh.parent?.remove(o.mesh);
     this.orbs.length = 0;
     this.tokens.melee.clear(); this.tokens.ranged.clear();
+    this.decoys.length = 0;
     this.stats = { kills: 0, time: 0, wave: 0, maxCombo: 0, damageTaken: 0 };
     this.phase = 'idle'; this.timer = 0; this.boss = null; this.queue.length = 0;
     this.victoryT = -1; this.running = false; this.objectiveActive = false;

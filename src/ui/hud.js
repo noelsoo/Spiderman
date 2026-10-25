@@ -238,6 +238,7 @@ export class HUD {
             <div class="hname"><span data-r="hname">-</span><small data-r="hhp"></small></div>
             <div class="hp" data-r="hp"></div>
             <div class="focus" data-r="focus"><div class="ult" data-r="ult">ULTIMATE READY</div><b data-r="focusb"></b></div>
+            <div class="rage hidden" data-r="rage"><b data-r="rageb"></b><span>RAGE</span></div>
           </div>
         </div>
         <div class="wpn hidden" data-r="wpn"><div class="wn" data-r="wpnn"></div><div class="wa"><b data-r="wpnc"></b><span data-r="wpnr"></span></div><div class="rl"><b data-r="wpnrl"></b></div></div>
@@ -1000,6 +1001,15 @@ export class HUD {
     if (full !== this._sig.full || this._sig.ultPad !== this._usePad()) {
       this._sig.full = full; this._sig.ultPad = this._usePad(); this.$.focus.classList.toggle('full', full);
       this.$.ult.innerHTML = `ULTIMATE READY &nbsp;${this._glyph('ultimate')}`;
+    }
+
+    // black-suit rage bar (Spider-Man symbiote suit only)
+    const showRage = p.id === 'spiderman' && !!p.symbiote;
+    if (showRage !== this._sig.rageOn) { this._sig.rageOn = showRage; this.$.rage.classList.toggle('hidden', !showRage); }
+    if (showRage) {
+      this.$.rageb.style.width = `${Math.max(0, Math.min(100, p.rage || 0))}%`;
+      const rg = !!p.raging;
+      if (rg !== this._sig.raging) { this._sig.raging = rg; this.$.rage.classList.toggle('raging', rg); }
     }
 
     // abilities (rebuild only when something changes); hidden while driving

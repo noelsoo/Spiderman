@@ -215,8 +215,15 @@ export class Enemy {
     }
 
     const pl = g.player;
-    this.target = pl && !pl.dead ? pl : null;
-    if (pl) {
+    // a registered decoy (e.g. Iron Legion drone) in range steals aggro; bosses ignore decoys
+    const decoy = this.manager.pickDecoy?.(this) ?? null;
+    this.decoy = decoy;
+    const tg = decoy ?? (pl && !pl.dead ? pl : null);
+    this.target = tg;
+    if (decoy) {
+      this.dx = decoy.pos.x - this.pos.x; this.dz = decoy.pos.z - this.pos.z;
+      this.dist = Math.hypot(this.dx, this.dz);
+    } else if (pl) {
       this.dx = pl.pos.x - this.pos.x; this.dz = pl.pos.z - this.pos.z;
       this.dist = Math.hypot(this.dx, this.dz);
     }
@@ -224,7 +231,7 @@ export class Enemy {
     this._losT -= dt;
     if (this._losT <= 0) {
       this._losT = 0.3 + Math.random() * 0.15;
-      if (pl) this.hasLOS = g.physics.lineOfSight(this.eyePos, pl.center);
+      if (tg) this.hasLOS = g.physics.lineOfSight(this.eyePos, tg.center);
     }
 
     const incapacitated = this.stunned || this.webbed || this.kbTimer > 0;
