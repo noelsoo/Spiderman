@@ -516,13 +516,13 @@ export function buildHulk() {
   const skin = withRim(phys(0xffffff, { map: sm_.map, normalMap: sm_.normal, normalScale: new V2(1.1, 1.1), roughness: 0.52, metalness: 0.0, sheen: 0.9, sheenRoughness: 0.4, sheenColor: new THREE.Color(0xc8ff90), clearcoat: 0.18, clearcoatRoughness: 0.45 }), 0xb8ff9a, 0.12);
   const skinD = std(0x3f8530, { roughness: 0.6, normalMap: sm_.normal, normalScale: new V2(0.8, 0.8) });
   const shorts = std(0xffffff, { map: tornShortsTexture(), roughness: 0.88, normalMap: fabricNormal(5, 0.5, 'hulkfab'), normalScale: new V2(0.7, 0.7) });
-  const HLd = skullHead('hulk', { brow: 0.15, browLat: 0.2, socket: 0.085, lid: 0.03, nose: 0.17, noseW: 1.5, cheek: 0.09, taper: 0.03, jawFlare: 0.2, hollow: 0.2, jawBone: 0.12, chin: 0.12, chinW: 0.42, muzzle: 0.06, lips: 1.2, fore: 0.0, back: 0.03, chinW2: 0 },
-    { skin: '#58a23f', shade: '#2b6226', iris: '#a6e65e', pupil: '#102208', sclera: '#dfe9bd', brow: '#0f220c', lip: '#2c6a2a', mood: 'angry', lid: 0.5, browW: 0.08, teeth: true, age: 0.9, blush: 0, bag: 0.1, eyeSize: 1.35, seed: 21, rough: 0.5 });
+  const HLd = skullHead('hulk', { brow: 0.15, browLat: 0.2, socket: 0.085, lid: 0.03, nose: 0.17, noseW: 1.5, cheek: 0.09, taper: 0.03, jawFlare: 0.2, hollow: 0.2, jawBone: 0.16, chin: 0.17, chinW: 0.46, muzzle: 0.1, lips: 1.2, fore: 0.0, back: 0.03, chinW2: 0 },
+    { skin: '#64b046', shade: '#3f8133', iris: '#a6e65e', pupil: '#102208', sclera: '#dfe9bd', brow: '#0f220c', lip: '#2c6a2a', mood: 'angry', lid: 0.5, browW: 0.08, teeth: true, age: 0.9, blush: 0, bag: 0.1, eyeSize: 1.35, seed: 21, rough: 0.5 });
   const info = buildBody(model, {
     headGeo: HLd.headGeo, skull: HLd.skull,
     mats: { default: skin, pelvis: shorts, thigh: skin, shin: skin, foot: skin, neck: skin, head: HLd.mat },
     muscle: 1.3, traps: 0.95, torso: { sx: 1.5, sz: 0.9, chestR: 1.3, waistR: 0.9 },
-    head: { R: 0.115, sx: 1.1, sy: 0.98, sz: 1.04 },
+    head: { R: 0.115, sx: 1.36, sy: 1.22, sz: 1.28 },
     arm: { u0: 0.062, u1: 0.05, f0: 0.054, f1: 0.042, ub: 0.3, fb: 0.35, shoulder: 1.0 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.28, sb: 0.3 },
     armM: 1.35, foreM: 1.55, legM: 1.2, neckR: 0.068, pec: 0.2,
@@ -610,10 +610,10 @@ export function buildThor() {
   for (const s of [1, -1]) P(model, model.j[s > 0 ? J.EL : J.ER], limbGeo(0.17 * k, 0.047 * k, 0.04 * k, 0.04, 0.4), silver, { pos: [0, -0.07 * k, 0] });
   // hair (cap + long strands past the shoulders) and a full beard with moustache
   const hr = H.R;
-  const hair = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3 }), hairD = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3, dbl: true });
+  const hair = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3 }), hairD = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3, dbl: true }), hairF = hairMaterial('#c9993a', { hi: '#f2d27a', seed: 3, feather: true });
   patch(model, H, 'thorcap', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, 0.66], [0.5, 0.6], [0.9, 0.34], [1.25, 0.02], [1.8, -0.3], [3.14, -0.3]]), pw: 1.15,
     thick: (a, l, t) => 0.045 + 0.05 * t + 0.014 * Math.sin(a * 7 + t * 4) * t,
-    post: (p, a, l, t) => { const k = sm01(1.1, 1.9, Math.abs(a)); p.y -= (2.6 + 0.35 * Math.sin(a * 17)) * sm01(0.72, 1, t) * k; p.x *= 1 + 0.12 * t * k; p.z -= 0.1 * t * k; } }, hair, { cast: true });
+    post: (p, a, l, t) => { const k = sm01(1.1, 1.9, Math.abs(a)); p.y -= (2.6 + 0.35 * Math.sin(a * 17)) * sm01(0.72, 1, t) * k; p.x *= 1 + 0.12 * t * k; p.z -= 0.1 * t * k; } }, hairF, { cast: true });
   const beardTop = tab([[0, -0.6], [0.3, -0.57], [0.6, -0.44], [1.0, -0.18], [1.45, 0.02]]), beardBot = tab([[0, -1.04], [0.5, -0.98], [1.0, -0.82], [1.45, -0.5]]);
   patch(model, H, 'thorbeard', { aMin: -1.45, aMax: 1.45, na: seg(30, 18), nb: 10, top: beardTop, bot: beardBot, pw: 1.1, thick: (a, l, t) => 0.04 + 0.05 * t, post: (p, a, l, t) => { p.y -= 0.34 * t * t * (1 - Math.abs(a) / 1.7); p.z += 0.05 * t * (1 - Math.abs(a) / 1.6); } }, hair, { cast: true });
   patch(model, H, 'thorstache', { aMin: -0.52, aMax: 0.52, na: 12, nb: 4, top: () => -0.4, bot: tab([[0, -0.49], [0.3, -0.47], [0.52, -0.5]]), thick: () => 0.05 }, hair);
@@ -727,26 +727,32 @@ export function buildSymbiote(cfg = {}) {
   const anti = !!cfg.anti, K = cfg.k ?? 1.3, HR = cfg.headR ?? 0.165;
   const dims = makeDims(K, { headR: HR, neck: anti ? 0.11 : 0.14 });
   const rig = buildRig(dims, 1.05);
-  const model = new ProcModel(cfg.id || 'venom', rig, { prof: { stance: 'hulk', cadence: 0.82, stride: 1.05, armSwing: 1.1, lean: 1.35, bob: 1.6, flipDodge: false, wide: 0.1, tempo: 0.95 } });
+  const model = new ProcModel(cfg.id || 'venom', rig, { prof: anti ? { stance: 'saint', cadence: 0.95, stride: 1.1, armSwing: 0.9, lean: 0.7, bob: 0.7, flipDodge: false, wide: 0.02, tempo: 1.05 } : { stance: 'brute', cadence: 0.72, stride: 1.0, armSwing: 1.0, lean: 1.4, bob: 2.2, flipDodge: false, throwStyle: 'two', wide: 0.16, tempo: 0.82, knuckle: true } });
+  model.fx = { power: 0 };
   const vn = veinNormal(anti ? 5 : 3, 3.4);
   const symOpt = anti
     ? { id: 'anti', color: 0xffffff, map: antiStreakTexture(), rim: 0x9fe8ff, rimK: 0.5, rough: 0.16, normalMap: vn, normalScale: 0.9 }
-    : { id: 'venom', color: 0x040407, rim: 0x3a6cff, rimK: 0.55, rough: 0.12, normalMap: vn, normalScale: 1.1 };
+    : { id: 'venom', color: 0x030306, rim: 0x5a90ff, rimK: 0.7, rough: 0.1, normalMap: vn, normalScale: 1.1 };
   const sym = symMat(symOpt);
   const info = buildBody(model, {
     mats: { default: sym },
-    muscle: 1.25, torso: { sx: 1.5, sz: 1.0, chestR: 1.28, waistR: 0.85 },
-    head: { R: HR, sx: anti ? 0.98 : 1.25, sy: 1.0, sz: anti ? 1.0 : 1.1 },
-    arm: { u0: 0.06, u1: 0.048, f0: 0.052, f1: 0.04, ub: 0.28, fb: 0.3, shoulder: 1.45 },
+    muscle: anti ? 1.2 : 1.5, torso: anti ? { sx: 1.45, sz: 0.95, chestR: 1.25, waistR: 0.85 } : { sx: 1.7, sz: 1.1, chestR: 1.38, waistR: 0.8 },
+    head: { R: HR, sx: anti ? 0.98 : 1.3, sy: anti ? 1.0 : 0.92, sz: anti ? 1.0 : 1.15 },
+    arm: { u0: 0.06, u1: 0.048, f0: 0.052, f1: 0.04, ub: 0.28, fb: 0.3, shoulder: anti ? 1.45 : 1.5 },
     leg: { t0: 0.09, t1: 0.066, s0: 0.066, s1: 0.045, tb: 0.25, sb: 0.28 },
-    armM: 1.6, foreM: 1.8, legM: 1.2, neckR: 0.08,
-    foot: [0.066, 0.05, 0.17], hand: [0.066, 0.075, 0.075], pelvis: [0.42, 0.22, 0.28],
+    armM: anti ? 1.55 : 1.7, foreM: anti ? 1.7 : 1.9, legM: anti ? 1.15 : 1.35, neckR: anti ? 0.08 : 0.1,
+    foot: [0.066, 0.05, 0.17], hand: anti ? [0.066, 0.075, 0.075] : [0.08, 0.09, 0.09], pelvis: [0.42, 0.22, 0.28],
   });
   const k = dims.k, hj = model.j[J.HD], H = info.headInfo, hr = H.R;
   // eyes: huge jagged white
-  const eyeM = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.5, roughness: 0.2 });
+  const eyeM = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.5, roughness: 0.2 }).clone();
   if (anti) addEyes(model, H, 'venom', eyeM, std(0x050508, { roughness: 0.3 }), { grow: 0.56, dy: -0.004, lift: 0.014, depth: 0.01, dx: 0.0, rimGrow: 1.0, rimDx: 0.0, rimDy: 0.0 });
-  else addEyes(model, H, 'venom', eyeM, null, { grow: 1.3, dy: -0.01, lift: 0.012, depth: 0.01, dx: 0.0 });
+  else addEyes(model, H, 'venom', eyeM, null, { grow: 1.55, dy: -0.012, lift: 0.014, depth: 0.01, dx: 0.0 });
+  if (!anti) { // jagged eye edges: small white blades fanning out of each eye
+    const jg = [];
+    for (const s of [1, -1]) for (let i = 0; i < 6; i++) { const a = (i / 5 - 0.5) * 2.4 + s * 0.2; jg.push({ geo: coneGeo(0.008, 0.026 + (i % 2) * 0.014, 4), pos: [s * hr * H.sx * (0.5 + Math.sin(a) * 0.3), H.y0 + hr * 0.2 + Math.cos(a) * hr * 0.2 * (i % 2 ? 1 : 0.8) - hr * 0.08, hr * H.sz * 0.88], rot: [0, 0, -s * a * 0.9 + (s > 0 ? 0 : 0)] }); }
+    P(model, hj, mergeParts('venomjag' + hr, jg), eyeM, { cast: false });
+  }
   const fangs = !anti;
   // mouth: Venom = huge toothy maw + long tongue; Anti-Venom = closed grin line with a few fangs
   const mouth = std(0x1a0508, { roughness: 0.6 });
@@ -755,9 +761,9 @@ export function buildSymbiote(cfg = {}) {
   let tongue = null;
   if (!anti) {
     P(model, hj, sphereGeo(1, 16, 10), mouth, { pos: [0, H.y0 - hr * 0.5, hr * H.sz * 0.78], scale: [hr * H.sx * 0.92, hr * 0.3, hr * 0.32], cast: false });
-    const teeth = [], rg = rng(5), N = 15;
+    const teeth = [], rg = rng(5), N = 23;
     for (let i = 0; i < N; i++) {
-      const u = i / (N - 1) * 2 - 1, phi = u * 1.05;
+      const u = i / (N - 1) * 2 - 1, phi = u * 1.1;
       const x = Math.sin(phi) * hr * H.sx * 1.0, z = Math.cos(phi) * hr * H.sz * 0.96;
       const yU = H.y0 - hr * 0.36 + u * u * hr * 0.2, yL = H.y0 - hr * 0.66 + u * u * hr * 0.2;
       const sz = (0.03 + rg() * 0.024) * (1 - Math.abs(u) * 0.3) * (i % 2 ? 1.0 : 1.35);
@@ -768,7 +774,7 @@ export function buildSymbiote(cfg = {}) {
     const t2 = [];
     for (let i = 0; i < 9; i++) { const u = i / 8 * 2 - 1, phi = u * 0.85; t2.push({ geo: coneGeo(0.008, 0.03, 4), pos: [Math.sin(phi) * hr * H.sx * 0.86, H.y0 - hr * 0.42 + u * u * hr * 0.15, Math.cos(phi) * hr * H.sz * 0.82], rot: [Math.PI + 0.15, -phi, 0] }); }
     P(model, hj, mergeParts('venomteeth3', t2), std(0xe4e0d0, { roughness: 0.4 }), { cast: false });
-    tongue = new Tendril({ segs: 16, radial: 6, r0: 0.03, r1: 0.007, material: tongueMat, ref: new V3(0, 1, 0) });
+    tongue = new Tendril({ segs: 20, radial: 6, r0: 0.036, r1: 0.007, material: tongueMat, ref: new V3(0, 1, 0) });
     hj.add(tongue.mesh);
     for (const s of [1, -1]) P(model, hj, boxGeo(hr * 0.9, hr * 0.12, hr * 0.5), sym, { pos: [s * hr * 0.5, H.y0 + hr * 0.62, hr * 0.78], rot: [0.1, 0, -s * 0.3] }); // brow ridge
   } else {
@@ -794,6 +800,13 @@ export function buildSymbiote(cfg = {}) {
     P(model, model.j[J.CH], mergeParts('venombackspikes' + k, bs), sym, {});
     for (const s of [1, -1]) P(model, model.j[s > 0 ? J.AL : J.AR], coneGeo(0.035 * k, 0.2 * k, 6), sym, { pos: [s * 0.04 * k, 0.1 * k, -0.02], rot: [0.1, 0, -s * 0.9] });
   }
+  if (!anti) { // hunched brute: trapezius hump, knuckle bulges, heavy shoulder caps
+    P(model, model.j[J.CH], sphereGeo(1, 14, 10), sym, { pos: [0, 0.26 * k, -0.1 * k], scale: [0.16 * k, 0.07 * k, 0.1 * k] });
+    for (const s of [1, -1]) {
+      P(model, model.j[s > 0 ? J.AL : J.AR], sphereGeo(1, 12, 9), sym, { pos: [s * 0.03 * k, 0.04 * k, 0], scale: [0.07 * k, 0.06 * k, 0.07 * k] });
+      P(model, model.j[s > 0 ? J.WL : J.WR], sphereGeo(1, 10, 8), sym, { pos: [0, -dims.hand * 0.5, 0.03 * k], scale: [0.075 * k, 0.06 * k, 0.07 * k] });
+    }
+  }
   // chest + back emblem (tendril-edged spider)
   const cr = info.chestRad(0.22 * k);
   const embM = std(0xffffff, { map: symEmblemTexture(anti ? 'anti' : 'venom'), transparent: true, alphaTest: 0.35, roughness: anti ? 0.3 : 0.25, emissive: anti ? 0x000000 : 0xffffff, emissiveIntensity: anti ? 0 : 0.2, side: THREE.DoubleSide });
@@ -802,16 +815,18 @@ export function buildSymbiote(cfg = {}) {
   // back tendrils
   const tends = [];
   const tm = symMat({ ...symOpt, id: symOpt.id + 't' });
-  const roots = [[0.14, 0.3, -0.12, 0.9, 0.45, -0.7], [-0.14, 0.3, -0.12, -0.9, 0.45, -0.7], [0.08, 0.15, -0.14, 0.7, 0.0, -1.0], [-0.08, 0.15, -0.14, -0.7, 0.0, -1.0], [0.0, 0.34, -0.12, 0.0, 0.7, -0.8]];
+  const roots = anti ? [[0.14, 0.3, -0.12, 0.9, 0.45, -0.7], [-0.14, 0.3, -0.12, -0.9, 0.45, -0.7], [0.08, 0.15, -0.14, 0.7, 0.0, -1.0], [-0.08, 0.15, -0.14, -0.7, 0.0, -1.0], [0.0, 0.34, -0.12, 0.0, 0.7, -0.8]] : [[0.2, 0.32, -0.12, 0.9, 0.5, -0.7], [-0.2, 0.32, -0.12, -0.9, 0.5, -0.7], [0.12, 0.2, -0.14, 0.7, 0.0, -1.0], [-0.12, 0.2, -0.14, -0.7, 0.0, -1.0], [0.0, 0.36, -0.12, 0.0, 0.7, -0.8], [0.3, 0.28, -0.1, 1.0, 0.1, -0.5], [-0.3, 0.28, -0.1, -1.0, 0.1, -0.5]];
   const ts = anti ? 0.72 : 1;
   (anti ? roots.slice(0, 3) : roots).forEach((r, i) => {
     const t = new Tendril({ segs: 16, radial: 6, r0: 0.075 * k * 0.8, r1: 0.014, material: tm, ref: new V3(0, 1, 0) });
     model.j[J.CH].add(t.mesh); tends.push({ t, r, ph: i * 1.7 });
   });
+  const eyeBase = eyeM.emissiveIntensity;
   addHook(model, (c, m) => {
-    const sp2 = Math.hypot(c.vl.x, c.vl.z), len = 1.0 * k * 0.7;
+    const sp2 = Math.hypot(c.vl.x, c.vl.z), len = (anti ? 1.0 : 1.3) * k * 0.7;
+    const pw = m.fx.power; eyeM.emissiveIntensity = eyeBase + pw * (anti ? 1.2 : 2.6) + (anti ? 0 : Math.sin(c.tm * 9) * 0.25 * pw);
     for (const { t, r, ph } of tends) {
-      const rage = c.st.startsWith('punch') || c.st === 'smash' || c.st === 'cast' || c.st === 'throw' ? 1 : 0.3;
+      const rage = Math.max(pw, c.st.startsWith('punch') || c.st === 'smash' || c.st === 'cast' || c.st === 'throw' ? 1 : 0.3);
       t.update((u, out) => {
         const w1 = Math.sin(c.tm * (2.0 + rage * 3) + ph + u * 5.5) * 0.14 * u * (0.6 + rage), w2 = Math.cos(c.tm * 1.6 + ph * 1.3 + u * 4) * 0.1 * u;
         const dir = new V3(r[3], r[4], r[5]).normalize();
@@ -822,9 +837,9 @@ export function buildSymbiote(cfg = {}) {
     // tongue
     const out = c.st === 'dead' ? 0.4 : 1;
     tongue?.update((u, o) => {
-      o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.28 * out + Math.sin(c.tm * 3 + u * 4) * 0.025 * u, hr * H.sz * 0.88 + u * 0.3 * out);
+      o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.42 * out * (1 + 0.25 * pw) + Math.sin(c.tm * 3 + u * 4) * 0.03 * u, hr * H.sz * 0.88 + u * 0.5 * out * (1 + 0.3 * pw));
     });
-  }, () => { tends.forEach((x) => x.t.dispose()); tongue?.dispose(); });
+  }, () => { tends.forEach((x) => x.t.dispose()); tongue?.dispose(); eyeM.dispose(); });
   return finish(model);
 }
 

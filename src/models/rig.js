@@ -126,6 +126,21 @@ function stance(p, f, legs = true) {
       p.set(CH, 0.2, -0.08); p.set(SP, 0.08, -0.1); p.set(HD, -0.14, -0.08); p.set(H, 0.1, 0.12);
       if (legs) { p.set(TL, -0.3, 0, 0.26); p.set(TR, 0.14, 0, -0.26); p.set(KL, 0.62); p.set(KR, 0.5); }
       break;
+    case 'brute': // Venom: hunched, wide-set heavy arms, fists forward, planted legs
+      p.set(AL, 0.12, 0.12, 0.66 + f.wide); p.set(AR, 0.12, -0.12, -0.66 - f.wide); p.set(EL, -0.75); p.set(ER, -0.75);
+      p.set(CH, 0.16); p.set(SP, 0.08); p.set(HD, -0.3); p.set(H, 0.08);
+      if (legs) { p.set(TL, 0, 0, 0.3); p.set(TR, 0, 0, -0.3); p.set(KL, 0.32); p.set(KR, 0.32); }
+      break;
+    case 'wiry': // Carnage: coiled predator crouch, claws up, knees bent
+      p.set(AL, -0.4, 0, 0.5); p.set(AR, -0.4, 0, -0.5); p.set(EL, -1.55); p.set(ER, -1.55);
+      p.set(CH, 0.26, -0.12); p.set(SP, 0.12, -0.1); p.set(HD, -0.22, -0.1); p.set(H, 0.16, 0.15);
+      if (legs) { p.set(TL, -0.42, 0, 0.3); p.set(TR, 0.2, 0, -0.3); p.set(KL, 0.85); p.set(KR, 0.66); }
+      break;
+    case 'saint': // Anti-Venom: upright, chest open, calm authority
+      p.set(AL, 0.0, 0, 0.3); p.set(AR, 0.0, 0, -0.3); p.set(EL, -0.45); p.set(ER, -0.45);
+      p.set(CH, -0.05); p.set(HD, 0.02); p.set(H, 0.02);
+      if (legs) { p.set(TL, 0, 0, 0.14); p.set(TR, 0, 0, -0.14); p.set(KL, 0.08); p.set(KR, 0.08); }
+      break;
     case 'thug':
       p.set(AL, -0.12, 0, 0.14); p.set(AR, -0.12, 0, -0.14); p.set(EL, -0.55); p.set(ER, -0.55);
       p.set(CH, 0.12); p.set(HD, 0.1); p.set(NK, 0.1);
@@ -155,6 +170,16 @@ S.idle = (m, p, c) => {
   const ws = Math.sin(c.tm * 0.23 + m.seed) * Math.sin(c.tm * 0.11 + m.seed * 2.1);
   p.hp[0] = ws * 0.018; p.add(H, 0, 0, ws * 0.02); p.add(TL, ws * 0.05, 0, ws * 0.03); p.add(TR, -ws * 0.05, 0, ws * 0.03);
   p.add(HD, Math.sin(c.tm * 0.17 + m.seed) * 0.03, 0, 0);
+  if (f.stance === 'brute') { // heavy slow breathing, shoulders heave, head sways low
+    const hv = Math.sin(c.tm * 1.3);
+    p.add(CH, hv * 0.035); p.add(AL, 0, 0, hv * 0.05); p.add(AR, 0, 0, -hv * 0.05); p.add(HD, Math.sin(c.tm * 0.6) * 0.05, Math.sin(c.tm * 0.5) * 0.12); p.hp[1] = hv * 0.012;
+  } else if (f.stance === 'wiry') { // twitchy: sudden head snaps and finger-claw flexes
+    const tw = Math.pow(Math.max(0, Math.sin(c.tm * 1.7 + m.seed)), 14), tw2 = Math.pow(Math.max(0, Math.sin(c.tm * 2.9 + m.seed * 2)), 20);
+    p.add(HD, tw * 0.18, tw * 0.5 - tw2 * 0.4); p.add(CH, 0, tw2 * 0.15); p.add(AL, tw2 * 0.15, 0, 0); p.add(AR, -tw * 0.12, 0, 0);
+    p.hp[1] = Math.sin(c.tm * 4.2) * 0.008 - 0.02;
+  } else if (f.stance === 'saint') { // slow, composed float
+    p.hp[1] = Math.sin(c.tm * 1.1) * 0.01; p.add(AL, 0, 0, Math.sin(c.tm * 0.9) * 0.04); p.add(AR, 0, 0, -Math.sin(c.tm * 0.9) * 0.04);
+  }
 };
 function runCycle(m, p, c, sprint, k = 1) {
   const f = c.f, sp = c.sp;
@@ -181,6 +206,15 @@ function runCycle(m, p, c, sprint, k = 1) {
   p.set(HD, -0.1 * f.lean, fl * 0.05, 0);
   p.hp[1] = Math.abs(Math.cos(ph)) * 0.03 * f.bob * clamp(sp / 6, 0.4, 1.6);
   p.flat = 0.75;
+  if (f.stance === 'wiry') { // low predator sprint: spine snaking, arms thrown wide and back, long strides
+    const sq = Math.max(0, Math.sin(ph * 2)) * 0.06;
+    p.set(H, 0.62 + sq, fl * 0.3, fl * 0.04); p.set(CH, 0.25, -fl * 0.35); p.set(SP, 0.1, -fl * 0.22); p.set(HD, -0.62, fl * 0.1);
+    p.set(AL, -0.55 - fl * 0.9, 0, 0.55); p.set(AR, -0.55 - fr * 0.9, 0, -0.55); p.set(EL, -1.0 - Math.max(0, -fl) * 0.5); p.set(ER, -1.0 - Math.max(0, -fr) * 0.5);
+    p.hp[1] = Math.abs(Math.cos(ph)) * 0.07 - 0.1;
+  } else if (f.stance === 'saint') { // upright, smooth, minimal bob
+    p.set(H, 0.05 + sp * 0.006, fl * 0.05, 0); p.set(CH, -0.02, -fl * 0.08); p.set(HD, 0.0, 0); p.hp[1] *= 0.4;
+    p.set(AL, fl * aa * 0.7, 0, 0.22); p.set(AR, fr * aa * 0.7, 0, -0.22);
+  }
   if (f.knuckle) { // Hulk: heavy gorilla run, knuckles near the ground, body slammed forward on each step
     const sq = Math.max(0, Math.sin(ph * 2)) * 0.05;
     p.set(H, 0.5 + sq, fl * 0.2, fl * 0.05); p.set(CH, 0.3, -fl * 0.25); p.set(SP, 0.1, -fl * 0.15); p.set(HD, -0.55, 0);

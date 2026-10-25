@@ -32,10 +32,10 @@ function skin() {
   if (SKIN) return SKIN;
   const geo = new THREE.ConeGeometry(0.11, 1.1, 6); geo.rotateX(Math.PI / 2);
   SKIN = {
-    tend: new THREE.MeshStandardMaterial({ color: 0xdfe8ff, roughness: 0.3, metalness: 0.05, emissive: 0x6f88d8, emissiveIntensity: 0.22 }),
+    tend: new THREE.MeshStandardMaterial({ color: 0xdfe8ff, roughness: 0.3, metalness: 0.05, emissive: 0x6f88d8, emissiveIntensity: 0.08 }),
     spikeGeo: geo,
     spikeMat: new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
-    glowMat: new THREE.MeshBasicMaterial({ color: 0x9fc0ff, toneMapped: false, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }),
+    glowMat: new THREE.MeshBasicMaterial({ color: 0x9fc0ff, toneMapped: false, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }),
   };
   return SKIN;
 }
@@ -43,7 +43,7 @@ function spikeMesh() {
   const S = skin();
   const g = new THREE.Group();
   g.add(new THREE.Mesh(S.spikeGeo, S.spikeMat));
-  const glow = new THREE.Mesh(S.spikeGeo, S.glowMat); glow.scale.set(2.2, 2.2, 1.2); g.add(glow);
+  const glow = new THREE.Mesh(S.spikeGeo, S.glowMat); glow.scale.set(1.6, 1.6, 1.1); g.add(glow);
   return g;
 }
 

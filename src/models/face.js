@@ -335,9 +335,26 @@ export function hairMaps(base = '#d2a947', hi = null, seed = 5, fine = 1) {
   const map = mkTex(c), normal = mkNormalTex(heightToNormal(heightOf(x2, W, W), W, W, 2.2));
   const out = { map, normal }; texCache.set(key, out); return out;
 }
+/** alpha map for feathered hair edges: strands end at ragged lengths near the bottom of the canvas (v=0 = hairline) */
+function featherAlpha(seed = 5) {
+  const key = 'hairfeather' + seed;
+  if (texCache.has(key)) return texCache.get(key);
+  const W = 256, [c, ctx] = mkCanvas(W, W), r = rng(seed + 77);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, W);
+  for (let x = 0; x < W; x += 2) {
+    const end = W * (0.8 + r() * 0.17), len = 14 + r() * 24;
+    const g = ctx.createLinearGradient(0, end - len, 0, end + 4);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.clearRect(x, end - len, 2, W); ctx.fillStyle = '#000'; ctx.fillRect(x, end - len, 2, W);
+    ctx.fillStyle = g; ctx.fillRect(x, end - len, 2, len + 4);
+  }
+  const t = mkTex(c); t.wrapT = THREE.RepeatWrapping; t.repeat.y = -1; t.offset.y = 1; texCache.set(key, t); return t;
+}
 export function hairMaterial(base, o = {}) {
   const m = hairMaps(base, o.hi, o.seed, o.fine);
-  return M('hairmat' + base + (o.hi || '') + (o.seed || 5) + (o.rough ?? '') + (o.dbl ? 'd' : ''), () => new THREE.MeshPhysicalMaterial({
+  const fe = o.feather ? { alphaMap: featherAlpha(o.seed || 5), transparent: true, alphaTest: 0.12 } : {};
+  return M('hairmat' + base + (o.hi || '') + (o.seed || 5) + (o.rough ?? '') + (o.dbl ? 'd' : '') + (o.feather ? 'f' : ''), () => new THREE.MeshPhysicalMaterial({
+    ...fe,
     map: m.map, normalMap: m.normal, normalScale: new THREE.Vector2(0.6, 0.6), roughness: o.rough ?? 0.5, metalness: 0, sheen: 1, sheenRoughness: 0.35,
     sheenColor: new THREE.Color(o.sheen ?? 0xffe6b0), clearcoat: 0.15, clearcoatRoughness: 0.4, side: o.dbl ? THREE.DoubleSide : THREE.FrontSide,
   }));

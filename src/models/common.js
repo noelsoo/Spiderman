@@ -816,6 +816,13 @@ export function antiStreakTexture() {
   return drawTex('antistreak', 256, 256, (ctx, W, H) => {
     ctx.fillStyle = '#f2f4f8'; ctx.fillRect(0, 0, W, H); const r = rng(8);
     for (let i = 0; i < 26; i++) { const x = r() * W, w = 1.5 + r() * 5, y = r() * H, l = 30 + r() * 120; const g = ctx.createLinearGradient(0, y, 0, y + l); g.addColorStop(0, 'rgba(10,10,16,0)'); g.addColorStop(0.3, `rgba(10,10,16,${0.35 + r() * 0.5})`); g.addColorStop(1, 'rgba(10,10,16,0)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, l); }
+    ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 5; // black marbling swirls
+    for (let i = 0; i < 16; i++) {
+      ctx.strokeStyle = `rgba(8,8,14,${0.4 + r() * 0.4})`; ctx.lineWidth = 2 + r() * 9;
+      const x = r() * W, y = r() * H, c1 = (r() - 0.5) * 120, c2 = (r() - 0.5) * 120;
+      for (const ox of [-W, 0, W]) { ctx.beginPath(); ctx.moveTo(x + ox, y); ctx.bezierCurveTo(x + c1 + ox, y + 50, x + c2 + ox, y + 90, x + (r() - 0.5) * 60 + ox, y + 140); ctx.stroke(); }
+    }
+    ctx.shadowBlur = 0;
     for (let i = 0; i < 40; i++) { ctx.fillStyle = `rgba(160,190,215,${0.05 + r() * 0.1})`; ctx.fillRect(r() * W, r() * H, 6 + r() * 30, 2 + r() * 10); }
   });
 }

@@ -45,6 +45,14 @@ export class SymbioteHero extends Hero {
     this._xh = null;
   }
 
+  /** drives model.fx.power (0..1): glowing eyes, wilder tendrils, longer tongue while a power or action is active */
+  updateVisuals(dt) {
+    const fx = this.model.fx;
+    if (!fx || fx.power === undefined) return;
+    const want = (this.actionT > 0 || this.dashT > 0 || this.state === 'launch' || this.state === 'wall' || this.sizeTarget > 1.01) ? 1 : 0;
+    fx.power += (want - fx.power) * (1 - Math.exp(-(want > fx.power ? 12 : 3) * dt));
+  }
+
   // ------------------------------------------------------------------ lifecycle
   _pool() {
     if (!this.pool) {

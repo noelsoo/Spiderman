@@ -89,15 +89,18 @@ export function buildWolverine() {
   });
   const hj = model.j[J.HD], cj = model.j[J.CH], H = info.headInfo, hr = H.R;
   // cowl: covers the skull down to the nose bridge, frames the face with two swept-back fins; white angled lenses; sideburns
-  const cowl = phys(0x142a78, { roughness: 0.5, ...fab('wolvmask', 5), sheen: 0.7, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x6a8cff) });
+  const cowl = phys(0x142a78, { roughness: 0.78, metalness: 0, normalMap: fabricNormal(14, 0.12, 'wolvmaskS'), normalScale: new V2(0.18, 0.18), sheen: 0.35, sheenRoughness: 0.7, sheenColor: new THREE.Color(0x5a78d8) });
   patch(model, H, 'wolvcowl', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, -0.12], [0.35, -0.15], [0.8, -0.36], [1.3, -0.34], [2.0, -0.5], [3.14, -0.56]]), thick: () => 0.04 }, cowl, { cast: true });
+  // subtle seams: centre crown seam and two side seams
+  for (const a0 of [0, 0.95, -0.95]) patch(model, H, 'wolvseam' + a0, { aMin: a0 - 0.012, aMax: a0 + 0.012, na: 2, nb: 16, top: () => Math.PI / 2 - 0.02, bot: a0 === 0 ? () => -0.1 : () => 0.2, thick: () => 0.047 }, std(0x0c1a52, { roughness: 0.85 }));
   const earG = G('wolvear', () => { const g = new THREE.ConeGeometry(0.036, 0.19, 5); g.translate(0, 0.095, 0); return g; });
   const lensM = glow(0xffffff, 1.8);
+  const sideHair = hairMaterial('#2a1a10', { hi: '#5a3a22', seed: 9, rough: 0.75, sheen: 0x555555, feather: true });
   const lensC = (a) => lerp(0.035, 0.115, (Math.abs(a) - 0.1) / 0.5), lensH = (a) => 0.078 * Math.sqrt(Math.max(0.02, 1 - ((Math.abs(a) - 0.36) / 0.27) ** 2));
   for (const s of [1, -1]) {
     P(model, hj, earG, cowl, { pos: [s * hr * 0.86, H.y0 + hr * 0.5, -hr * 0.12], rot: [-0.75, 0, -s * 0.62], scale: [1, 1, 0.8] });
     patch(model, H, 'wolvlens' + s, { aMin: s > 0 ? 0.1 : -0.64, aMax: s > 0 ? 0.64 : -0.1, na: 12, nb: 5, top: (a) => lensC(a) + lensH(a), bot: (a) => lensC(a) - lensH(a) * 0.75, thick: () => 0.052 }, lensM);
-    patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 1.05 : -1.45, aMax: s > 0 ? 1.45 : -1.05, na: 8, nb: 8, top: () => -0.12, bot: (a) => lerp(-0.62, -0.42, (Math.abs(a) - 1.05) / 0.4), thick: () => 0.05 }, hairMaterial('#2a1a10', { hi: '#5a3a22', seed: 9, rough: 0.75, sheen: 0x555555 }));
+    patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 0.98 : -1.5, aMax: s > 0 ? 1.5 : -0.98, na: 10, nb: 8, top: (a) => lerp(-0.02, -0.16, sm01(0, 1, (Math.abs(a) - 0.98) / 0.52)), bot: (a) => { const u = (Math.abs(a) - 0.98) / 0.52; return lerp(-0.7, -0.24, u * u); }, pw: 1.1, thick: (a, l, t) => 0.05 + 0.025 * t, post: (p, a, l, t) => { p.z += 0.05 * t * (1 - Math.abs(Math.abs(a) - 1.0)); } }, sideHair);
   }
   addEars(model, H, skin);
   // belt + buckle, boots, cuffs
@@ -190,9 +193,14 @@ export function buildCaptain() {
   const jl = tab([[0, -0.97], [0.4, -0.92], [0.8, -0.76], [1.2, -0.42], [1.45, -0.12]]);
   patch(model, H, 'capstrap', { aMin: -1.45, aMax: 1.45, na: 28, nb: 2, top: (a) => jl(a) + 0.09, bot: (a) => jl(a) - 0.09, thick: () => 0.03 }, leather(0x7a5430, { roughness: 0.6 }), { cast: true });
   P(model, hj, boxGeo(hr * 0.2, hr * 0.17, hr * 0.06), metal(0xc9a74a, { roughness: 0.3 }), { pos: [0, H.y0 - hr * H.sy * 0.97 * 0.8, hr * H.sz * 0.62], rot: [0.55, 0, 0] });
-  const wing = G('capwing', () => { const g = new THREE.ConeGeometry(0.03, 0.14, 3); g.translate(0, 0.07, 0); g.scale(1, 1, 0.25); return g; });
-  const white = std(0xf0f0f0, { roughness: 0.4 });
-  for (const s of [1, -1]) for (let i = 0; i < 2; i++) P(model, hj, wing, white, { pos: [s * hr * 0.98, H.y0 + hr * (0.18 + i * 0.12), -hr * 0.1 - i * 0.02], rot: [-0.9 + i * 0.3, 0, -s * (1.3 + i * 0.25)] });
+  const white = std(0xf4f4f4, { roughness: 0.4 });
+  const feather = G('capfeather', () => { const g = sphereGeo(1, 8, 6); g.translate(0, 1, 0); return g; });
+  const wp = [[], []];
+  for (let si = 0; si < 2; si++) { const s = si ? -1 : 1; for (let i = 0; i < 5; i++) {
+    const len = 0.17 - i * 0.022, base = [s * hr * 1.0, H.y0 + hr * (0.42 - i * 0.07), -hr * 0.12 - i * 0.012];
+    wp[si].push({ geo: feather, pos: base, rot: [-0.55 - i * 0.14, 0, -s * (0.95 + i * 0.2)], scale: [0.017, len * 0.5, 0.0045] });
+  } }
+  for (let si = 0; si < 2; si++) P(model, hj, mergeParts('capwing2' + si + hr, wp[si]), white, {});
   addEars(model, H, skin);
 
   // ---- shield on the left forearm
@@ -402,16 +410,17 @@ export function buildScarlet() {
   addEars(model, H, skin);
   // tiara: gold circlet with a crown of points across the brow
   const gold = phys(0xd2a23c, { roughness: 0.3, metalness: 0.8, emissive: 0x2a1a06, emissiveIntensity: 1 });
-  patch(model, H, 'sctiara', { aMin: -1.35, aMax: 1.35, na: 26, nb: 2, top: (a) => 0.72 - 0.25 * (Math.abs(a) / 1.35) ** 2, bot: (a) => 0.6 - 0.28 * (Math.abs(a) / 1.35) ** 2, thick: () => 0.085 }, gold, { cast: true });
+  const tBot = (a) => 0.36 + 0.34 * Math.min(1, Math.abs(a) / 1.2) ** 1.3;
+  const tTop = (a) => tBot(a) + 0.07 + 0.2 * Math.max(0, 1 - Math.abs(a) / 0.55) ** 1.5 + 0.03 * (1 - Math.min(1, Math.abs(a) / 1.25));
+  patch(model, H, 'sctiara', { aMin: -1.3, aMax: 1.3, na: 30, nb: 3, top: tTop, bot: tBot, thick: () => 0.07 }, gold, { cast: true });
   const tp = [];
-  for (let i = 0; i < 9; i++) {
-    const u = i / 8 * 2 - 1, a = u * 1.15, lat = 0.72 - 0.25 * (Math.abs(a) / 1.35) ** 2;
-    const pnt = skullMetres(H, H.skull, a, lat, 0.085), h = 0.04 * (1 - Math.abs(u) * 0.55);
-    tp.push({ geo: coneGeo(0.012, h, 4), pos: [pnt.x, pnt.y + h * 0.5, pnt.z], rot: [Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.4] });
+  for (const s of [1, -1]) for (const [a0, h] of [[0.55, 0.055], [0.85, 0.04]]) {
+    const pnt = skullMetres(H, H.skull, s * a0, tTop(a0), 0.07);
+    tp.push({ geo: coneGeo(0.016, h, 5), pos: [pnt.x, pnt.y + h * 0.35, pnt.z], rot: [-0.25, 0, -s * 0.35] });
   }
-  P(model, hj, mergeParts('scCrown2' + hr, tp), gold, { pos: [0, H.y0, 0] });
+  P(model, hj, mergeParts('scHorns' + hr, tp), gold, { pos: [0, H.y0, 0] });
   const gem = glow(0xff2040, 1.6);
-  P(model, hj, sphereGeo(0.011, 8, 6), gem, { pos: [0, H.y0 + hr * H.sy * 0.66 * 0.97, hr * H.sz * 0.9], cast: false });
+  P(model, hj, sphereGeo(0.011, 8, 6), gem, { pos: [0, H.y0 + hr * H.sy * 0.5, hr * H.sz * 0.96], cast: false });
   // belt, standing collar, long gloves with flared cuffs and gold buckles
   const goldTrim = metal(0xd2a23c, { roughness: 0.3 });
   P(model, model.j[J.SP], cylGeo(0.118 * k, 0.126 * k, 0.03 * k, seg(16, 10)), lthr, { pos: [0, 0.015 * k, 0], scale: [1.1, 1, 0.78] });

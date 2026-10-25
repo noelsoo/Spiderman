@@ -446,7 +446,10 @@ function carnageTexture() {
     for (let i = 0; i < 46; i++) {
       ctx.strokeStyle = `rgba(6,0,2,${0.65 + r() * 0.3})`; ctx.lineWidth = 5 + r() * 14;
       const x = r() * W, y0 = r() * H, len = 40 + r() * 120;
-      ctx.beginPath(); ctx.moveTo(x, y0); ctx.bezierCurveTo(x + (r() - 0.5) * 60, y0 + len * 0.33, x + (r() - 0.5) * 70, y0 + len * 0.66, x + (r() - 0.5) * 40, y0 + len); ctx.stroke();
+      const c1 = (r() - 0.5) * 60, c2 = (r() - 0.5) * 70, c3 = (r() - 0.5) * 40;
+      for (const ox of [-W, 0, W]) for (const oy of [-H, 0, H]) { // wrap so the veins tile seamlessly while the texture crawls
+        ctx.beginPath(); ctx.moveTo(x + ox, y0 + oy); ctx.bezierCurveTo(x + c1 + ox, y0 + len * 0.33 + oy, x + c2 + ox, y0 + len * 0.66 + oy, x + c3 + ox, y0 + len + oy); ctx.stroke();
+      }
     }
   }, { repeat: [1, 1] });
 }
@@ -462,11 +465,11 @@ function carnageBody(model, dims, o = {}) {
   const k = dims.k;
   const info = buildBody(model, {
     mats: { default: red, hand: black, foot: black, shoulder: black },
-    torso: { sx: o.sx ?? 1.45, sz: o.sz ?? 0.95, chestR: o.chestR ?? 1.22, waistR: 0.85 },
-    head: { R: dims.headR, sx: 1.2, sy: 1.0, sz: 1.08 },
-    arm: { u0: 0.058, u1: 0.046, f0: 0.05, f1: 0.04, ub: 0.22, fb: 0.24, shoulder: 1.35 },
-    leg: { t0: 0.09, t1: 0.064, s0: 0.064, s1: 0.044, tb: 0.2, sb: 0.24 },
-    armM: o.armM ?? 1.4, foreM: o.foreM ?? 1.5, legM: 1.15, neckR: 0.07,
+    torso: { sx: o.sx ?? 1.2, sz: o.sz ?? 0.8, chestR: o.chestR ?? 1.05, waistR: 0.72 },
+    head: { R: dims.headR, sx: 1.12, sy: 1.12, sz: 1.08 },
+    arm: { u0: 0.05, u1: 0.04, f0: 0.044, f1: 0.034, ub: 0.2, fb: 0.22, shoulder: 1.15 },
+    leg: { t0: 0.08, t1: 0.056, s0: 0.056, s1: 0.04, tb: 0.18, sb: 0.22 },
+    armM: o.armM ?? 1.2, foreM: o.foreM ?? 1.3, legM: 1.05, neckR: 0.07,
     foot: [0.064, 0.05, 0.17], hand: [0.064, 0.074, 0.07], pelvis: [0.4, 0.22, 0.28],
   });
   return { info, red, black, k };
@@ -475,9 +478,10 @@ function carnageBody(model, dims, o = {}) {
 export function buildCarnage() {
   const dims = makeDims(1.24, { headR: 0.155, neck: 0.13 });
   const rig = buildRig(dims, 1.05);
-  const model = new ProcModel('carnage', rig, { prof: { stance: 'feral', cadence: 0.9, stride: 1.12, armSwing: 1.2, lean: 1.5, bob: 1.5, flipDodge: false, wide: 0.1, tempo: 1.2 } });
+  const model = new ProcModel('carnage', rig, { prof: { stance: 'wiry', cadence: 1.15, stride: 1.25, armSwing: 1.3, lean: 1.7, bob: 1.2, flipDodge: false, wide: 0.1, tempo: 1.4 } });
   model.fx = { whip: 0, whipAng: 0, rage: 0 };
   const { info, red, black, k } = carnageBody(model, dims);
+  const veinTex = red.map;
   const hj = model.j[J.HD], H = info.headInfo, hr = H.R;
   // huge white eyes with black rims
   const eyeM = glow(0xfff4f4, 2.2);
@@ -505,7 +509,8 @@ export function buildCarnage() {
   const bladeG = G('vb_blade', () => { const g = new THREE.ConeGeometry(0.05, 1, 4); g.scale(1, 1, 0.28); g.rotateX(Math.PI); g.translate(0, -0.5, 0); return g; });
   for (const s of [1, -1]) {
     const wr = model.j[s > 0 ? J.WL : J.WR];
-    P(model, wr, bladeG, black, { pos: [0, -dims.hand * 0.4, 0.0], scale: [k * 1.2, 1.15 * k, k * 1.2] });
+    P(model, wr, bladeG, black, { pos: [0, -dims.hand * 0.4, 0.0], scale: [k * 1.15, 1.55 * k, k * 1.15] });
+    P(model, model.j[s > 0 ? J.EL : J.ER], G('vb_fblade', () => { const g = new THREE.ConeGeometry(0.03, 1, 4); g.scale(1, 1, 0.25); g.rotateX(Math.PI); g.translate(0, -0.5, 0); return g; }), black, { pos: [s * 0.045 * k, -0.02 * k, 0.02 * k], scale: [k, 0.5 * k, k], rot: [0.05, 0, s * 0.12] }); // second blade along the forearm
     P(model, model.j[s > 0 ? J.EL : J.ER], coneGeo(0.022 * k, 0.16 * k, 5), black, { pos: [0, -0.08 * k, -0.05 * k], rot: [-2.4, 0, 0] });
     P(model, model.j[s > 0 ? J.AL : J.AR], coneGeo(0.04 * k, 0.24 * k, 6), black, { pos: [s * 0.045 * k, 0.1 * k, 0], rot: [0.1, 0, -s * 0.9] });
   }
@@ -514,7 +519,7 @@ export function buildCarnage() {
   P(model, model.j[J.CH], mergeParts('vb_carbackspikes' + k, bs), black, {});
   // tendrils: 5 back writhers + 2 long whips from the shoulders
   const tends = [];
-  const roots = [[0.12, 0.32, -0.12, 0.9, 0.5, -0.7], [-0.12, 0.32, -0.12, -0.9, 0.5, -0.7], [0.0, 0.36, -0.13, 0.0, 0.8, -0.8], [0.09, 0.14, -0.14, 0.8, 0.0, -0.9], [-0.09, 0.14, -0.14, -0.8, 0.0, -0.9]];
+  const roots = [[0.12, 0.32, -0.12, 0.9, 0.5, -0.7], [-0.12, 0.32, -0.12, -0.9, 0.5, -0.7], [0.0, 0.36, -0.13, 0.0, 0.8, -0.8], [0.09, 0.14, -0.14, 0.8, 0.0, -0.9], [-0.09, 0.14, -0.14, -0.8, 0.0, -0.9], [0.06, 0.26, -0.13, 0.4, 0.9, -0.5], [-0.06, 0.26, -0.13, -0.4, 0.9, -0.5]];
   roots.forEach((r, i) => {
     const t = new Tendril({ segs: 14, radial: 6, r0: 0.05 * k, r1: 0.01, material: black, ref: new V3(0, 1, 0) });
     model.j[J.CH].add(t.mesh); tends.push({ t, r, ph: i * 1.7 });
@@ -527,7 +532,8 @@ export function buildCarnage() {
   const tmpD = new V3();
   addHook(model, (c, m) => {
     const fx = m.fx, sp2 = Math.hypot(c.vl.x, c.vl.z);
-    const rage = clamp((c.st.startsWith('punch') || c.st === 'kick' || c.st === 'smash' || c.st === 'cast' ? 1 : 0.35) + fx.rage * 0.6, 0, 1.4);
+    const rage = clamp((c.st.startsWith('punch') || c.st === 'kick' || c.st === 'smash' || c.st === 'cast' ? 1 : 0.7) + fx.rage * 0.6, 0, 1.5);
+    if (veinTex) { const tt = performance.now() * 0.001; veinTex.offset.set((tt * 0.012) % 1, (-tt * 0.028 - Math.sin(tt * 0.5) * 0.01) % 1); } // veins slowly crawl
     for (const { t, r, ph } of tends) {
       tmpD.set(r[3], r[4], r[5]).normalize();
       const len = 1.3 * k;
