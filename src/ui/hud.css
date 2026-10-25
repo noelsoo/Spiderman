@@ -44,6 +44,14 @@
   text-shadow: 0 0 10px #ffb400; opacity: 0; transform: skewX(18deg); white-space: nowrap; }
 .focus.full .ult { opacity: 1; animation: ultpulse 0.9s ease-in-out infinite; }
 @keyframes ultpulse { 50% { opacity: 0.55; } }
+.rage { position: relative; height: 8px; margin-top: 5px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); transform: skewX(-18deg); }
+.rage.hidden { display: none; }
+.rage b { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #4a0a6a, #c0204a, #ff5a3a); transition: width 0.1s; }
+.rage span { position: absolute; left: 4px; top: 10px; font-size: 9px; font-weight: 800; letter-spacing: 0.22em; color: #e8a0c0; text-shadow: 0 0 6px #7a1040; transform: skewX(18deg); }
+.rage.raging { border-color: #ff6a8a; animation: rageglow 0.5s ease-in-out infinite; }
+.rage.raging b { background: linear-gradient(90deg, #ff2040, #ffd0a0, #ff2040); }
+.rage.raging span { color: #fff; }
+@keyframes rageglow { 0%, 100% { box-shadow: 0 0 6px #ff2040; } 50% { box-shadow: 0 0 20px 4px #ff5a7a; } }
 
 /* abilities, bottom-right */
 .abil { position: absolute; right: 28px; bottom: 26px; display: flex; gap: 12px; align-items: flex-end; }

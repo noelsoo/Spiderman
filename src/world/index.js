@@ -28,6 +28,7 @@ function groundPlane(x0, x1, z0, z1, tile, y = 0) {
 export class World {
   constructor(game) {
     this.game = game;
+    this.id = 'nyc';
     this.bounds = { minX: L.MINX, maxX: L.MAXX, minZ: L.MINZ, maxZ: L.MAXZ };
     this.spawnPoint = { pos: new THREE.Vector3(0, 60, 0), yaw: 0 };
     this.menuFocus = new THREE.Vector3(-50, 90, -200);

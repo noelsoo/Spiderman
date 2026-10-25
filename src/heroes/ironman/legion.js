@@ -56,6 +56,9 @@ export class Legion {
     d.vel.set((index % 2 ? 1 : -1) * 4, 7, 2).applyAxisAngle(_v.set(0, 1, 0), this.hero.yaw);
     d.t = 0; d.life = life; d.fireCd = 0.6 + index * 0.25; d.target = null; d.scanT = 0; d.idx = index;
     d.ph = Math.random() * 6.28; d.hit = 0;
+    // taunt: nearby non-boss enemies retarget to this drone for its lifetime
+    d.alive = true; d.radius = 22; d.priority = 1; d.center = d.pos;
+    this.hero.game.enemies?.addDecoy?.(d);
     this.live.push(d);
     return d;
   }
@@ -112,6 +115,7 @@ export class Legion {
 
   _expire(d, boom) {
     const i = this.live.indexOf(d); if (i >= 0) this.live.splice(i, 1);
+    d.alive = false; this.hero.game.enemies?.removeDecoy?.(d);
     d.group.visible = false; this.pool.push(d);
     if (!boom) return;
     const g = this.hero.game;
