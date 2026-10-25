@@ -251,7 +251,8 @@ export class Vehicles {
     if (v.driver === 'ai') {
       // carjack: hero walks to the driver door, the driver is yanked out
       const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
-      const door = new THREE.Vector3(v.pos.x - (-cy) * (v.spec.W / 2 + 0.7) + sy * 0.4, v.pos.y, v.pos.z - sy * (v.spec.W / 2 + 0.7) + cy * 0.4);
+      const ds = this._driverSide();
+      const door = new THREE.Vector3(v.pos.x + ds * cy * (v.spec.W / 2 + 0.7) + sy * 0.4, v.pos.y, v.pos.z - ds * sy * (v.spec.W / 2 + 0.7) + cy * 0.4);
       this.jack = { v, t: 0, door, ejected: false };
       v.driver = null; v.ai = null; v.chasing = false; v.ctrl.t = 0; v.ctrl.b = 1; v.ctrl.hb = true; v.asleep = false;
       g.audio?.play?.('horn', { pos: v.pos, volume: 0.5 });
@@ -312,13 +313,17 @@ export class Vehicles {
   /** open water at (x, z): the NYC river is an x-band, Singapore has the bay polygon and the sea */
   _wet(x, z) { return this.game.world?.id === 'singapore' ? sgInWater(x, z) : inWater(x); }
 
+  /** +1: driver sits on the car's left (New York); -1: on the right (Singapore cars are right-hand drive). */
+  _driverSide() { return this.game.world?.id === 'singapore' ? -1 : 1; }
+
   _exitSpot(v, forced) {
     const phys = this.game.physics;
     const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
     const rx = -cy, rz = sy;
     const hw = v.spec.W / 2 + 1.0, hl = v.spec.L / 2 + 1.3;
-    const cands = [[-hw, 0.3], [hw, 0.3], [0, -hl], [0, hl], [-hw - 1.5, 0.3], [hw + 1.5, 0.3]];
-    if (forced) cands.unshift([-hw - 1, -1.5], [hw + 1, -1.5]);
+    const dl = -this._driverSide();      // lateral sign of the driver's door: -1 left (New York), +1 right (Singapore, right-hand drive)
+    const cands = [[dl * hw, 0.3], [-dl * hw, 0.3], [0, -hl], [0, hl], [dl * (hw + 1.5), 0.3], [-dl * (hw + 1.5), 0.3]];
+    if (forced) cands.unshift([dl * (hw + 1), -1.5], [-dl * (hw + 1), -1.5]);
     for (const [lat, lon] of cands) {
       const x = v.pos.x + rx * lat + sy * lon, z = v.pos.z + rz * lat + cy * lon;
       if (this._wet(x - 3, z) || this._wet(x + 3, z)) continue;
@@ -705,7 +710,8 @@ export class Vehicles {
     v.ctrl.t = 0; v.ctrl.b = 1; v.ctrl.hb = true; v.ctrl.s = 0;
     // refresh the door position (car may still be rolling)
     const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
-    j.door.set(v.pos.x + cy * (v.spec.W / 2 + 0.7) + sy * 0.4, v.pos.y, v.pos.z - sy * (v.spec.W / 2 + 0.7) + cy * 0.4);
+    const ds = this._driverSide();
+    j.door.set(v.pos.x + ds * cy * (v.spec.W / 2 + 0.7) + sy * 0.4, v.pos.y, v.pos.z - ds * sy * (v.spec.W / 2 + 0.7) + cy * 0.4);
     const k = 1 - Math.exp(-14 * dt);
     p.pos.x += (j.door.x - p.pos.x) * k; p.pos.z += (j.door.z - p.pos.z) * k;
     p.vel.set(0, 0, 0);

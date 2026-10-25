@@ -19,14 +19,14 @@ export function buildRoadData(shops = []) {
   for (const d of DIAG) segments.push({ a: new THREE.Vector3(d.a[0], 0, d.a[1]), b: new THREE.Vector3(d.b[0], 0, d.b[1]), width: d.w, lanes: d.lanes });
   const sidewalks = [];
   for (const c of cells(WEST_X, WEST_Z)) sidewalks.push({ x0: c.x0 - 5, x1: c.x1 + 5, z0: c.z0 - 5, z1: c.z1 + 5, width: 5, park: false });
-  return { driveSide: 'left', laneModel: 'left-hand traffic: for a road running +z, the +z lane is on the -x side (west); running +x, the +x lane is on the +z side (south)', avenues, streets, intersections, sidewalks, segments, shops };
+  return { driveSide: 'left', laneModel: 'left-hand traffic: for a road running +z the +z lane is on the +x side (east, on the left when heading south); running +x the +x lane is on the -z side (north); see laneFixed() in vehicles/traffic.js', avenues, streets, intersections, sidewalks, segments, shops };
 }
 
 /** Signal controller. state(x,z,out) -> { ns, ew, x, z }; ns = cars moving along z, ew = cars moving along x. */
 export class TrafficLights {
   constructor(inter) {
     this.t = 0;
-    this.list = inter.filter((i) => !i.highway).map((i, k) => ({ x: i.x, z: i.z, aw: i.aw, sw: i.sw, off: ((k * 7919) % 97) / 97 * CYCLE, code: -1, inst: [] }));
+    this.list = inter.map((i, k) => ({ x: i.x, z: i.z, aw: i.aw, sw: i.sw, off: ((k * 7919) % 97) / 97 * CYCLE, code: -1, inst: [] }));
     this.mesh = null;
   }
   phase(it, t = this.t) {
@@ -46,7 +46,7 @@ export class TrafficLights {
     out.ns = ns; out.ew = ew; out.x = best.x; out.z = best.z;
     return out;
   }
-  /** instanced signal lamps, one disc per head face */
+  /** instanced signal lamps, one disc per head face (highway junctions included, so cars and lamps share one phase) */
   build(group, ctx) {
     const st = (x, z) => ctx.chunks.bucket(x, z, 'street');
     const heads = [];

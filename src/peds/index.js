@@ -264,7 +264,7 @@ export class Peds {
     const p = this._grab();
     if (!p) return null;
     const sy = Math.sin(car.yaw), cy = Math.cos(car.yaw), rx = -cy, rz = sy;
-    const side = -1; // driver sits on the left
+    const side = this.game.world?.id === 'singapore' ? 1 : -1; // driver sits on the left (New York) or the right (Singapore, right-hand drive)
     p.active = true; p.hidden = false; p.dead = false; p.root.visible = true; p.hp = p.maxHp = 40; p.carCd = 1.2;
     p.pos.set(car.pos.x + rx * side * (car.spec.W / 2 + 0.2), car.pos.y + 0.2, car.pos.z + rz * side * (car.spec.W / 2 + 0.2));
     p.vel.set(rx * side * 4.5 + sy * 0.5, 3.5, rz * side * 4.5 + cy * 0.5);

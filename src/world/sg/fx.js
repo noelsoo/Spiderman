@@ -68,9 +68,9 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Merlion water spout: parabolic droplets. */
 export class Spout {
   constructor(group, mouth, dir) {
-    this.N = 60;
+    this.N = 150;
     this.mouth = mouth.clone(); this.dir = dir.clone();
-    const g = new THREE.SphereGeometry(0.22, 5, 4);
+    const g = new THREE.SphereGeometry(0.17, 5, 4);
     this.mesh = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({ color: 0xdff4ff, transparent: true, opacity: 0.75, depthWrite: false }), this.N);
     this.mesh.frustumCulled = false;
     group.add(this.mesh);
@@ -78,14 +78,14 @@ export class Spout {
   }
   update(dt) {
     this.t += dt;
-    const sp = 9, up = 6.5, g = 9.8;
+    const sp = 8.5, up = 5.2, g = 9.8;
     const T = (2 * up) / g + 0.9;
     for (let i = 0; i < this.N; i++) {
       const ph = ((this.t * 0.9 + i / this.N) % 1) * T;
       const jitter = ((i * 7919) % 13) / 13 - 0.5;
       this.p.copy(this.mouth).addScaledVector(this.dir, sp * ph);
       this.p.y += up * ph - 0.5 * g * ph * ph + 0.0;
-      this.p.x += jitter * 0.5 * ph * ph * 0.1;
+      this.p.x += jitter * 0.04 * ph * ph; this.p.z -= jitter * 0.04 * ph * ph;
       const y = this.p.y;
       this.s.setScalar(y < -0.4 ? 0.001 : 1);
       this.m.compose(this.p, this.q, this.s);

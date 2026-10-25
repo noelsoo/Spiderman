@@ -217,6 +217,8 @@ export class SingaporeWorld {
   }
 
   _buildShops(ctx) {
+    // fictional local names (the texture atlas names are the New York ones)
+    const SG_SHOP_NAMES = ['Lion City Armoury', 'Kampong Ballistics', 'Tanjong Tactical', 'Bayfront Munitions'];
     const defs = [
       { x: -345, z: -150, yaw: Math.PI / 2 },   // west promenade (facing the bay, +x)
       { x: -345, z: 62, yaw: Math.PI / 2 },
@@ -236,7 +238,7 @@ export class SingaporeWorld {
       b.boxXf(ex + fx * 0.6, 3.5, ez + fz * 0.6, Math.abs(tx) * (W + 0.6) + Math.abs(fx) * 1.4, 0.25, Math.abs(tz) * (W + 0.6) + Math.abs(fz) * 1.4, 0, col.map((v) => v * 0.6));
       nb.boxXf(ex + fx * 0.15, 4.6, ez + fz * 0.15, Math.abs(tx) * (W - 3) + Math.abs(fx) * 0.15, 0.8, Math.abs(tz) * (W - 3) + Math.abs(fz) * 0.15, 0, [col[0] * 1.2, col[1] * 1.2, col[2] * 1.2]);
       ctx.physics.addBox(new THREE.Vector3(cx - (Math.abs(tx) * W + Math.abs(fx) * D) / 2, 0, cz - (Math.abs(tz) * W + Math.abs(fz) * D) / 2), new THREE.Vector3(cx + (Math.abs(tx) * W + Math.abs(fx) * D) / 2, 5.2, cz + (Math.abs(tz) * W + Math.abs(fz) * D) / 2), { type: 'building', id: 'shop', height: 5.2 });
-      return { pos: new THREE.Vector3(ex + fx * 1.5, L.PROM_Y, ez + fz * 1.5), yaw: d.yaw, name: SHOP_DEFS[i].name };
+      return { pos: new THREE.Vector3(ex + fx * 1.5, L.PROM_Y, ez + fz * 1.5), yaw: d.yaw, name: SG_SHOP_NAMES[i % SG_SHOP_NAMES.length] };
     });
   }
 

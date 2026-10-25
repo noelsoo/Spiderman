@@ -21,7 +21,9 @@ export const MERLION = { x: -276, z: -312 };
 export const FLYER = { x: 470, z: -330 };
 export const ESPL = { x: -40, z: -385 };
 
-/** N-S roads (avenues) and E-W roads (streets). w = width, lanes = total lanes (both directions). */
+/** N-S roads (avenues) and E-W roads (streets). w = width, lanes = total lanes (both directions).
+ *  Traffic keeps LEFT: on an avenue a car heading +z (south) uses the +x (east) half, heading -z the -x half;
+ *  on a street a car heading +x (east) uses the -z (north) half, heading -x the +z half. */
 export const AVE = [
   { x: -860, z0: -800, z1: 770, w: 18, lanes: 4 }, { x: -740, z0: -800, z1: 770, w: 18, lanes: 4 },
   { x: -620, z0: -800, z1: 770, w: 18, lanes: 4 }, { x: -500, z0: -800, z1: 770, w: 18, lanes: 4 },

@@ -27,6 +27,7 @@ export class WState {
 }
 
 const SHOP_NAMES = ['Stark Armory', 'Midtown Munitions', "Hell's Kitchen Arms", 'Brooklyn Ballistics'];
+const FAR_SHOP = 700;
 const SHOP_ZONES = [[3, 6], [6, 9], [1, 3], [7, 1]];  // block (i, j) near spawn, east, west, north-east
 
 export class Weapons {
@@ -130,6 +131,27 @@ export class Weapons {
     g.scene.add(sf.group);
     s.group = sf.group; s.spin = sf.spin;
     this.shops.push(s);
+  }
+
+  /** Distance LOD for the storefronts (each is ~75 draw calls up close). Call once per frame with the render camera.
+   *  < 150 m (190 m once shown): everything; gun racks only within ~65 m (80 m once shown).
+   *  Beyond that, out to FAR_SHOP m: the cheap far version (lit sign, light columns, one flat facade quad, ~5 calls). */
+  cull(camera) {
+    const cp = camera.position;
+    for (const s of this.shops) {
+      if (!s.group) continue;
+      const dx = s.pos.x - cp.x, dz = s.pos.z - cp.z, d2 = dx * dx + dz * dz;
+      const mode = d2 < (s._mode === 0 ? 190 : 150) ** 2 ? 0 : d2 < FAR_SHOP * FAR_SHOP ? 1 : 2;
+      const rk = mode === 0 && d2 < (s._rk ? 80 : 65) ** 2;
+      if (mode === s._mode && rk === s._rk) continue;
+      s._mode = mode; s._rk = rk;
+      s.group.visible = mode < 2;
+      for (const c of s.group.children) {
+        if (c.userData.far || c.userData.farOnly) c.visible = c.userData.farOnly ? mode === 1 : true;
+        else if (c.isGroup) { for (const k of c.children) if (k.userData.rack) k.visible = rk; c.visible = mode === 0; }
+        else c.visible = mode === 0;
+      }
+    }
   }
 
   tryInteract() {
@@ -298,7 +320,8 @@ export class Weapons {
 
   _drivingMuzzle(v, out) {
     const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
-    return out.set(v.pos.x + cy * 0.75 + sy * 0.3, v.pos.y + 1.3, v.pos.z - sy * 0.75 + cy * 0.3);   // driver (left) window
+    const ds = this.game.world?.id === 'singapore' ? -1 : 1;     // driver window: left in New York, right in Singapore
+    return out.set(v.pos.x + ds * cy * 0.75 + sy * 0.3, v.pos.y + 1.3, v.pos.z - ds * sy * 0.75 + cy * 0.3);
   }
 
   // ===================================================================== ambient hook (called every frame via cam.update)
