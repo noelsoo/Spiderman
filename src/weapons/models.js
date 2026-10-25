@@ -162,13 +162,14 @@ export function buildStorefront(name, defs, color = 0xff7a2c) {
     const col = i % 3, row = (i / 3) | 0, sc = 1.15;
     const holder = new THREE.Group(); holder.position.set(-1.9 + col * 1.9, 2.55 - row * 0.85, -4.25);
     m.scale.setScalar(sc); m.rotation.y = Math.PI / 2; m.position.x = -(d.muzzle?.[0] ?? 0.4) * 0.45 * sc;
+    m.userData.rack = true;      // hidden by Weapons.cull() beyond ~65 m
     holder.add(m); g.add(holder);
   });
 
   // neon sign above the roof
   const tex = signTexture(name.toUpperCase(), 'GUNS  -  AMMO  -  GEAR', color);
   const sign = add(new THREE.PlaneGeometry(6.4, 1.6), new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, depthWrite: false, side: THREE.DoubleSide }), 0, 4.75, -2.2);
-  add(new THREE.BoxGeometry(6.6, 1.7, 0.1), dark, 0, 4.75, -2.27);
+  const signBack = add(new THREE.BoxGeometry(6.6, 1.7, 0.1), dark, 0, 4.75, -2.27);
   add(new THREE.BoxGeometry(0.15, 1.2, 0.15), steel, -2.4, 4.0, -2.3); add(new THREE.BoxGeometry(0.15, 1.2, 0.15), steel, 2.4, 4.0, -2.3);
 
   // floating gun hologram
@@ -190,6 +191,12 @@ export function buildStorefront(name, defs, color = 0xff7a2c) {
   const entM = glow(color, { transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
   const ent = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.45, 40).rotateX(-Math.PI / 2), entM); ent.position.y = 0.16; g.add(ent);
   const entFill = new THREE.Mesh(new THREE.CircleGeometry(1.15, 40).rotateX(-Math.PI / 2), glow(color, { transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false })); entFill.position.y = 0.15; g.add(entFill);
+
+  // cheap far version (Weapons.cull): the lit sign, its backing and the light columns stay, plus one flat lit facade
+  // quad standing in for the walls, counter, racks, roof and hologram, so a shop never pops out of the street.
+  const farFacade = add(new THREE.PlaneGeometry(7.4, 3.6), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.28), toneMapped: false }), 0, 1.8, -0.4);
+  farFacade.userData.farOnly = true; farFacade.visible = false;
+  for (const o of [sign, signBack, beam, beam2, farFacade]) o.userData.far = true;
 
   g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
   return {

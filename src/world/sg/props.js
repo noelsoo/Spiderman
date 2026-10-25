@@ -35,15 +35,34 @@ function palmGeo() {
   return b.toGeometry();
 }
 
+/** Rain tree (unit tree: ~0.85 tall, ~1.4 wide; instance scale x/z = spread, y = height): a thick short trunk forking
+ *  into limbs under a wide, flat umbrella canopy made of overlapping flattened lobes with a darker underside. */
 function rainTreeGeo() {
   const b = new Bucket();
-  b.cylV(0, 0, 0, 0.06, 0.46, 6, [0.32, 0.25, 0.2], 0.04);
-  const ico = new THREE.IcosahedronGeometry(1, 1);
-  const m = new THREE.Matrix4();
-  for (const [x, y, z, rx, ry, c] of [[0, 0.62, 0, 0.5, 0.22, 1], [0.28, 0.54, 0.1, 0.3, 0.16, 0.85], [-0.24, 0.56, -0.12, 0.32, 0.17, 0.95], [0.05, 0.7, -0.22, 0.26, 0.14, 1.05]]) {
-    m.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(rx, ry, rx));
-    b.addGeo(ico, m, [0.16 * c, 0.4 * c, 0.15 * c]);
+  const bark = [0.3, 0.24, 0.19];
+  b.cylV(0, 0, 0, 0.075, 0.34, 7, bark, 0.055);                       // buttressed trunk
+  b.cylV(0, 0.3, 0, 0.055, 0.14, 6, bark, 0.045);                     // fork
+  const ico0 = new THREE.IcosahedronGeometry(1, 0);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
+  const lobe = (x, y, z, rx, ry, c, tint = 1) => {
+    m.compose(p.set(x, y, z), q, sc.set(rx, ry, rx));
+    b.addGeo(ico0, m, [0.15 * c * tint, 0.42 * c, 0.14 * c * tint]);
+  };
+  const N = 6;
+  for (let k = 0; k < N; k++) {                                       // limbs spreading out to the lobes
+    const a = k / N * Math.PI * 2 + 0.3, r = 0.36;
+    b.cylBetween([0, 0.4, 0], [Math.cos(a) * r * 0.9, 0.58, Math.sin(a) * r * 0.9], 0.02, bark);
   }
+  for (let k = 0; k < N; k++) {                                       // outer ring of flat lobes
+    const a = k / N * Math.PI * 2 + 0.3, r = 0.46, c = 0.85 + (k % 3) * 0.1;
+    lobe(Math.cos(a) * r, 0.62 + (k % 2) * 0.03, Math.sin(a) * r, 0.3, 0.085, c);
+  }
+  for (let k = 0; k < 5; k++) {                                       // inner ring and crown, slightly raised
+    const a = k / 5 * Math.PI * 2, r = 0.2;
+    lobe(Math.cos(a) * r, 0.7, Math.sin(a) * r, 0.26, 0.09, 1.0 + (k % 2) * 0.1);
+  }
+  lobe(0, 0.74, 0, 0.3, 0.09, 1.1);
+  lobe(0, 0.56, 0, 0.62, 0.05, 0.5, 0.9);                              // shaded underside
   return b.toGeometry();
 }
 
@@ -80,7 +99,7 @@ export function makeProps(ctx, group, { palmSpots, lamps }) {
   };
   const leafMat = low ? new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }) : new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.8 });
   mkInst(palmGeo(), leafMat, palms, (it) => [(it[4] ?? 1) * (0.9 + rng() * 0.5) * 9, (it[4] ?? 1) * (7 + rng() * 6)]);
-  const t = mkInst(rainTreeGeo(), leafMat, rains, (it) => [(it[4] ?? 1) * (0.9 + rng() * 0.5) * 11, (it[4] ?? 1) * (9 + rng() * 4)]);
+  const t = mkInst(rainTreeGeo(), leafMat, rains, (it) => [(it[4] ?? 1) * (0.9 + rng() * 0.4) * 9.5, (it[4] ?? 1) * (10 + rng() * 4)]);
 
   // lamps: pole + arm + head; heads glow with night
   const L = lamps.filter((_, i) => !low || i % 2 === 0);

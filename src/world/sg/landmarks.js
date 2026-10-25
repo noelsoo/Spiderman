@@ -6,7 +6,7 @@ import { emitBox, addBox, lightBox } from './builders.js';
 import { MBS, AMS, HELIX, MERLION, FLYER, ESPL, L } from './layout.js';
 
 const WHITE = [0.94, 0.95, 0.97], STEEL = [0.66, 0.69, 0.74], DARK = [0.12, 0.13, 0.15];
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
+const _e = new THREE.Euler(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 let _ico = null;
 const ico = () => (_ico ||= new THREE.IcosahedronGeometry(1, 1));
 export function ball(b, x, y, z, rx, ry = rx, rz = rx, col = WHITE) {
@@ -343,35 +343,66 @@ export function buildMerlion(ctx) {
   // pedestal
   wb.cylV(BX, 0.45, BZ, 5.4, 2.4, 10, [0.72, 0.74, 0.78]);
   addBox(ctx, BX - 5, 0.45, BZ - 5, BX + 5, 2.85, BZ + 5, 'prop', 'merlion-base');
-  // body: tapered cylinder, tail curl behind (fish), lion head in front
-  wb.cylV(BX, 2.85, BZ, 3.5, 7.5, 10, WHITE, 2.9);
-  ball(wb, BX, 10.4, BZ, 3.1, 2.4, 3.1, WHITE);                 // chest
+  // Local frame on the pedestal: u forward (towards the bay, fx/fz), v lateral, y up. `bl` is an ellipsoid with its own
+  // axes (sv lateral, sy up, su forward) turned to face the bay, so flat scales and fins lie the right way.
+  const yaw = Math.atan2(fx, fz), lvx = fz, lvz = -fx;
+  const W2 = (u, v) => [BX + fx * u + lvx * v, BZ + fz * u + lvz * v];
+  const bl = (u, v, y, sv, sy, su, col = WHITE, pitch = 0, roll = 0) => {
+    const [x, z] = W2(u, v);
+    _e.set(pitch, yaw, roll, 'YXZ'); _q.setFromEuler(_e);
+    _m.compose(_p.set(x, y, z), _q, _s.set(sv, sy, su));
+    wb.addGeo(ico(), _m, col);
+  };
+  const SCALE_A = [0.66, 0.77, 0.88], SCALE_B = [0.9, 0.95, 1.0], MANE = [0.86, 0.88, 0.92], FISH = [0.8, 0.88, 0.95];
+  // breaking waves round the pedestal top
+  for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; bl(Math.cos(a) * 4.3, Math.sin(a) * 4.3, 2.95, 1.1, 0.7, 1.1, [0.8, 0.88, 0.95]); }
+  // fish body: chest, belly, then a tail sweeping back and curling up and over behind the lion
+  const spine = new THREE.CatmullRomCurve3([[0.9, 11.2], [0.4, 8.8], [-0.3, 6.6], [-1.3, 5.0], [-3.2, 4.3], [-5.2, 5.5], [-6.5, 8.0], [-6.6, 10.8], [-5.7, 13.4], [-4.1, 15.4], [-2.3, 16.3]].map(([u, y]) => new THREE.Vector3(u, y, 0)));
+  const N = 34, pt = new THREE.Vector3(), tg = new THREE.Vector3();
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, r = lerp(3.0, 0.5, Math.pow(t, 0.75));
+    spine.getPointAt(t, pt); spine.getTangentAt(t, tg);
+    const pitch = -Math.atan2(tg.y, tg.x);                      // spine direction in the (u, y) plane
+    bl(pt.x, 0, pt.y, r, r * 1.05, r * 1.05, FISH);
+    // overlapping scales on the outer face of the curve, three per ring, alternating tint
+    const nx = -tg.y, ny = tg.x;                                // outward normal in (u, y), away from the curl centre
+    for (let k = -1; k <= 1; k++) {
+      const sr = r * 0.46;
+      bl(pt.x + nx * r * 0.82, k * r * 0.62, pt.y + ny * r * 0.82, sr, sr * 0.75, sr, (i + k) & 1 ? SCALE_A : SCALE_B, pitch);
+    }
+    if (i % 3 === 1 && t > 0.3) bl(pt.x - nx * r * 0.95, 0, pt.y - ny * r * 0.95, r * 0.14, r * 0.5, r * 0.5, SCALE_A, pitch); // dorsal ridge
+  }
+  // tail fluke: two thin fan blades at the tip, spread sideways and swept back
+  spine.getPointAt(1, pt);
+  for (const sd of [-1, 1]) for (let k = 0; k < 4; k++) {
+    const f = (k + 1) / 4;
+    bl(pt.x - 0.4 - f * 0.8, sd * (0.7 + f * 2.1), pt.y + 0.55 + f * 0.9, 0.55, 0.16 + (1 - f) * 0.1, 1.15 - f * 0.25, k & 1 ? SCALE_B : SCALE_A, 0, sd * 0.35);
+  }
+  // lion head on the shoulders, facing the bay
+  const hu = 1.9, hy = 13.3;
+  bl(hu, 0, hy, 2.5, 2.4, 2.6, WHITE);                           // skull
+  bl(hu + 2.2, 0, hy - 0.8, 1.3, 1.0, 1.6, WHITE);               // muzzle
+  bl(hu + 3.1, 0, hy - 0.2, 0.55, 0.4, 0.45, DARK);              // nose
+  bl(hu + 2.8, 0, hy - 1.75, 0.95, 0.55, 1.1, [0.42, 0.44, 0.5]);  // open mouth
+  bl(hu + 2.4, 0, hy - 2.3, 0.85, 0.5, 1.3, WHITE);              // lower jaw
+  for (const sd of [-1, 1]) {
+    bl(hu + 2.3, sd * 0.9, hy + 0.55, 0.3, 0.32, 0.3, DARK);     // eyes
+    bl(hu + 2.0, sd * 1.0, hy + 1.1, 0.7, 0.28, 0.7, WHITE);     // brow
+    bl(hu + 0.1, sd * 1.9, hy + 2.35, 0.75, 0.85, 0.5, WHITE);   // ears
+    bl(hu + 3.0, sd * 0.45, hy - 1.15, 0.12, 0.35, 0.12, [1, 1, 1]); // fangs
+  }
+  for (let k = 0; k < 18; k++) {                                  // mane: two rings of curls round the head, behind the face
+    const a = k / 18 * Math.PI * 2 + 0.17, rr = 3.5 + (k % 3) * 0.12;
+    bl(hu - 0.9, Math.cos(a) * rr, hy + Math.sin(a) * rr * 0.92 - 0.2, 1.15, 1.2, 1.1, MANE);
+  }
+  for (let k = 0; k < 11; k++) {
+    const a = k / 11 * Math.PI * 2, rr = 2.5;
+    bl(hu - 1.7, Math.cos(a) * rr, hy + Math.sin(a) * rr * 0.9 - 0.3, 1.2, 1.25, 1.15, WHITE);
+  }
   addBox(ctx, BX - 3.2, 2.85, BZ - 3.2, BX + 3.2, 11.5, BZ + 3.2, 'prop', 'merlion-body');
-  // fish tail, curving up and forward behind the body
-  let tx = BX - fx * 2.2, tz = BZ - fz * 2.2, ty = 5;
-  for (let i = 0; i < 12; i++) {
-    const t = i / 11, r = lerp(2.4, 0.7, t);
-    const px = BX - fx * (2.3 + Math.sin(t * Math.PI * 0.9) * 2.6), pz = BZ - fz * (2.3 + Math.sin(t * Math.PI * 0.9) * 2.6), py = 5 + t * 11;
-    ball(wb, px, py, pz, r, r * 1.1, r * 0.8, [0.9, 0.93, 0.96]);
-    // scale ridges
-    if (i % 2 === 0) ball(wb, px + fx * r * 0.4, py - r * 0.3, pz + fz * r * 0.4, r * 0.75, r * 0.4, r * 0.75, [0.82, 0.86, 0.9]);
-  }
-  ball(wb, BX - fx * 2.3, 16.8, BZ - fz * 2.3, 2.6, 1.0, 1.9, [0.88, 0.92, 0.96]);  // caudal fin
-  // head
-  const hx = BX + fx * 1.2, hz = BZ + fz * 1.2, hy = 13.6;
-  ball(wb, hx, hy, hz, 3.0, 2.7, 3.0, WHITE);
-  ball(wb, hx + fx * 2.4, hy - 0.8, hz + fz * 2.4, 1.5, 1.2, 1.5, WHITE);            // muzzle
-  ball(wb, hx + fx * 3.1, hy - 1.7, hz + fz * 3.1, 1.0, 0.7, 1.0, [0.5, 0.52, 0.56]); // open mouth
-  for (let k = 0; k < 11; k++) { // mane
-    const a = (k / 11) * Math.PI * 2;
-    ball(wb, hx - fx * 0.8 + Math.cos(a) * 3.2 * -fz + Math.sin(a) * 0, hy + Math.sin(a) * 3.0, hz - fz * 0.8 + Math.cos(a) * 3.2 * fx, 1.2, 1.3, 1.2, [0.88, 0.9, 0.94]);
-  }
-  ball(wb, hx + fx * 1.8 - fz * 1.3, hy + 2.5, hz + fz * 1.8 + fx * 1.3, 0.7, 0.8, 0.7, WHITE);
-  ball(wb, hx + fx * 1.8 + fz * 1.3, hy + 2.5, hz + fz * 1.8 - fx * 1.3, 0.7, 0.8, 0.7, WHITE);
-  ball(wb, hx + fx * 2.7 - fz * 0.9, hy + 0.5, hz + fz * 2.7 + fx * 0.9, 0.35, 0.35, 0.35, DARK);
-  ball(wb, hx + fx * 2.7 + fz * 0.9, hy + 0.5, hz + fz * 2.7 - fx * 0.9, 0.35, 0.35, 0.35, DARK);
-  addBox(ctx, hx - 3.5, 11.5, hz - 3.5, hx + 3.5, 16.5, hz + 3.5, 'prop', 'merlion-head');
-  ctx.merlionMouth = new THREE.Vector3(hx + fx * 3.2, hy - 1.6, hz + fz * 3.2);
+  addBox(ctx, BX - 6, 2.85, BZ - 6, BX + 1, 17, BZ + 1, 'prop', 'merlion-tail');
+  addBox(ctx, BX - 3.5, 11.5, BZ - 3.5, BX + 4.5, 16.5, BZ + 4.5, 'prop', 'merlion-head');
+  { const [mx, mz] = W2(hu + 3.2, 0); ctx.merlionMouth = new THREE.Vector3(mx, hy - 1.75, mz); }
   ctx.merlionDir = new THREE.Vector3(fx, 0, fz);
   // floodlights at night
   for (const [dx, dz] of [[-6, 3], [3, -6], [6, 6]]) ctx.chunks.bucket(X, Z, 'night').boxAll(BX + dx - 0.3, 0.45, BZ + dz - 0.3, BX + dx + 0.3, 1.0, BZ + dz + 0.3, 1, [1, 0.95, 0.8]);
