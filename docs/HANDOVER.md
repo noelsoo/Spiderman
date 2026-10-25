@@ -26,7 +26,15 @@ Working and verified in headless tests: all 11 heroes clear goon fights, all 10 
 Heroes (`HERO_ORDER`): spiderman, ironman, hulk, thor, wolverine, captain, hawkeye, scarlet, venom, carnage, antivenom.
 
 Recent work, newest first:
-1. Realism and powers pass (Sonnet agents, merged on `claude/elegant-heisenberg-e10osz`):
+1. Follow-up pass:
+   - Faces: Hulk head enlarged, Wolverine smooth cowl and shaped sideburns, Captain America feathered wings, Scarlet Witch V headpiece, Thor feathered hairline (`feather` option on `hairMaterial`).
+   - Symbiotes: Venom hunched brute (`brute` stance, knuckle run, more teeth, power-driven eye glow), Carnage wiry with crawling veins and double blades (`wiry`), Anti-Venom marbled with a dimmer glow (`saint`). `model.fx.power` set from `SymbioteHero.updateVisuals`.
+   - Enemy decoys: `enemies.addDecoy/removeDecoy/pickDecoy`; Iron Legion drones register as decoys (bosses ignore). Micro-missiles have terminal guidance and hit at 3 to 8 m.
+   - Black-suit rage bar on the HUD. Police verified on New York (spawn at every wanted level; officers do not leave cars for a rooftop hero).
+   - Shops: `Weapons.cull(camera)` owns culling, with a far sign/facade version out to 700 m. Singapore shop names are local.
+   - Singapore: Merlion rebuilt with a water jet, umbrella rain trees, highway signal heads, right-hand-drive carjack and exit (`_driverSide()`), lane comments fixed. Swing on Singapore 205 to 263 m in 8 s.
+   - Verified: PS4 pad title-screen navigation, the Settings map row and the map-switch reload flow (headless, fake DS4).
+2. Realism and powers pass (Sonnet agents, merged on `claude/elegant-heisenberg-e10osz`):
    - Marina Bay Sands rebuilt (`src/world/sg/landmarks.js`): curved leaning tower legs, ship-shaped SkyPark with cantilever bow, pool, railings and trees, wavy Shoppes roof, shared glass facade material, bigger light show. Landing on the deck verified at y 205.
    - New powers. Scarlet Witch: tendril combo, Chaos Lift and Crush (hold ability), Mind Control (hold ability2), Reality Warp dome (special while flying). Iron Man: thruster combo, smart shoulder lasers (hold special), Iron Legion drones (hold ability), Nano Shield (hold dodge on ground), air dash, ground pound. Hawkeye: 11 trick arrows with tap/double-tap/hold quick-select, multi-nock, airborne focus-mark volley, roll and vault. Wolverine: claw trails, pounce, Fastball throw, pin takedown, Feral Sense and Roar (holds), claw-climb any wall, visible regeneration. Helpers in `src/heroes/mystic/`, `ironman/`, `hawkeye/`, `wolverine/`. Several taps now fire on release so the hold variants work.
    - Hero models: `muscleLimb`, `handGeo`, `footGeo`, `deformLathe` in `src/models/common.js`; shared head builder `src/models/face.js` (faces, hair, beards, cowls); costume detail for Scarlet Witch, Hawkeye, Thor, Captain, Wolverine. Viewer: `node tools/viewer/shot.mjs <heroes> <view> out.png`.
@@ -50,7 +58,7 @@ Full contracts are in `docs/ARCHITECTURE.md` (v1 to v3 plus Map v3). Key points:
 - Physics (`src/core/physics.js`): AABBs in an XZ spatial grid. `resolveCapsule` returns `wallBox/groundBox`; heroes expose `wallContact/groundContact`.
 - Input (`src/core/input.js`): `BINDINGS` table (keys, mouse, wheel, pad). Raw pads are mapped to the standard layout via `PROFILES`. `consume()` works per source and `prev` tracks the raw state.
 - Camera (`src/core/camera.js`): `requestAim(params)` per frame, sphere-cast collision with smoothed distance.
-- World: `src/world/` is New York; `src/world/sg/` is Singapore (`SingaporeWorld`, same API as `World`, sets `world.id = 'singapore'`). New York has no `id`. Grid constants are in `src/world/grid.js`.
+- World: `src/world/` is New York; `src/world/sg/` is Singapore (`SingaporeWorld`, same API as `World`, sets `world.id = 'singapore'`). New York has `id: 'nyc'`. Grid constants are in `src/world/grid.js`.
 - Events: `enemy:killed`, `hero:switch`, `vehicle:enter/exit`, `crime`, `cash`, `weapon:fired`, `boss:defeated`.
 - Boss fairness rule: exposed windows of at least 3 s, telegraphs via `windup`, phases at 66% and 33%.
 - Quality tiers low/medium/high/ultra; software GL forces low; `window.__FORCE_WORLD_QUALITY` overrides.
@@ -80,14 +88,12 @@ Full contracts are in `docs/ARCHITECTURE.md` (v1 to v3 plus Map v3). Key points:
 
 ## Next steps (priority order)
 
-1. **Faces still stylised:** Hulk's head looks small, Wolverine's cowl has a brick-like texture and block sideburns, Captain America's wings are flat cones, Scarlet Witch's tiara reads as a crown. Hair is textured sheets.
-2. **Viewmodel question still open** from the earlier session: ask what the user sees (screen going black near cars, hands, weapon, camera clipping).
-3. **Symbiote heroes** (Venom, Carnage, Anti-Venom) were not touched by the face pass; the user wanted more work on them.
-4. **Shop culling lives in `src/main.js`** but belongs in `src/weapons`; shops pop out at 150 to 190 m, pop-in not reviewed by eye.
-5. **Iron Man's drones do not draw aggro** (enemies always target the player); micro-missiles overshoot under 10 m.
-6. **Singapore rough edges:** Merlion tail, rain trees, highway signal lamps, gun shop names, campaign is New York only, lane comments in `layout.js`/`roads.js` are backwards.
-7. **Untested:** PS4 pad navigation on the title screen, map-switch reload flow in a real browser, police spawn at wanted level on New York.
-8. **Optional:** black-suit rage bar on the HUD, `id: 'nyc'` on the New York `World`.
+1. **Viewmodel question still open:** ask what the user means (screen black near cars, hands, weapon, camera clipping).
+2. **Symbiote goons are expensive:** about 82 draw calls each (40 meshes); a busy Singapore street at night reaches 513 to 660 calls with 4 to 5 on screen. Turning off shadow casting made no measurable difference; merge their meshes per material instead.
+3. **Model nitpicks:** Merlion scales read like a corn cob up close; Wolverine side hair still blocky; Venom tucks his head low; Carnage veins animate in lockstep across instances (shared texture); body suits for Wolverine and Captain still use the brick-like weave.
+4. **Swing dead zones:** open promenades and water with no building within 95 m give no anchor (for example (60,150) in Singapore).
+5. **Campaign is New York only;** Singapore objectives do not exist.
+6. **Real-hardware checks:** PS4 pad on the title screen at real frame rates (headless runs below 1 fps); the rage bar position at 1080p.
 
 ## User preferences to respect
 
