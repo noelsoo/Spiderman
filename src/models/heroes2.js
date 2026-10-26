@@ -12,7 +12,7 @@ const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
 const fab = (name = 'h2fab', p = 6) => ({ normalMap: fabricNormal(p, 0.55, name), normalScale: new V2(0.7, 0.7) });
 const matte = () => ({ normalMap: matteFabricNormal('h2matte', 3, 0.35), normalScale: new V2(0.45, 0.45) });
-const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.6, ...fab(), sheen: 0.6, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xffffff), ...o }), 0xcfe0ff, 0.1);
+const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.6, ...fab(), sheen: 0.3, sheenRoughness: 0.6, sheenColor: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3), ...o }), 0xcfe0ff, 0.1);
 const leather = (color, o = {}) => std(color, { roughness: 0.7, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9), ...o });
 
 /** lagged-chain cloth panel (cape / coat tail / hair curtain) hung from `joint`. Same secondary motion as Thor's cape. */
