@@ -8,6 +8,7 @@ import {
   M as M2, phys, withRim, webNormal, fabricNormal, grainNormal, panelMaps, skinMaps, scaleMaps, armorMaps, arcTexture, thorDiscTexture, capeTexture, tornShortsTexture, veinNormal, symEmblemTexture, antiStreakTexture, drawTex, faceTexture, faceShell, seg, qk, quality,
 } from './common.js';
 
+import { bakeSkinned } from './skinbake.js';
 import { skullPoint, SKULL_DEFAULT, skullGeo, shellGeo, tab, ribbonGeo, skullMetres, faceMaterial, hairMaterial, earsGeo } from './face.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
@@ -840,6 +841,7 @@ export function buildSymbiote(cfg = {}) {
       o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.42 * out * (1 + 0.25 * pw) + Math.sin(c.tm * 3 + u * 4) * 0.03 * u, hr * H.sz * 0.88 + u * 0.5 * out * (1 + 0.3 * pw));
     });
   }, () => { tends.forEach((x) => x.t.dispose()); tongue?.dispose(); eyeM.dispose(); });
+  bakeSkinned(model);
   return finish(model);
 }
 
@@ -899,6 +901,11 @@ export function buildGoon(opts = {}) {
   P(model, model.j[J.AL], coneGeo(0.035, 0.18, 5), sym, { pos: [0.03, 0.08, 0], rot: [0, 0, -0.9] });
   if (rnd() < 0.5) P(model, model.j[J.AR], coneGeo(0.03, 0.14, 5), sym, { pos: [-0.03, 0.07, 0], rot: [0, 0, 0.9] });
   if (kk !== 1) rig.group.scale.setScalar(1);
+  // one SkinnedMesh per material group: cloth/skin/hat share one vertex-coloured material, plus face, eyes, symbiote
+  const plain = (m) => m.isMeshStandardMaterial && !m.isMeshPhysicalMaterial && !m.map && !m.transparent;
+  const uniCloth = M2('goonUniCloth', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.84, metalness: 0.04, normalMap: fn, normalScale: fnS }));
+  const uniPlain = M2('goonUniPlain', () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.04 }));
+  bakeSkinned(model, { unify: [{ test: (m) => plain(m) && !!m.normalMap && m.normalMap === fn, material: uniCloth }, { test: plain, material: uniPlain }] });
   return finish(model);
 }
 
@@ -969,5 +976,6 @@ export function buildHunter() {
     carry: { pos: [-0.1 * k, 0.12 * k, 0.2 * k], rot: [0.5, 0.3] },
     aim: { pos: [-0.12 * k, 0.285 * k, 0.2 * k], rot: [0.0, 0.05] },
   };
+  bakeSkinned(model);
   return finish(model);
 }

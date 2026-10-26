@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import {
   G, std, metal, glow, glowInstance, phys, withRim, sphereGeo, boxGeo, cylGeo, coneGeo, capsuleGeo, mergeParts, rng, seg,
-  fabricNormal, grainNormal, scaleMaps, capChestTexture, capStripesTexture, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
+  fabricNormal, matteFabricNormal, grainNormal, scaleMaps, capChestTexture, capStripesTexture, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
 } from './common.js';
 import { P, addHook, buildBody, addFace, finish, curvedPlane, skullHead, patch, strand, addEars } from './characters.js';
 import { tab, hairMaterial, skullMetres } from './face.js';
@@ -11,6 +11,7 @@ import { tab, hairMaterial, skullMetres } from './face.js';
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
 const fab = (name = 'h2fab', p = 6) => ({ normalMap: fabricNormal(p, 0.55, name), normalScale: new V2(0.7, 0.7) });
+const matte = () => ({ normalMap: matteFabricNormal('h2matte', 3, 0.35), normalScale: new V2(0.45, 0.45) });
 const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.6, ...fab(), sheen: 0.6, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xffffff), ...o }), 0xcfe0ff, 0.1);
 const leather = (color, o = {}) => std(color, { roughness: 0.7, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9), ...o });
 
@@ -73,8 +74,8 @@ export function buildWolverine() {
       ctx.beginPath(); ctx.moveTo(ex, y - 13); ctx.quadraticCurveTo((ex + tx) / 2, y + 2, tx, y + 14); ctx.quadraticCurveTo((ex + tx) / 2, y + 12, ex, y + 16); ctx.fill();
     }
   }, { offsetX: 0.5 });
-  const blue = cloth(0x1a3a96), yellow = cloth(0xf2c213, { roughness: 0.5 });
-  const torso = cloth(0xffffff, { map: torsoTex, normalScale: new V2(0.3, 0.3) });
+  const blue = cloth(0x1a3a96, matte()), yellow = cloth(0xf2c213, { roughness: 0.5, ...matte() });
+  const torso = cloth(0xffffff, { ...matte(), map: torsoTex, normalScale: new V2(0.3, 0.3) });
   const skin = std(0xd8a27c, { roughness: 0.65 });
   const WLd = skullHead('wolv', { brow: 0.05, jawBone: 0.07, chin: 0.1, chinW: 0.3, taper: 0.12, cheek: 0.055, nose: 0.2, jawFlare: 0.05, muzzle: 0.03 },
     { skin: '#d8a27c', iris: '#5a3a22', brow: '#2a1a10', lip: '#8a4a40', mood: 'angry', stubble: 0.5, browW: 0.05, lid: 0.3, seed: 31, eyeSize: 1.25 });
@@ -100,7 +101,7 @@ export function buildWolverine() {
   for (const s of [1, -1]) {
     P(model, hj, earG, cowl, { pos: [s * hr * 0.86, H.y0 + hr * 0.5, -hr * 0.12], rot: [-0.75, 0, -s * 0.62], scale: [1, 1, 0.8] });
     patch(model, H, 'wolvlens' + s, { aMin: s > 0 ? 0.1 : -0.64, aMax: s > 0 ? 0.64 : -0.1, na: 12, nb: 5, top: (a) => lensC(a) + lensH(a), bot: (a) => lensC(a) - lensH(a) * 0.75, thick: () => 0.052 }, lensM);
-    patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 0.98 : -1.5, aMax: s > 0 ? 1.5 : -0.98, na: 10, nb: 8, top: (a) => lerp(-0.02, -0.16, sm01(0, 1, (Math.abs(a) - 0.98) / 0.52)), bot: (a) => { const u = (Math.abs(a) - 0.98) / 0.52; return lerp(-0.7, -0.24, u * u); }, pw: 1.1, thick: (a, l, t) => 0.05 + 0.025 * t, post: (p, a, l, t) => { p.z += 0.05 * t * (1 - Math.abs(Math.abs(a) - 1.0)); } }, sideHair);
+    patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 0.98 : -1.5, aMax: s > 0 ? 1.5 : -0.98, na: 10, nb: 8, top: (a) => lerp(-0.02, -0.16, sm01(0, 1, (Math.abs(a) - 0.98) / 0.52)), bot: (a) => { const u = clamp((Math.abs(a) - 0.98) / 0.52, 0, 1); return lerp(-0.74, -0.165, Math.pow(u, 0.6)); }, pw: 1.5, thick: (a, l, t) => 0.046 + 0.03 * t * (1 - 0.5 * Math.abs(a) / 1.5), post: (p, a, l, t) => { p.z += 0.05 * t * (1 - Math.abs(Math.abs(a) - 1.0)); } }, sideHair);
   }
   addEars(model, H, skin);
   // belt + buckle, boots, cuffs
@@ -145,10 +146,10 @@ export function buildCaptain() {
   sc.map.repeat.set(3, 2); sc.normal.repeat.set(3, 2);
   const scaleMat = withRim(phys(0xffffff, { map: sc.map, normalMap: sc.normal, normalScale: new V2(1.0, 1.0), roughness: 0.42, metalness: 0.35, clearcoat: 0.4, clearcoatRoughness: 0.3 }), 0x9fc0ff, 0.14);
   const stripeTex = capStripesTexture();
-  const stripes = cloth(0xffffff, { map: stripeTex });
-  const red = cloth(0xa81420, { roughness: 0.5 });
+  const stripes = cloth(0xffffff, { ...matte(), map: stripeTex });
+  const red = cloth(0xa81420, { roughness: 0.5, ...matte() });
   const gloveM = leather(0x4a2c18, { roughness: 0.62 });
-  const navy = cloth(0x1a2a6c);
+  const navy = cloth(0x1a2a6c, matte());
   const skin = std(0xe3b490, { roughness: 0.62 });
   const CPd = skullHead('cap', { brow: 0.05, jawBone: 0.065, chin: 0.1, chinW: 0.3, taper: 0.14, cheek: 0.05, nose: 0.19, socket: 0.05 },
     { skin: '#e3b490', iris: '#4a80c8', brow: '#6a4a24', lip: '#b0605a', mood: 'stern', stubble: 0.12, browW: 0.05, seed: 41, eyeSize: 1.3 });
@@ -184,7 +185,7 @@ export function buildCaptain() {
     P(model, model.j[s > 0 ? J.KL : J.KR], cylGeo(0.066 * k, 0.052 * k, dims.shin * 0.5, seg(12, 8)), red, { pos: [0, -dims.shin * 0.7, 0] }); // boot
   }
   // cowl: scale-mail hood with an open face, white wings, forehead 'A' and a leather chin strap
-  const cowl = withRim(phys(0x16286a, { roughness: 0.45, metalness: 0.2, ...fab('capcowl', 5), clearcoat: 0.3 }), 0x9fc0ff, 0.1);
+  const cowl = withRim(phys(0x16286a, { roughness: 0.45, metalness: 0.2, ...matte(), clearcoat: 0.3 }), 0x9fc0ff, 0.1);
   patch(model, H, 'capcowl', { na: seg(44, 26), nb: 14, top: () => Math.PI / 2, bot: tab([[0, 0.36], [0.5, 0.24], [0.85, 0.02], [1.2, -0.08], [1.6, -0.5], [3.14, -0.64]]), thick: () => 0.04 }, cowl, { cast: true });
   const A = drawTex('capA', 128, 128, (ctx, W, Hh) => {
     ctx.fillStyle = '#f4f4f4'; ctx.font = 'bold 100px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('A', W / 2, Hh / 2 + 6);

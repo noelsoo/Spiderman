@@ -128,7 +128,7 @@ function stance(p, f, legs = true) {
       break;
     case 'brute': // Venom: hunched, wide-set heavy arms, fists forward, planted legs
       p.set(AL, 0.12, 0.12, 0.66 + f.wide); p.set(AR, 0.12, -0.12, -0.66 - f.wide); p.set(EL, -0.75); p.set(ER, -0.75);
-      p.set(CH, 0.16); p.set(SP, 0.08); p.set(HD, -0.3); p.set(H, 0.08);
+      p.set(CH, 0.12); p.set(SP, 0.06); p.set(HD, -0.02); p.set(NK, -0.06); p.set(H, 0.08);
       if (legs) { p.set(TL, 0, 0, 0.3); p.set(TR, 0, 0, -0.3); p.set(KL, 0.32); p.set(KR, 0.32); }
       break;
     case 'wiry': // Carnage: coiled predator crouch, claws up, knees bent

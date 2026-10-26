@@ -407,6 +407,22 @@ export function webNormal(kind) {
   const t = ntex(heightToNormal(h, W, W, 2.4)); texCache.set(key, t); return t;
 }
 
+/** smooth matte fabric normal: very fine soft grain plus subtle seam lines (spandex / flight suit, not a basket weave) */
+export function matteFabricNormal(name = 'matte', seams = 3, amp = 0.35) {
+  const key = 'matte' + name + seams + amp + texRes();
+  if (texCache.has(key)) return texCache.get(key);
+  const W = Math.min(texRes(), 512), r = rng(21);
+  const h = new Float32Array(W * W);
+  noiseInto(h, W, W, r, 0.5);
+  blur3(h, W, 1);
+  for (let i = 0; i < h.length; i++) h[i] *= amp;
+  for (let k = 0; k < seams; k++) { // soft stitched seams, tile-safe (wrap)
+    const x = Math.floor((k + 0.5) / seams * W);
+    for (let y = 0; y < W; y++) for (let d = -2; d <= 2; d++) h[y * W + ((x + d + W) % W)] -= (1 - Math.abs(d) / 3) * 0.1 * (y % 6 < 4 ? 1 : 0.6);
+  }
+  const t = ntex(heightToNormal(h, W, W, 1.2)); texCache.set(key, t); return t;
+}
+
 /** suit-fabric normal for generic UV (tile with repeat) */
 export function fabricNormal(period = 6, amp = 0.5, name = 'fab') {
   const key = name + period + amp + texRes();

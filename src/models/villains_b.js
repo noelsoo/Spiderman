@@ -454,7 +454,7 @@ function carnageTexture() {
   }, { repeat: [1, 1] });
 }
 function carnageMats() {
-  const tex = carnageTexture();
+  const tex = carnageTexture().clone(); tex.needsUpdate = true; // own texture per instance so each Carnage crawls on its own offset
   const red = withRim(phys(0xffffff, { map: tex, roughness: 0.26, metalness: 0.12, clearcoat: 1, clearcoatRoughness: 0.12, emissive: 0x330005, emissiveIntensity: 0.7 }), 0xff3a50, 0.5);
   const black = symMat({ id: 'carb', color: 0x0a0204, rim: 0xff1830, rimK: 0.9, rough: 0.16 });
   return { red, black };
@@ -481,7 +481,7 @@ export function buildCarnage() {
   const model = new ProcModel('carnage', rig, { prof: { stance: 'wiry', cadence: 1.15, stride: 1.25, armSwing: 1.3, lean: 1.7, bob: 1.2, flipDodge: false, wide: 0.1, tempo: 1.4 } });
   model.fx = { whip: 0, whipAng: 0, rage: 0 };
   const { info, red, black, k } = carnageBody(model, dims);
-  const veinTex = red.map;
+  const veinTex = red.map, veinPh = Math.random() * 40;
   const hj = model.j[J.HD], H = info.headInfo, hr = H.R;
   // huge white eyes with black rims
   const eyeM = glow(0xfff4f4, 2.2);
@@ -533,7 +533,7 @@ export function buildCarnage() {
   addHook(model, (c, m) => {
     const fx = m.fx, sp2 = Math.hypot(c.vl.x, c.vl.z);
     const rage = clamp((c.st.startsWith('punch') || c.st === 'kick' || c.st === 'smash' || c.st === 'cast' ? 1 : 0.7) + fx.rage * 0.6, 0, 1.5);
-    if (veinTex) { const tt = performance.now() * 0.001; veinTex.offset.set((tt * 0.012) % 1, (-tt * 0.028 - Math.sin(tt * 0.5) * 0.01) % 1); } // veins slowly crawl
+    if (veinTex) { const tt = performance.now() * 0.001 + veinPh; veinTex.offset.set((tt * 0.012) % 1, (-tt * 0.028 - Math.sin(tt * 0.5) * 0.01) % 1); } // veins slowly crawl
     for (const { t, r, ph } of tends) {
       tmpD.set(r[3], r[4], r[5]).normalize();
       const len = 1.3 * k;
