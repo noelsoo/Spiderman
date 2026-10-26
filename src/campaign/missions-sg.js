@@ -25,7 +25,7 @@ const SKY_LEASH = { at: { place: 'skypark' }, dy: 14, r: 95 };
 export const MISSIONS_SG = [
   // ------------------------------------------------------------------------------------------------ 0
   {
-    key: 'merlion-breach', title: 'Merlion Breach', chapter: 'Part 1',
+    key: 'merlion-breach', num: 1, title: 'Merlion Breach', chapter: 'Part 1',
     villain: { name: 'The Lizard', color: '#6bd36a', kind: 'lizard' },
     briefing: 'A Hive culture has surfaced beside the Merlion and the bay is boiling. Clear the infected, gather the spore samples before the tide takes them, then stop what is left of Dr. Connors, who was visiting the city.',
     recommended: { hero: 'spiderman', why: 'The promenade is wide open and full of lamp posts to swing from. Everyone else: keep to the pier and fight in the open.' },
@@ -54,7 +54,7 @@ export const MISSIONS_SG = [
 
   // ------------------------------------------------------------------------------------------------ 1
   {
-    key: 'helix-run', title: 'Helix Run', chapter: 'Part 2',
+    key: 'helix-run', num: 2, title: 'Helix Run', chapter: 'Part 2',
     villain: { name: 'The Brute', color: '#7a2bd0', kind: 'hunter' },
     briefing: 'The Hive\'s couriers have loaded the samples into a van. Chase it along the bay to the Helix Bridge, jam its engine, then take down the brute guarding the cargo on the bridge deck.',
     recommended: { hero: 'ironman', why: 'Fast flight keeps up with the van. Everyone else: the van waits for you if you fall behind, so just keep going.' },
@@ -83,7 +83,7 @@ export const MISSIONS_SG = [
 
   // ------------------------------------------------------------------------------------------------ 2
   {
-    key: 'supertree-siege', title: 'Supertree Siege', chapter: 'Part 3',
+    key: 'supertree-siege', num: 3, title: 'Supertree Siege', chapter: 'Part 3',
     villain: { name: 'Green Goblin', color: '#9be03c', kind: 'goblin' },
     briefing: 'The Hive is using the Supertree Grove as a growth lattice. Defend the power grid that keeps the trees cool, hold the grove against the swarm, and bring down the Goblin who is feeding the spores to the canopy.',
     recommended: { hero: 'hawkeye', why: 'Drones and the Goblin hover over the trees. Melee heroes: the Goblin will land to fight, so be patient.' },
@@ -109,7 +109,7 @@ export const MISSIONS_SG = [
 
   // ------------------------------------------------------------------------------------------------ 3
   {
-    key: 'skypark-ascent', title: 'Sky High', chapter: 'Part 4',
+    key: 'skypark-ascent', num: 4, title: 'Sky High', chapter: 'Part 4',
     villain: { name: 'Kraven the Hunter', color: '#d9a441', kind: 'kraven' },
     briefing: 'The spore signal is being broadcast from the Marina Bay Sands SkyPark, two hundred metres up. A drone lift will carry you to the deck. Fight through the Hive\'s hunters, then face the hunter who commands them.',
     recommended: { hero: 'thor', why: 'Lightning clears the deck quickly. Everyone else: the SkyPark is wide, so use the open ground and the garden trees for cover.' },
@@ -135,7 +135,7 @@ export const MISSIONS_SG = [
 
   // ------------------------------------------------------------------------------------------------ 4
   {
-    key: 'hive-over-the-bay', title: 'Hive Over the Bay', chapter: 'Finale',
+    key: 'hive-over-the-bay', num: 5, title: 'Hive Over the Bay', chapter: 'Finale',
     villain: { name: 'Venom', color: '#b58cff', kind: 'venom' },
     briefing: 'Night has fallen over Marina Bay. The Hive\'s host stands on the SkyPark and is about to broadcast the spores across the city. Hold the deck, break the host\'s guard and end it at the source.',
     recommended: { hero: 'hulk', why: 'Soak up the damage and smash. Or pick whoever you love most. Any hero wins.' },

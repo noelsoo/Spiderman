@@ -139,7 +139,7 @@ export function installCampaignUI(HUD, H) {
       const row = document.createElement('div');
       row.className = `mrow${locked ? ' locked' : ''}${d ? ' done' : ''}`;
       row.style.setProperty('--vc', m.villain.color);
-      row.innerHTML = `<i class="n">${m.id}</i><div class="mt"><b>${esc(locked ? m.chapter : m.title)}</b><small>${esc(locked ? 'Locked' : m.villain.name)}</small></div><span class="ms">${locked ? 'LOCKED' : stars(d?.stars ?? 0)}</span>`;
+      row.innerHTML = `<i class="n">${m.num ?? m.id}</i><div class="mt"><b>${esc(locked ? m.chapter : m.title)}</b><small>${esc(locked ? 'Locked' : m.villain.name)}</small></div><span class="ms">${locked ? 'LOCKED' : stars(d?.stars ?? 0)}</span>`;
       list.appendChild(row);
       const it = this._item(scr, row, {
         act: () => {
