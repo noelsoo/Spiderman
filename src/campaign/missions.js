@@ -27,6 +27,7 @@ export const SPEAKERS = {
   VENOM: { name: 'Venom', color: '#b58cff' },
   CARNAGE: { name: 'Carnage', color: '#ff2a3d' },
   HIVE: { name: 'The Hive', color: '#a070ff' },
+  MEI: { name: 'Dr. Mei Tan', color: '#4fe0c0' },
 };
 
 const L = (who, text) => ({ who, text });
