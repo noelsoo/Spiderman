@@ -1,6 +1,7 @@
 // Instanced street props: palms, rain trees, lamp posts; plus shoreline benches.
 import * as THREE from 'three';
 import { Bucket } from '../geo.js';
+import { BAY } from './layout.js';
 
 function palmGeo() {
   const b = new Bucket();
@@ -101,6 +102,11 @@ export function makeProps(ctx, group, { palmSpots, lamps }) {
   mkInst(palmGeo(), leafMat, palms, (it) => [(it[4] ?? 1) * (0.9 + rng() * 0.5) * 9, (it[4] ?? 1) * (7 + rng() * 6)]);
   const t = mkInst(rainTreeGeo(), leafMat, rains, (it) => [(it[4] ?? 1) * (0.9 + rng() * 0.4) * 9.5, (it[4] ?? 1) * (10 + rng() * 4)]);
 
+  // tall lamps are swing anchors (arm tip); the 9.5 m street lamps are too short to swing from
+  for (const [x, z, h, d, ax] of lamps) {
+    if (h < 12) continue;
+    phys.addAnchor(x + (ax === 'z' ? 0 : d) * 1.4, 0.12 + h, z + (ax === 'z' ? d : (ax ?? 0)) * 1.4, { id: 'lamp' });
+  }
   // lamps: pole + arm + head; heads glow with night
   const L = lamps.filter((_, i) => !low || i % 2 === 0);
   let heads = null, headMat = null;
@@ -122,6 +128,39 @@ export function makeProps(ctx, group, { palmSpots, lamps }) {
       m.compose(p.set(x + dirx * 1.4, 0.12 + h - 0.1, z + dirz * 1.4), q, s.set(1, 1, 1)); heads.setMatrixAt(i, m);
     });
     for (const im of [pm, arm, heads]) { im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; group.add(im); }
+  }
+  // waterfront high-mast lights (26 m): ring the bay promenade and give open ground a swing anchor
+  {
+    if (!headMat) headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.2, 0.2) });
+    const masts = [];
+    for (let i = 0; i < BAY.length; i++) {
+      const [ax, az] = BAY[i], [bx, bz] = BAY[(i + 1) % BAY.length];
+      const len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
+      let nx = -dz, nz = dx;
+      if (ctx.isWater((ax + bx) / 2 + nx * 3, (az + bz) / 2 + nz * 3)) { nx = -nx; nz = -nz; }
+      const n = Math.max(1, Math.round(len / 75));
+      for (let k = 0; k < n; k++) {
+        const f = (k + 0.5) / n, x = ax + dx * len * f + nx * 6.5, z = az + dz * len * f + nz * 6.5;
+        if (ok(x, z)) masts.push([x, z]);
+      }
+    }
+    if (masts.length) {
+      const H = 26;
+      const poleM = new THREE.MeshStandardMaterial({ color: 0x8a9098, roughness: 0.5, metalness: 0.5 });
+      const pole = new THREE.CylinderGeometry(0.16, 0.34, H, 8); pole.translate(0, H / 2, 0);
+      const pm = new THREE.InstancedMesh(pole, poleM, masts.length);
+      const ringG = new THREE.CylinderGeometry(1.5, 1.5, 0.35, 10); ringG.translate(0, H, 0);
+      const rm = new THREE.InstancedMesh(ringG, poleM, masts.length);
+      const lampG = new THREE.BoxGeometry(2.6, 0.3, 2.6); lampG.translate(0, H + 0.3, 0);
+      const lm = new THREE.InstancedMesh(lampG, headMat, masts.length);
+      const mm = new THREE.Matrix4();
+      masts.forEach(([x, z], i) => {
+        mm.makeTranslation(x, 0.12, z); pm.setMatrixAt(i, mm); rm.setMatrixAt(i, mm); lm.setMatrixAt(i, mm);
+        phys.addAnchor(x, H + 0.5, z, { id: 'mast' });
+      });
+      for (const im of [pm, rm, lm]) { im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; group.add(im); }
+      pm.castShadow = true;
+    }
   }
   return { update(night) { if (headMat) headMat.color.setScalar(0.2 + night * 3.0); } };
 }

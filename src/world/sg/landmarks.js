@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { STYLES } from '../materials.js';
 import { emitBox, addBox, lightBox } from './builders.js';
+import { buildMerlionBody, buildFluke } from './merlion-body.js';
 import { MBS, AMS, HELIX, MERLION, FLYER, ESPL, L } from './layout.js';
 
 const WHITE = [0.94, 0.95, 0.97], STEEL = [0.66, 0.69, 0.74], DARK = [0.12, 0.13, 0.15];
@@ -318,6 +319,12 @@ export function buildHelix(ctx) {
   }
   // crest nodes (web anchors)
   for (let i = 0; i <= segs; i += 10) {
+    for (const P of [A[i], B[i]]) if (P[1] > CY + R * 0.9) ctx.physics.addAnchor(P[0], P[1] + 0.7, P[2], { id: 'helix' });
+  }
+  for (let i = 0; i <= segs; i += 4) { // every other arch node on the upper half of the double helix
+    for (const P of [A[i], B[i]]) if (P[1] > CY + R * 0.35) ctx.physics.addAnchor(P[0], P[1] + 0.3, P[2], { id: 'helix' });
+  }
+  for (let i = 0; i <= segs; i += 10) {
     for (const P of [A[i], B[i]]) if (P[1] > CY + R * 0.9) addBox(ctx, P[0] - 0.7, P[1] - 0.6, P[2] - 0.7, P[0] + 0.7, P[1] + 0.6, P[2] + 0.7, 'bridge', 'helix-node');
   }
   // deck rails + lights
@@ -353,31 +360,15 @@ export function buildMerlion(ctx) {
     _m.compose(_p.set(x, y, z), _q, _s.set(sv, sy, su));
     wb.addGeo(ico(), _m, col);
   };
-  const SCALE_A = [0.66, 0.77, 0.88], SCALE_B = [0.9, 0.95, 1.0], MANE = [0.86, 0.88, 0.92], FISH = [0.8, 0.88, 0.95];
+  const MANE = [0.86, 0.88, 0.92];
   // breaking waves round the pedestal top
   for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; bl(Math.cos(a) * 4.3, Math.sin(a) * 4.3, 2.95, 1.1, 0.7, 1.1, [0.8, 0.88, 0.95]); }
   // fish body: chest, belly, then a tail sweeping back and curling up and over behind the lion
   const spine = new THREE.CatmullRomCurve3([[0.9, 11.2], [0.4, 8.8], [-0.3, 6.6], [-1.3, 5.0], [-3.2, 4.3], [-5.2, 5.5], [-6.5, 8.0], [-6.6, 10.8], [-5.7, 13.4], [-4.1, 15.4], [-2.3, 16.3]].map(([u, y]) => new THREE.Vector3(u, y, 0)));
-  const N = 34, pt = new THREE.Vector3(), tg = new THREE.Vector3();
-  for (let i = 0; i <= N; i++) {
-    const t = i / N, r = lerp(3.0, 0.5, Math.pow(t, 0.75));
-    spine.getPointAt(t, pt); spine.getTangentAt(t, tg);
-    const pitch = -Math.atan2(tg.y, tg.x);                      // spine direction in the (u, y) plane
-    bl(pt.x, 0, pt.y, r, r * 1.05, r * 1.05, FISH);
-    // overlapping scales on the outer face of the curve, three per ring, alternating tint
-    const nx = -tg.y, ny = tg.x;                                // outward normal in (u, y), away from the curl centre
-    for (let k = -1; k <= 1; k++) {
-      const sr = r * 0.46;
-      bl(pt.x + nx * r * 0.82, k * r * 0.62, pt.y + ny * r * 0.82, sr, sr * 0.75, sr, (i + k) & 1 ? SCALE_A : SCALE_B, pitch);
-    }
-    if (i % 3 === 1 && t > 0.3) bl(pt.x - nx * r * 0.95, 0, pt.y - ny * r * 0.95, r * 0.14, r * 0.5, r * 0.5, SCALE_A, pitch); // dorsal ridge
-  }
-  // tail fluke: two thin fan blades at the tip, spread sideways and swept back
-  spine.getPointAt(1, pt);
-  for (const sd of [-1, 1]) for (let k = 0; k < 4; k++) {
-    const f = (k + 1) / 4;
-    bl(pt.x - 0.4 - f * 0.8, sd * (0.7 + f * 2.1), pt.y + 0.55 + f * 0.9, 0.55, 0.16 + (1 - f) * 0.1, 1.15 - f * 0.25, k & 1 ? SCALE_B : SCALE_A, 0, sd * 0.35);
-  }
+  const radiusAt = (t) => lerp(3.0, 0.5, Math.pow(t, 0.75)) * (1 + 0.1 * Math.sin(Math.PI * Math.min(1, t * 1.6)));
+  const fish = buildMerlionBody(spine, (u, v) => W2(u, v), radiusAt, ctx.quality);
+  buildFluke(spine, (u, v) => W2(u, v), fish.mat, fish.group);
+  ctx.group.add(fish.group);
   // lion head on the shoulders, facing the bay
   const hu = 1.9, hy = 13.3;
   bl(hu, 0, hy, 2.5, 2.4, 2.6, WHITE);                           // skull
@@ -399,8 +390,12 @@ export function buildMerlion(ctx) {
     const a = k / 11 * Math.PI * 2, rr = 2.5;
     bl(hu - 1.7, Math.cos(a) * rr, hy + Math.sin(a) * rr * 0.9 - 0.3, 1.2, 1.25, 1.15, WHITE);
   }
-  addBox(ctx, BX - 3.2, 2.85, BZ - 3.2, BX + 3.2, 11.5, BZ + 3.2, 'prop', 'merlion-body');
-  addBox(ctx, BX - 6, 2.85, BZ - 6, BX + 1, 17, BZ + 1, 'prop', 'merlion-tail');
+  // collision: overlapping cubes following the curl (each sized to the tube radius at that point)
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12, r = radiusAt(t) * 0.8; spine.getPointAt(t, _p);
+    const [cx, cz] = W2(_p.x, 0), h = r * 1.0;
+    addBox(ctx, cx - h, Math.max(2.85, _p.y - r), cz - h, cx + h, _p.y + r, cz + h, 'prop', i < 2 ? 'merlion-body' : 'merlion-tail');
+  }
   addBox(ctx, BX - 3.5, 11.5, BZ - 3.5, BX + 4.5, 16.5, BZ + 4.5, 'prop', 'merlion-head');
   { const [mx, mz] = W2(hu + 3.2, 0); ctx.merlionMouth = new THREE.Vector3(mx, hy - 1.75, mz); }
   ctx.merlionDir = new THREE.Vector3(fx, 0, fz);
