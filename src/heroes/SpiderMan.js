@@ -32,7 +32,7 @@ const TUNE = {
   // zip
   zipRange: 60, zipSpeed: 58, zipBoost: 34, zipBoostCd: 2.2,
   // glide
-  glideFall: -4, glideSpeed: 22, glideTurn: 2.4, diveSpeed: 40, diveFall: -24,
+  glideFall: -4, glideSpeed: 22, wingSpeed: 26, wingUp: 15, wingLift: 9, wingCd: 0.9, glideTurn: 2.4, diveSpeed: 40, diveFall: -24,
   // slingshot
   slingMin: 0.16, slingMax: 1.1, slingSpeed: 30, slingBonus: 30,
   // combat
@@ -108,6 +108,7 @@ export class SpiderMan extends Hero {
     this.lines = this.linesClassic; for (const l of Object.values(this.linesSym)) l.hide();
     this.bs.reset();
     this.anchor = new THREE.Vector3(); this.ropeLen = 20; this.ropeTarget = 20; this.swingT = 0;
+    this.wingAssist = false; this.wingCd = 0; this.wingT = 0; this.noAnchorT = 0;
     this.hand = 0; this.swingLock = 0; this.swingTry = 0; this.reattach = 0;
     this.wallN = new THREE.Vector3(0, 0, 1); this.wallLost = 0; this.wallLock = 0;
     this.zipTarget = new THREE.Vector3(); this.zipKind = 'ground'; this.zipN = new THREE.Vector3(); this.zipT = 0; this.zipSpeed = 0;
@@ -303,6 +304,26 @@ export class SpiderMan extends Hero {
         if (score > bestScore) { bestScore = score; best = { point: pt.clone(), normal: hit.normal.clone(), score }; }
       }
     }
+    // point anchors: tall props and landmarks without a usable box (high lamps, wheel rim, bridge arches)
+    if (phys.anchors?.length) {
+      const list = phys.queryAnchors(c.x, c.z, maxRay, this._anchorTmp || (this._anchorTmp = []));
+      for (const an of list) {
+        const dx = an.x - c.x, dz = an.z - c.z, hd = Math.hypot(dx, dz);
+        if (hd < 5 || hd > maxRay) continue;
+        const cos = (dx * heading.x + dz * heading.z) / hd;
+        if (cos < 0.4) continue;
+        const rise = an.y - c.y, dist = Math.hypot(hd, rise);
+        if (rise < minRise || dist < 20 || dist > maxRay + 6) continue;   // short ropes on low props only pendulum in place
+        const maxLen = Math.min(dist * TUNE.ropeShorten, an.y - TUNE.groundClear);
+        if (maxLen < 9 || maxLen < dist * 0.62) continue;
+        pt.set(an.x, an.y, an.z);
+        if (!phys.lineOfSight(c, pt)) continue;
+        let score = Math.min(rise, 45) * 0.5 + (dist >= 18 && dist <= 55 ? 14 : -Math.abs(dist - 36) * 0.35);
+        score -= Math.acos(Math.min(1, cos)) * 9;
+        if (hd < dist * 0.4) score -= 6;
+        if (score > bestScore) { bestScore = score; best = { point: pt.clone(), normal: new THREE.Vector3(-dx / hd, 0, -dz / hd), score }; }
+      }
+    }
     // corner swing: when turning, grab the vertical edge of the building you are rounding
     const hs = Math.hypot(this.vel.x, this.vel.z);
     if (hs > 8 && (this.vel.x * heading.x + this.vel.z * heading.z) / hs < 0.93) {
@@ -355,6 +376,7 @@ export class SpiderMan extends Hero {
     if (this.onGround) this.jumpArmed = false;
     this.swingLock = Math.max(0, this.swingLock - dt);
     this.swingTry = Math.max(0, this.swingTry - dt);
+    this.wingCd = Math.max(0, this.wingCd - dt);
     this.reattach = Math.max(0, this.reattach - dt);
     this.wallLock = Math.max(0, this.wallLock - dt);
     this.perchT = Math.max(0, this.perchT - dt);
@@ -464,13 +486,16 @@ export class SpiderMan extends Hero {
       if (input.down('swing') && this.swingLock <= 0 && this.reattach <= 0 && this.swingTry <= 0 && !this.dodgeT && !this.spin && !this.sling) {
         this.swingTry = 0.1;
         if (this._tryStartSwing(input)) return;
+        this.noAnchorT += 0.1;
+        if (this.noAnchorT >= 0.7 && this._wingLaunch(input, busy)) return;   // nothing to hook onto for 0.7 s: web-wing point launch
       }
+      if (!input.down('swing')) this.noAnchorT = 0;
       if (this.wallLock <= 0 && this.vaultT <= 0 && this.onWall && !this.dodgeT && this._canWall(input)) { this._enterWall(); return; }
 
       // Web Wings
       if (!this.onGround && !busy && this.airT > 0.25 && this.vel.y < -1 &&
           (input.pressed('jump') || (input.down('jump') && this.jumpArmed)) && this._groundDist() > 3) {
-        this.state = 'glide'; this.glideSpeed = Math.max(Math.hypot(this.vel.x, this.vel.z), 12); this._play('whoosh');
+        this.state = 'glide'; this.wingAssist = false; this.glideSpeed = Math.max(Math.hypot(this.vel.x, this.vel.z), 12); this._play('whoosh');
         return;
       }
     }
@@ -627,7 +652,41 @@ export class SpiderMan extends Hero {
     return true;
   }
 
+  /**
+   * Dead-zone fallback (open promenades, parks, water): when swing is held and there is nothing to hook onto, fire a
+   * short web-wing point launch. On the ground it hops forward and up into the Web Wings glide, keeping momentum; in
+   * the air it opens the wings. While swing stays held the glide keeps trying to catch an anchor, so the hero chains
+   * into a normal swing the moment a building, lamp or landmark comes into range.
+   */
+  _wingLaunch(input, busy) {
+    if (this.symbiote || busy || this.wingCd > 0 || this.dodgeT || this.spin || this.sling) return false;
+    const hd = this._swingHeading(input, _x);
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    if (this.onGround) {
+      const sp = Math.max(TUNE.wingSpeed, hs * 1.05);
+      this.vel.x = hd.x * sp; this.vel.z = hd.z * sp; this.vel.y = TUNE.wingUp; this.onGround = false;
+      this.wingCd = TUNE.wingCd; this.wingT = 0.9;
+      this.yaw = Math.atan2(hd.x, hd.z);
+      this.glideSpeed = sp; this.state = 'glide'; this.wingAssist = true; this.atk = null;
+      const from = this._hand(_hp2.set(0, 0, 0));
+      this.lines.zip.begin(0.35);
+      this._fx('beam', from, from.clone().addScaledVector(hd, 12).setY(from.y + 6), 0xffffff, 0.1, 0.18);
+      this._fx('burst', this.pos.clone().setY(this.pos.y + 0.2), 0xffffff, 10, 5, 0.3, 0.15);
+      this._play('thwip'); this._play('whoosh'); this._rumble(0.3, 0.2, 80); this.game.cam.shake(0.05);
+      return true;
+    }
+    // airborne: open the wings only when momentum is low or the ground is close and rushing up (keeps fast swing exits ballistic)
+    const gd = this._groundDist();
+    if (this.airT > 0.25 && gd > 3 && ((hs < 18 && this.vel.y < 2) || (gd < 22 && this.vel.y < -8))) {
+      this.glideSpeed = Math.max(hs, TUNE.glideSpeed); this.state = 'glide'; this.wingAssist = true;
+      if (hs > 3) this.yaw = Math.atan2(this.vel.x, this.vel.z);
+      this._play('whoosh'); return true;
+    }
+    return false;
+  }
+
   _attachSwing(a, heading) {
+    this.noAnchorT = 0;
     this.anchor.copy(a.point);
     const c = this._center(_c);
     const d = c.distanceTo(this.anchor);
@@ -955,13 +1014,14 @@ export class SpiderMan extends Hero {
   _updateGlide(dt, input) {
     this.gravityScale = 0;
     const sym = this.symbiote, GS = sym ? BS.glideSpeed : TUNE.glideSpeed, DS = sym ? BS.diveSpeed : TUNE.diveSpeed, DF = sym ? BS.diveFall : TUNE.diveFall;
-    if (this.aiming) { this.state = 'free'; this.gravityScale = 1; this.jumpArmed = false; return; }
+    if (this.aiming) { this.state = 'free'; this.gravityScale = 1; this.jumpArmed = false; this.wingAssist = false; return; }
+    this.wingT = Math.max(0, this.wingT - dt);
     if (input.down('swing') && this.swingTry <= 0) {
       this.swingTry = 0.1;
       if (this._tryStartSwing(input)) return;
     }
     if (input.pressed('ability') && this._tryZip(input)) return;
-    if (!input.down('jump') || this.onGround) { this.state = 'free'; this.gravityScale = 1; this.jumpArmed = false; return; }
+    if ((!input.down('jump') && !(this.wingAssist && input.down('swing'))) || this.onGround) { this.state = 'free'; this.gravityScale = 1; this.jumpArmed = false; this.wingAssist = false; return; }
     if (this.onWall && this.wallLock <= 0 && this._canWall(input)) { this._enterWall(); return; }
     this._combatInputs(dt, input, false);
 
@@ -982,7 +1042,7 @@ export class SpiderMan extends Hero {
     this.vel.x = Math.sin(this.yaw) * this.glideSpeed; this.vel.z = Math.cos(this.yaw) * this.glideSpeed;
     let fall = dive ? DF : TUNE.glideFall;
     if (!dive && this.glideSpeed > GS + 4 && input.move.y > 0.3) fall = 3 + (this.glideSpeed - GS) * 0.25; // pull up: bleed speed into lift
-    this.vel.y = approach(this.vel.y, fall, (dive ? 40 : 22) * dt);
+    this.vel.y = approach(this.vel.y, fall, (dive ? 40 : this.wingT > 0 && this.vel.y > 0 ? TUNE.wingLift : 22) * dt);
     if (!dive && fall > 0) this.glideSpeed = Math.max(GS, this.glideSpeed - 6 * dt);
     this.setAnim('glide', this.glideSpeed);
     this._leanPose(_a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), dive ? 1.45 : 1.05, clamp(-turn / Math.max(dt, 1e-3) * 0.25, -0.5, 0.5), 8);

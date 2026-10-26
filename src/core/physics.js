@@ -12,6 +12,32 @@ export class Physics {
     this.grid = new Map();
     this.groundY = 0;
     this._stamp = 0;
+    this.anchors = [];          // swing-only anchor points: tall props with no usable box (lamps, rims, cables)
+    this._anchorGrid = new Map();
+  }
+
+  /** Register a swing-only anchor point. data is free-form (e.g. { id: 'lamp' }). */
+  addAnchor(x, y, z, data = {}) {
+    const a = { x, y, z, data };
+    this.anchors.push(a);
+    const k = this._key(Math.floor(x / this.cell), Math.floor(z / this.cell));
+    let list = this._anchorGrid.get(k);
+    if (!list) { list = []; this._anchorGrid.set(k, list); }
+    list.push(a);
+    return a;
+  }
+
+  /** Anchor points whose grid cells overlap the square of half-size r around (x, z). */
+  queryAnchors(x, z, r, out = []) {
+    out.length = 0;
+    if (!this.anchors.length) return out;
+    const x0 = Math.floor((x - r) / this.cell), x1 = Math.floor((x + r) / this.cell);
+    const z0 = Math.floor((z - r) / this.cell), z1 = Math.floor((z + r) / this.cell);
+    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) {
+      const list = this._anchorGrid.get(this._key(ix, iz));
+      if (list) for (const a of list) out.push(a);
+    }
+    return out;
   }
 
   _key(ix, iz) { return ix * 73856093 ^ iz * 19349663; }
