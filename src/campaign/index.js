@@ -12,9 +12,10 @@
 // The HUD side lives in src/ui/campaign-ui.js (menus, subtitles, letterbox, mission complete / failed screens).
 import * as THREE from 'three';
 import { MISSIONS, SPEAKERS } from './missions.js';
+import { MISSIONS_SG, SG_META } from './missions-sg.js';
 import { STEP_TYPES, resolvePlace, groundPoint, pickKind, setupChase } from './objectives.js';
 
-const KEY = 'sm-campaign';
+const NYC_META = { title: 'Sinister Symbiosis', key: 'sm-campaign', city: 'New York', finale: 'The hive is destroyed. New York is safe.', blurb: 'Sinister Symbiosis: stop the symbiote outbreak across New York.' };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const smooth = (t) => t * t * (3 - 2 * t);
 const _v = new THREE.Vector3();
@@ -23,7 +24,10 @@ const _look = new THREE.Vector3();
 export class Campaign {
   constructor(game) {
     this.game = game;
-    this.missions = MISSIONS;
+    // the chapter list follows the loaded map; each campaign keeps its own save slot
+    this.sg = game.world?.id === 'singapore';
+    this.missions = this.sg ? MISSIONS_SG : MISSIONS;
+    this.meta = this.sg ? SG_META : NYC_META;
     this.speakers = SPEAKERS;
     this.progress = this._load();
     this.active = null;          // mission definition being played
@@ -46,12 +50,12 @@ export class Campaign {
   _load() {
     const def = { v: 1, unlocked: 0, done: {}, cash: 0 };
     try {
-      const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+      const o = JSON.parse(localStorage.getItem(this.meta.key) || 'null');
       if (o && typeof o === 'object') return { ...def, ...o, done: { ...(o.done || {}) } };
     } catch { /* private mode */ }
     return def;
   }
-  save() { try { localStorage.setItem(KEY, JSON.stringify(this.progress)); } catch { /* ignore */ } }
+  save() { try { localStorage.setItem(this.meta.key, JSON.stringify(this.progress)); } catch { /* ignore */ } }
   reset() { this.progress = { v: 1, unlocked: 0, done: {}, cash: 0 }; this.save(); }
   unlockAll() { this.progress.unlocked = this.missions.length - 1; this.save(); }
   isUnlocked(id) { return id <= this.progress.unlocked; }
@@ -66,7 +70,7 @@ export class Campaign {
 
   // ====================================================================== helpers for steps
   resolve(spec) { return resolvePlace(this, spec); }
-  prepareChase(g, at) { return setupChase(this, at); }
+  prepareChase(g, at, route) { return setupChase(this, at, route); }
   aliveCount() { let n = 0; for (const e of this.game.enemies.list) if (e.alive) n++; return n; }
 
   spawn(kindSpec, pos, opts = {}) {
@@ -215,6 +219,7 @@ export class Campaign {
     if (!m) return;
     const resume = this._resume; this._resume = null;
     this.active = m;
+    if (m.time !== undefined) this._setTime(m.time);
     this.run = { retries: resume?.retries ?? 0, checkpoint: null, hero: g.player?.id };
     this.mem = {}; this.time = 0; this.phase = 'playing'; this.stepIdx = -1; this.step = null;
     this.dlg = { queue: [], cur: null, t: 0, gap: 0 };
@@ -242,6 +247,7 @@ export class Campaign {
     if (this.step) { try { this.step.end(); } catch (e) { console.error(e); } }
     if (this.cine && g.state === 'overlay') { this.cine = null; g.overlay = null; }
     this.cine = null;
+    this._restoreTime();
     this.step = null; this.active = null; this.phase = 'idle'; this.stepIdx = -1; this.mem = {}; this._pending = null;
     g.enemies.objectiveActive = false;
     g.hud?.objective?.('');
@@ -296,6 +302,19 @@ export class Campaign {
     _v.set(p.x + Math.cos(a) * r, 0.3, p.z + Math.sin(a) * r);
     this.game.fx?.explosion?.(_v, 3.2, 0xff5a20);
     this.game.fx?.smoke?.(_v, 3, 3, null, 0.05);
+  }
+
+  /** Optional per-mission time of day (Singapore finale is at night); restored when the mission stops. */
+  _setTime(t) {
+    const a = this.game.world?.atmo;
+    if (!a?.setTime) return;
+    if (this._prevT === undefined) this._prevT = a.t;
+    a.setTime(t);
+  }
+  _restoreTime() {
+    if (this._prevT === undefined) return;
+    const t = this._prevT; this._prevT = undefined;
+    this.game.world?.atmo?.setTime?.(t);
   }
 
   // ====================================================================== end states

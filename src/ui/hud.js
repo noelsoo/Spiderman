@@ -309,7 +309,7 @@ export class HUD {
     let flag = null;
     try { flag = sessionStorage.getItem('sm-open'); sessionStorage.removeItem('sm-open'); } catch { /* ignore */ }
     if (flag === 'freeroam') { this.stack = ['title']; this._open('heroselect', { mode: 'freeroam' }); }
-    else if (flag === 'campaign' && this.game.world?.id !== 'singapore') this.openCampaignMenu();
+    else if (flag === 'campaign') this.openCampaignMenu();
   }
 
   showPause() { this.stack = []; this._closeWheel(false); this._open('pause'); }
@@ -527,8 +527,8 @@ export class HUD {
       scr.items[scr.items.length - 1].onFocus = () => { desc.textContent = text; desc.classList.remove('pop'); void desc.offsetWidth; desc.classList.add('pop'); };
       menu.appendChild(b); return b;
     };
-    mk(played ? 'Continue' : 'Campaign', () => this._push(sg ? 'campaignmap' : 'campaign'),
-      played ? 'Pick up the Sinister Symbiosis story where you left off.' : 'Sinister Symbiosis: stop the symbiote outbreak across New York.', 'big');
+    mk(played ? 'Continue' : 'Campaign', () => this._push('campaign'),
+      played ? `Pick up the ${C.meta.title} story where you left off.` : C.meta.blurb, 'big');
     mk('Free Roam', () => this._push('mapselect'), 'Swing, fly and fight across an open city. Choose New York or Singapore.');
     mk('Heroes', () => this._push('heroselect', { mode: 'browse' }), 'Browse the roster and pick your favourite hero.');
     mk('Settings', () => this._push('settings'), 'Graphics, audio, camera, controls and accessibility.');

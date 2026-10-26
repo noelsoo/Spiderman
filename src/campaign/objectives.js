@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { ENEMY_KINDS } from '../enemies/index.js';
 import { avenueX, streetZ, inWater, L as CITY } from '../world/city.js';
+import { inWater as sgInWater } from '../world/sg/layout.js';
 
 const _v = new THREE.Vector3();
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -31,6 +32,23 @@ const PLACES = {
 };
 const KEEP_Y = new Set(['deckStart', 'deckC']);
 
+// ---- Singapore (Marina Bay) places. Layout constants: src/world/sg/layout.js, landmarks: world.landmarks.
+export const isSG = (g) => g.world?.id === 'singapore';
+const SG_LM = (g, name, fb) => (g.world?.landmarks?.[name] ?? fb).clone().setY(0);
+const SG_PLACES = {
+  merlion: (g) => SG_LM(g, 'Merlion', new THREE.Vector3(-275, 0, -313)).add(new THREE.Vector3(13, 0, 17)),    // pier beside the statue
+  merlionStatue: (g) => SG_LM(g, 'Merlion', new THREE.Vector3(-275, 0, -313)),
+  helix: (g) => new THREE.Vector3(g.world?.landmarks?.['Helix Bridge']?.x ?? 285, 6.05, g.world?.landmarks?.['Helix Bridge']?.z ?? -325),   // bridge deck
+  helixN: () => new THREE.Vector3(285, 0, -440),                                                              // road at the north ramp
+  vanStart: () => new THREE.Vector3(-380, 0, -340),
+  vanCorner: () => new THREE.Vector3(-380, 0, -440),
+  gardens: (g) => SG_LM(g, 'Gardens by the Bay', new THREE.Vector3(500, 0, 470)),
+  mbsPlaza: () => new THREE.Vector3(205, 0, 30),                                                              // waterfront plaza under the SkyPark
+  skypark: (g) => new THREE.Vector3(g.world?.landmarks?.SkyPark?.x ?? 270, 205.05, 35),                       // SkyPark deck (fixed height)
+  spawn: (g) => (g.world?.spawnPoint?.pos ?? new THREE.Vector3()).clone().setY(0),
+};
+const SG_KEEP_Y = new Set(['helix', 'skypark']);
+
 /** Resolve a place spec (see missions.js) to a fresh Vector3 (y snapped to the ground unless the spec fixes it). */
 export function resolvePlace(c, spec) {
   const g = c.game;
@@ -40,7 +58,12 @@ export function resolvePlace(c, spec) {
   spec = spec || {};
   const p = new THREE.Vector3();
   let keepY = false;
-  if (spec.place) { p.copy((PLACES[spec.place] ?? PLACES.plaza)(g, c)); keepY = KEEP_Y.has(spec.place); }
+  const sg = isSG(g);
+  if (spec.place) {
+    if (sg) { p.copy((SG_PLACES[spec.place] ?? SG_PLACES.mbsPlaza)(g, c)); keepY = SG_KEEP_Y.has(spec.place); }
+    else { p.copy((PLACES[spec.place] ?? PLACES.plaza)(g, c)); keepY = KEEP_Y.has(spec.place); }
+  }
+  else if (spec.xz) p.set(spec.xz[0], 0, spec.xz[1]);                                                      // raw world x, z (Singapore)
   else if (spec.node) p.set(avenueX(spec.node[0]), 0, streetZ(spec.node[1]));
   else if (spec.rel === 'player') {
     const pl = g.player?.pos ?? p, a = spec.ang ?? Math.random() * 6.28, d = spec.dist ?? 20;
@@ -58,23 +81,31 @@ export function resolvePlace(c, spec) {
   if (spec.y !== undefined) p.y = spec.y;
   else if (!keepY && !spec.shop) p.y = g.physics.heightAt(p.x, p.z, spec.maxY ?? 4);
   else if (spec.shop) p.y = g.physics.heightAt(p.x, p.z, 4);
+  // Singapore: never hand out a point inside a building or in the bay (statues, supertrees, towers)
+  if (sg && spec.y === undefined && !spec.shop && !spec.rel && sgBlocked(g, p)) groundPoint(c, p, 1, 36, p);
   return p;
 }
 
+const sgBlocked = (g, p) => {
+  _v.set(p.x, p.y + 0.9, p.z);
+  return !!g.physics.inside(_v) || (sgInWater(p.x, p.z) && p.y < 0.1);
+};
+
 /** A walkable position in the ring r0..r1 around `center` (avoids building interiors, the river and the sky). */
 export function groundPoint(c, center, r0, r1, out = new THREE.Vector3()) {
-  const phys = c.game.physics, b = c.game.world?.bounds;
-  for (let i = 0; i < 24; i++) {
+  const phys = c.game.physics, b = c.game.world?.bounds, sg = isSG(c.game);
+  for (let i = 0; i < (sg ? 70 : 24); i++) {
     const a = Math.random() * Math.PI * 2, r = rnd(r0, r1);
     let x = center.x + Math.cos(a) * r, z = center.z + Math.sin(a) * r;
     if (b) { x = clamp(x, b.minX + 6, b.maxX - 6); z = clamp(z, b.minZ + 6, b.maxZ - 6); }
     const y = phys.heightAt(x, z, center.y + 2.5);
     if (Math.abs(y - center.y) > 3.2) continue;
-    if (inWater(x - 10) && y < 5) continue;
+    if (sg ? (sgInWater(x, z) && y < 0.1) : (inWater(x - 10) && y < 5)) continue;
     _v.set(x, y + 0.9, z);
     if (phys.inside(_v)) continue;
     return out.set(x, y, z);
   }
+  if (sg) return out.copy(center);
   const y = phys.heightAt(center.x + r0, center.z, center.y + 2.5);
   return out.set(center.x + r0, y, center.z);
 }
@@ -169,7 +200,7 @@ class Step {
       if (!e.alive || e.isBoss) continue;
       const age = this.t - (e.spawnT ?? 0);
       const far = hypot2(e.pos, pl) > 230;
-      const fell = e.pos.y < -4;
+      const fell = e.pos.y < -4 || (this.def.floorY !== undefined && e.pos.y < this.def.floorY - 6);
       const roofed = rooftopTimeout > 0 && e.onRoof && age > rooftopTimeout;
       if (far) e.farT = (e.farT || 0) + dt; else e.farT = 0;
       if (fell || roofed || (e.farT > 14)) {
@@ -180,6 +211,20 @@ class Step {
     }
   }
   text(t, progress) { this.c.setObjective(t, progress); }
+  /** Optional arena leash (def.leash = { at, to?, dy?, r? }): a hero who falls off a deck / SkyPark is returned to the fight. */
+  arenaLeash(dt) {
+    const Lh = this.def.leash;
+    if (!Lh) return;
+    this._leashAt ??= this.c.resolve(Lh.at);
+    const pl = this.pl, at = this._leashAt;
+    const out = pl.y < at.y - (Lh.dy ?? 10) || hypot2(pl, at) > (Lh.r ?? 120);
+    this._leashT = out ? (this._leashT || 0) + dt : 0;
+    if (this._leashT > 2) {
+      this._leashT = 0;
+      this.c.teleportPlayer(this.c.resolve(Lh.to ?? Lh.at), Lh.yaw);
+      this.g.hud?.toast?.('F.R.I.D.A.Y. dropped you back at the fight');
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------- cutscene / talk
@@ -188,7 +233,7 @@ class CutsceneStep extends Step {
     const c = this.c, d = this.def;
     this.text(d.text ?? '');
     c.setWaypoint(null);
-    if (d.reveal === 'van') c.prepareChase(this.g, d.at ?? 'depot');
+    if (d.reveal === 'van') c.prepareChase(this.g, d.at ?? 'depot', d.route);
     c.playCutscene({ lines: d.lines, cam: d.cam, teleport: d.teleport, teleportYaw: d.teleportYaw, onEnd: () => { this.done = true; } });
   }
   skip() { this.c.skipCutscene(); this.done = true; }
@@ -347,6 +392,7 @@ class DefeatStep extends Step {
     for (const e of this.tracked) if (e.alive) { const dd = hypot2(e.pos, pl); if (dd < bd) { bd = dd; best = e; } }
     this.c.setWaypoint(best ? best.pos : this.centerWp);
     this.recoverStragglers(dt, d.rooftopTimeout ?? 38);
+    this.arenaLeash(dt);
     if (d.hint && this.hintN < 2) { this.hintT -= dt; if (this.hintT <= 0 && alive) { this.hintT = 14; this.hintN++; this.g.hud?.prompt?.(d.hint[0], d.hint[1]); } }
     if (spawned >= this.total && alive === 0) this.done = true;
   }
@@ -374,6 +420,7 @@ class SurviveStep extends Step {
       }
     }
     this.recoverStragglers(dt, 0);
+    this.arenaLeash(dt);
     this.text(`${this.def.text ?? 'Survive'}`, 1 - this.left / this.def.seconds);
     this.c.setTimer(fmtClock(this.left));
     if (this.left <= 0) this.done = true;
@@ -428,6 +475,7 @@ class DefendStep extends Step {
     this.text(this.def.text ?? 'Defend the objective', 1 - this.left / this.def.seconds);
     this.c.setTimer(fmtClock(this.left));
     this.recoverStragglers(dt, 0);
+    this.arenaLeash(dt);
     if (this.hp <= 0) { this.c.fail(`${this.def.label ?? 'The objective'} was destroyed`); return; }
     if (this.left <= 0) this.done = true;
   }
@@ -518,9 +566,10 @@ function buildRoute(a0, s0, dir0, len = 26) {
 }
 
 /** Create the fleeing van (re-using a traffic vehicle) and its route. Idempotent per mission run. */
-export function setupChase(c, atSpec) {
+export function setupChase(c, atSpec, routeSpecs) {
   const g = c.game;
   if (c.mem.chase) return c.mem.chase;
+  if (routeSpecs?.length) return setupChasePts(c, routeSpecs);
   const veh = g.vehicles;
   const at = c.resolve(atSpec ?? 'depot');
   // pick a candidate car: prefer a van far from the player's view, otherwise any inactive/idle car
@@ -548,22 +597,59 @@ export function setupChase(c, atSpec) {
   return c.mem.chase;
 }
 
+/** Map-independent chase (Singapore): the van drives a polyline of resolved points and parks at the last one. */
+function setupChasePts(c, routeSpecs) {
+  const g = c.game, veh = g.vehicles;
+  const pts = routeSpecs.map((sp) => c.resolve(sp));
+  let v = null, bd = Infinity;
+  for (const cand of veh.list) {
+    if (cand === veh.driving || cand.reserve || cand.isPolice || cand.held || cand.thrown || cand.wrecked || cand.sinking) continue;
+    const d = hypot2(cand.pos, pts[0]) - (cand.kind === 'van' ? 400 : 0);
+    if (d < bd) { bd = d; v = cand; }
+  }
+  if (!v) return null;
+  veh._releaseModel?.(v);
+  v.setKind('van');
+  v.hex = 0x24272e; v.color.setHex(v.hex);
+  v.maxHp = 240; v.parked = false; v.reserve = false;
+  const yaw = Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z);
+  v.place(pts[0].x, pts[0].z, yaw, 0);
+  v.driver = 'mission'; v.ai = null; v.asleep = false; v.active = true; v.group.visible = true;
+  v.hp = v.maxHp; v.invuln = 0.4; v.needsRelocate = false;
+  v.syncGroup();
+  c.mem.vanPos = v.pos.clone();
+  c.mem.chase = { v, pts, ri: 1, stuckT: 0, offT: 0, lastPos: v.pos.clone() };
+  return c.mem.chase;
+}
+
 class ChaseStep extends Step {
   start() {
     const d = this.def, c = this.c, g = this.g;
-    this.ch = setupChase(c, d.at);
+    this.ch = setupChase(c, d.at, d.route);
     if (!this.ch) { this.done = true; return; }
     this.v = this.ch.v;
     this.stopHp = this.v.maxHp * (d.hpFrac ?? 0.3);
     this.left = d.time ?? 200;
     this.text(d.text ?? 'Stop the van', 0);
     this.jamT = 0; this.toldJam = false;
-    g.hud?.setAllyBar?.('OSCORP VAN', 1, '#ff7a4d');
+    g.hud?.setAllyBar?.(d.label ?? 'OSCORP VAN', 1, '#ff7a4d');
     if (d.lines) c.say(d.lines);
   }
   /** Put the van back on the road, on the segment it was driving, heading for the next node. */
   recover(speed = 6) {
-    const ch = this.ch, v = this.v, n = ch.route.length;
+    const ch = this.ch, v = this.v;
+    if (ch.pts) {
+      const a = ch.pts[Math.max(0, ch.ri - 1)], b = ch.pts[Math.min(ch.pts.length - 1, ch.ri)];
+      const len = Math.max(1, hypot2(a, b)), ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
+      // closest point on the current segment, nudged forward
+      const t = clamp(((v.pos.x - a.x) * ux + (v.pos.z - a.z) * uz) + 8, 0, len);
+      v.place(a.x + ux * t, a.z + uz * t, Math.atan2(ux, uz), speed);
+      v.driver = 'mission'; v.hp = Math.max(v.hp, this.stopHp + 5); v.invuln = 1;
+      v.syncGroup();
+      ch.stuckT = 0; ch.offT = 0; ch.lastPos.copy(v.pos);
+      return;
+    }
+    const n = ch.route.length;
     const [a, s] = ch.route[(ch.ri - 1 + n) % n], [A, S] = ch.route[ch.ri % n];
     const dx = Math.sign(A - a), dz = Math.sign(S - s);
     const heading = Math.atan2(avenueX(A) - avenueX(a), streetZ(S) - streetZ(s));
@@ -572,7 +658,34 @@ class ChaseStep extends Step {
     v.syncGroup();
     ch.stuckT = 0; ch.offT = 0; ch.lastPos.copy(v.pos);
   }
+  steerPts(dt) {
+    const ch = this.ch, v = this.v, P = ch.pts, last = P.length - 1;
+    const dist = hypot2(v.pos, this.pl);
+    let want = 21;
+    if (dist > 60) want = 21 * (dist >= 140 ? 0 : 1 - ((dist - 60) / 80) * 0.88);
+    while (ch.ri < last && hypot2(v.pos, P[ch.ri]) < 16 + Math.min(10, Math.abs(v.speed))) ch.ri++;
+    const T = P[ch.ri];
+    if (ch.ri >= last && hypot2(v.pos, T) < 14) want = 0;            // parked at the end of the route
+    const err = wrapPi(Math.atan2(T.x - v.pos.x, T.z - v.pos.z) - v.yaw);
+    v.ctrl.s = clamp(-err * 1.9, -1, 1);
+    const turn = Math.abs(err);
+    if (turn > 0.5) want = Math.min(want, 8); else if (turn > 0.25) want = Math.min(want, 14);
+    const sp = v.speed;
+    v.ctrl.t = clamp((want - sp) * 0.35, 0, 1);
+    v.ctrl.b = sp > want + 3 ? clamp((sp - want) * 0.12, 0, 0.7) : (want < 0.5 && sp > 1.5 ? 0.6 : 0);
+    v.ctrl.hb = want < 0.5 && sp < 1.5;
+    if (want > 3 && Math.abs(v.speed) < 1.2 && !v.wrecked) ch.stuckT += dt; else ch.stuckT = 0;
+    // off the route (spun out, shunted by traffic): put it back
+    const a = P[Math.max(0, ch.ri - 1)], b = P[ch.ri];
+    const len = Math.max(1, hypot2(a, b)), ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
+    const off = Math.abs((v.pos.x - a.x) * uz - (v.pos.z - a.z) * ux);
+    ch.offT = off > 22 ? ch.offT + dt : 0;
+    const jumped = Math.hypot(v.pos.x - ch.lastPos.x, v.pos.z - ch.lastPos.z) > 30;
+    ch.lastPos.copy(v.pos);
+    if (ch.stuckT > 2.4 || ch.offT > 1.5 || jumped) this.recover();
+  }
   steer(dt) {
+    if (this.ch.pts) { this.steerPts(dt); return; }
     const ch = this.ch, v = this.v;
     const pl = this.pl;
     const dist = hypot2(v.pos, pl);
@@ -618,10 +731,10 @@ class ChaseStep extends Step {
     const dist = hypot2(v.pos, this.pl);
     // FRIDAY jams the engine while any hero stays close
     const jam = dist < 17 && !v.wrecked;
-    if (jam) { v.damage(7 * dt, 'jam'); this.jamT += dt; if (!this.toldJam) { this.toldJam = true; g.hud?.toast?.('F.R.I.D.A.Y. is jamming the van\'s engine'); } }
+    if (jam) { v.damage((this.def.jam ?? 7) * dt, 'jam'); this.jamT += dt; if (!this.toldJam) { this.toldJam = true; g.hud?.toast?.('F.R.I.D.A.Y. is jamming the van\'s engine'); } }
     if (!v.wrecked) this.steer(dt);
     const frac = clamp((v.hp - this.stopHp) / (v.maxHp - this.stopHp), 0, 1);
-    g.hud?.setAllyBar?.('OSCORP VAN', frac);
+    g.hud?.setAllyBar?.(this.def.label ?? 'OSCORP VAN', frac);
     this.text(`${this.def.text ?? 'Stop the van'}${jam ? ' (jamming)' : ` (${Math.round(dist)} m)`}`, 1 - frac);
     c.setTimer(fmtClock(this.left));
     if (v.wrecked || v.hp <= this.stopHp) { this.finish(); return; }
@@ -699,6 +812,7 @@ class BossStep extends Step {
       }
       this.recoverStragglers(dt, 0);
     }
+    this.arenaLeash(dt);
     // arena leash (bridge deck): never leave a hero stranded below / away from the fight
     if (d.arena === 'deck') {
       const pl = this.pl;

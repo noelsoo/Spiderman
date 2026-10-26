@@ -113,7 +113,7 @@ export function installCampaignUI(HUD, H) {
   P._build_campaign = function (scr) {
     const g = this.game, C = g.campaign, ms = C.missions;
     scr.el.innerHTML = `<div class="camp">
-      <div class="camp-h"><h2>Sinister Symbiosis</h2><div class="camp-sub"><span data-r="cstars"></span></div></div>
+      <div class="camp-h"><h2>${esc(C.meta.title)}</h2><div class="camp-sub"><span data-r="cstars"></span></div></div>
       <div class="camp-b"><div class="camp-list" data-r="clist"></div><div class="camp-det" data-r="cdet"></div></div>
       <div class="camp-f"></div></div>`;
     const q = (n) => scr.el.querySelector(`[data-r="${n}"]`);
@@ -152,6 +152,9 @@ export function installCampaignUI(HUD, H) {
     }
     const f = scr.el.querySelector('.camp-f');
     f.appendChild(this._btn(scr, 'Back', () => this._back()));
+    // the other city's campaign lives on the other map: offer the switch (the game reloads)
+    const other = C.sg ? { map: 'nyc', label: 'Switch to New York' } : { map: 'singapore', label: 'Switch to Singapore' };
+    f.appendChild(this._btn(scr, other.label, () => { try { sessionStorage.setItem('sm-open', 'campaign'); } catch { /* ignore */ } g.switchMap(other.map); }));
     // first unlocked-but-unfinished mission, or the remembered one
     let start = this._campSel;
     if (start === undefined || start === null) {
@@ -200,16 +203,8 @@ export function installCampaignUI(HUD, H) {
     };
   };
 
-  /** Campaign is New York only: explain and offer to switch maps. */
-  P._build_campaignmap = function (scr) {
-    const g = this.game;
-    scr.el.innerHTML = `<div class="panel" style="text-align:center"><h2>Campaign</h2>
-      <div class="note" style="font-size:15px">The campaign takes place in New York. Switch to the New York map to play it (the game reloads).</div>
-      <div class="menu" style="margin:0 auto"></div></div>`;
-    const menu = scr.el.querySelector('.menu');
-    menu.appendChild(this._btn(scr, 'Switch to New York', () => { try { sessionStorage.setItem('sm-open', 'campaign'); } catch { /* ignore */ } g.switchMap('nyc'); }, 'big'));
-    menu.appendChild(this._btn(scr, 'Back', () => this._back()));
-  };
+  /** Legacy screen name: every map has a campaign now, so it is the chapter list for the current map. */
+  P._build_campaignmap = function (scr) { return this._build_campaign(scr); };
 
   // ------------------------------------------------------------------ hero select
   // power / mobility / ranged / toughness, 1-5 (summary only, not gameplay values)
@@ -291,7 +286,7 @@ export function installCampaignUI(HUD, H) {
       <div class="mstars">${[0, 1, 2].map((i) => `<i class="${i < r.stars ? 'on' : ''}" style="animation-delay:${0.25 + i * 0.28}s">★</i>`).join('')}</div>
       <ul class="flags">${r.flags.map((f) => `<li class="${f.ok ? 'ok' : 'no'}"><b>${f.ok ? '✓' : '✗'}</b>${esc(f.label)}</li>`).join('')}</ul>
       <div class="stats"><div><b>${fmtTime(r.time)}</b><span>Time</span></div><div><b>$${r.cash.toLocaleString('en-US')}</b><span>Cash</span></div><div><b>${r.kills}</b><span>Takedowns</span></div><div><b>${r.damage}</b><span>Damage taken</span></div></div>
-      <div class="note">${r.newBest ? 'New best time! ' : ''}${r.replay ? 'Replay reward is halved. ' : ''}${r.next ? `Unlocked: ${esc(r.next.title)}` : 'The hive is destroyed. New York is safe.'}</div>
+      <div class="note">${r.newBest ? 'New best time! ' : ''}${r.replay ? 'Replay reward is halved. ' : ''}${r.next ? `Unlocked: ${esc(r.next.title)}` : esc(g.campaign.meta.finale)}</div>
       <div class="menu mm" style="margin:0 auto"></div></div>`;
     const menu = scr.el.querySelector('.menu');
     const add = (l, a) => menu.appendChild(this._btn(scr, l, a));
