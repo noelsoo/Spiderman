@@ -26,7 +26,13 @@ Working and verified in headless tests: all 11 heroes clear goon fights, all 10 
 Heroes (`HERO_ORDER`): spiderman, ironman, hulk, thor, wolverine, captain, hawkeye, scarlet, venom, carnage, antivenom.
 
 Recent work, newest first:
-1. Follow-up pass:
+1. Third pass:
+   - Enemy models baked into SkinnedMeshes (`src/models/skinbake.js`, `bakeSkinned`): a goon is about 4 draw calls instead of 42. Bosses not baked. `globalThis.__NOBAKE` disables it for A/B tests; `tools/enemycalls.mjs` measures.
+   - Matte fabric normal for Wolverine and Captain suits; fabric sheen tinted by suit colour; Venom head raised; Carnage veins per instance.
+   - Merlion fish body is one lofted scaled tube (`src/world/sg/merlion-body.js`); head still sphere-built.
+   - Swing anchors: `physics.addAnchor/queryAnchors`, used by `findAnchor`; Singapore highway lamps, Helix arch nodes and new 26 m bay masts. Web-wing launch fallback (`_wingLaunch`) after 0.7 s with no anchor.
+   - Singapore campaign "Lion City Outbreak" (`src/campaign/missions-sg.js`, 5 missions), map-aware places, save key `sm-campaign-sg`, chapter list follows the map.
+2. Follow-up pass:
    - Faces: Hulk head enlarged, Wolverine smooth cowl and shaped sideburns, Captain America feathered wings, Scarlet Witch V headpiece, Thor feathered hairline (`feather` option on `hairMaterial`).
    - Symbiotes: Venom hunched brute (`brute` stance, knuckle run, more teeth, power-driven eye glow), Carnage wiry with crawling veins and double blades (`wiry`), Anti-Venom marbled with a dimmer glow (`saint`). `model.fx.power` set from `SymbioteHero.updateVisuals`.
    - Enemy decoys: `enemies.addDecoy/removeDecoy/pickDecoy`; Iron Legion drones register as decoys (bosses ignore). Micro-missiles have terminal guidance and hit at 3 to 8 m.
@@ -89,11 +95,11 @@ Full contracts are in `docs/ARCHITECTURE.md` (v1 to v3 plus Map v3). Key points:
 ## Next steps (priority order)
 
 1. **Viewmodel question still open:** ask what the user means (screen black near cars, hands, weapon, camera clipping).
-2. **Symbiote goons are expensive:** about 82 draw calls each (40 meshes); a busy Singapore street at night reaches 513 to 660 calls with 4 to 5 on screen. Turning off shadow casting made no measurable difference; merge their meshes per material instead.
-3. **Model nitpicks:** Merlion scales read like a corn cob up close; Wolverine side hair still blocky; Venom tucks his head low; Carnage veins animate in lockstep across instances (shared texture); body suits for Wolverine and Captain still use the brick-like weave.
-4. **Swing dead zones:** open promenades and water with no building within 95 m give no anchor (for example (60,150) in Singapore).
-5. **Campaign is New York only;** Singapore objectives do not exist.
-6. **Real-hardware checks:** PS4 pad on the title screen at real frame rates (headless runs below 1 fps); the rage bar position at 1080p.
+2. **Real-hardware checks:** PS4 pad on the title screen at real frame rates; rage bar position at 1080p; play the Singapore campaign by hand.
+3. **Bosses are not skin-baked** (`villains_a.js`, `villains_b.js`); bake them like goons if boss fights are heavy.
+4. **Model nitpicks:** Merlion lion head is a cluster of spheres; Captain America's legs look pale (a separate material in `characters.js`).
+5. **Swing:** facing open water from the Singapore promenade is still a dead zone; one New York test spot lost 27 m to the glide fallback.
+6. **Merlion pier lip** is 0.45 m and must be jumped onto.
 
 ## User preferences to respect
 
