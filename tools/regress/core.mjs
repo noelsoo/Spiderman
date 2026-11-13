@@ -19,6 +19,19 @@ export const core = [
     },
   },
   {
+    name: 'csp',
+    async run(c) {
+      const r = await c.ev(() => {
+        const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+        window.qa.begin('spiderman'); window.qa.step(60);
+        window.game.hud.showPause?.(); window.qa.step(5); window.game.resume();
+        return { has: !!meta, viol: window.__csp };
+      });
+      c.assert(r.has, 'built page has no CSP meta (run npm run build first, not dev)');
+      c.assert(!r.viol.length, 'CSP violations: ' + r.viol.slice(0, 4).join(' | '));
+    },
+  },
+  {
     name: 'heroes-freeroam',
     async run(c) {
       const out = [];

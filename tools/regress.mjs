@@ -131,6 +131,7 @@ for (const map of maps) {
     page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
     await page.addInitScript(({ s, map }) => {
       window.__FORCE_WORLD_QUALITY = 'low';
+      window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));
       try { if (!sessionStorage.getItem('qa-seeded')) { sessionStorage.setItem('qa-seeded', '1'); localStorage.clear(); localStorage.setItem('sm-settings', JSON.stringify({ quality: 'low', map, ...(s || {}) })); } } catch {}
     }, { s: settings, map });
     await page.goto(url);
