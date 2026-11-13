@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 
 const V3 = THREE.Vector3;
-const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
+const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp, TAU = Math.PI * 2;
 const sm = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 
 // joint indices
@@ -181,46 +181,107 @@ S.idle = (m, p, c) => {
     p.hp[1] = Math.sin(c.tm * 1.1) * 0.01; p.add(AL, 0, 0, Math.sin(c.tm * 0.9) * 0.04); p.add(AR, 0, 0, -Math.sin(c.tm * 0.9) * 0.04);
   }
 };
+// Two-bone leg IK in the sagittal plane. Target = ankle (z forward, y down is negative) relative to the hip joint, upright frame.
+// Writes world-frame thigh angle (_ik.a, rotation.x convention: negative = forward) and knee flexion (_ik.k).
+const _ik = { a: 0, k: 0 };
+function legIK(d, z, y) {
+  const L1 = d.thigh, L2 = d.shin;
+  const D = clamp(Math.hypot(z, y), Math.abs(L1 - L2) + 0.01, L1 + L2 - 0.004);
+  const cg = clamp((L1 * L1 + L2 * L2 - D * D) / (2 * L1 * L2), -1, 1);
+  const cp = clamp((L1 * L1 + D * D - L2 * L2) / (2 * L1 * D), -1, 1);
+  _ik.k = Math.PI - Math.acos(cg);
+  _ik.a = Math.atan2(-z, -y) - Math.acos(cp);
+}
+
+/**
+ * Procedural gait. Stance feet travel back at exactly the ground speed (no sliding up to the stride limit), swing feet follow a
+ * Hermite arc that matches the stance speed at lift-off and touch-down. Cadence, duty factor, bob, sway, pelvis/shoulder
+ * counter-rotation and arm swing all derive from the smoothed ground speed.
+ */
 function runCycle(m, p, c, sprint, k = 1) {
-  const f = c.f, sp = c.sp;
-  const amp = clamp(0.32 + sp * 0.06, 0.4, 1.05) * f.stride * (sprint ? 1.12 : 1);
-  // foot planting: leg angular rate is derived from ground speed so planted feet move back at ~body speed
-  const legL = m.dims.thigh + m.dims.shin;
-  const om = clamp(sp * 0.82 / (legL * Math.sin(Math.min(amp, 1.2)) + 0.001), 3.2, 24) * f.cadence * k;
-  m.phase += c.dt * om;
-  const ph = m.phase;
+  const f = c.f, d = m.dims, dt = c.dt, kk = d.k;
+  const vIn = m._spH > 0.25 ? m._spH : c.sp;
+  m._gv += (vIn - m._gv) * (1 - Math.exp(-14 * dt));
+  const v = Math.max(0.05, m._gv);
+  const Lg = d.thigh + d.shin;
   stance(p, f, false);
-  const g = f.gait ? clamp((sp - 1.0) / 5.0, 0, 1) : 1; // pedestrians: relaxed walk -> jog
-  const fl = Math.sin(ph), fr = Math.sin(ph + Math.PI);
-  p.set(TL, -fl * amp, 0, 0.04 + f.wide * 0.1); p.set(TR, -fr * amp, 0, -0.04 - f.wide * 0.1);
-  p.set(KL, (0.18 + 0.95 * Math.max(0, Math.cos(ph))) * amp * 1.35);
-  p.set(KR, (0.18 + 0.95 * Math.max(0, Math.cos(ph + Math.PI))) * amp * 1.35);
-  const aa = (0.55 + (sprint ? 0.25 : 0)) * amp * f.armSwing * (f.gait ? 0.5 + 0.5 * g : 1);
+  const gaitK = f.gait ? clamp((v - 1.0) / 5.0, 0, 1) : 1;
+  // ---- cadence / duty factor / stride
+  const ls = Math.min(0.3 + 0.3 * v, 1.35) * kk * f.stride * (sprint ? 1.05 : 1) * (f.gait ? 0.85 : 1);
+  const fq = clamp(v / (2 * ls), 0.25, 3.0 * f.cadence * k);
+  const beta = clamp(0.66 - 0.034 * v, 0.28, 0.66);
+  const Smax = 1.4 * Lg;
+  const S = Math.min(v * beta / fq, Smax), vs = S * fq / beta;
+  m.gph = (m.gph + dt * fq) % 1;
+  const ph = m.gph, xL = ph, xR = (ph + 0.5) % 1;
+  const fl = Math.cos(ph * TAU), fr = -fl;
+  const run = 1 - clamp((beta - 0.42) / 0.12, 0, 1); // 1 = running gait, 0 = walking gait
+  // ---- pelvis height / bob
+  const crouch = f.stance === 'wiry' ? 0.2 : f.knuckle ? 0.09 : f.stance === 'feral' ? 0.07 : 0;
+  const bend = lerp(0.03, 0.14, clamp(v / 8, 0, 1)) + crouch;
+  const G0 = Lg * (1 - bend);
+  const s = (ph * 2) % 1;
+  const dip = Lg * 0.055 * clamp(v / 7, 0.25, 1.3) * f.bob, rise = Lg * 0.018 * f.bob;
+  let bobS = 0, flight = 0;
+  const q = s / (2 * beta);
+  if (beta < 0.5 && q >= 1) flight = Lg * 0.55 * (0.5 - beta) * Math.sin(Math.PI * (s - 2 * beta) / (1 - 2 * beta)) * f.bob;
+  const bobRun = q < 1 ? -dip * Math.sin(Math.PI * q) : 0, bobWalk = rise * Math.sin(Math.PI * s);
+  bobS = lerp(bobWalk, bobRun, run);
+  // ---- upper body (needs the pelvis pitch before the legs are solved)
+  const mv = clamp(v / 8, 0, 1);
+  const accLean = clamp(m._acc * 0.010, -0.1, 0.14) * mv;
+  const lean = (0.04 + 0.016 * Math.min(v, 12)) * f.lean * (sprint ? 1.2 : 1) * (f.gait ? 0.35 + 0.65 * gaitK : 1) + accLean;
+  const turn = -clamp(m.yawRate * 0.028, -0.3, 0.3) * mv;
+  const sway = Math.cos((ph - beta * 0.5) * TAU); // +1 = weight over the left foot
+  const twist = lerp(0.07, 0.14, mv) * (f.gait ? 0.6 + 0.4 * gaitK : 1);
+  p.set(H, lean, -twist * fl, sway * lerp(0.035, 0.05, run) + turn);
+  p.set(SP, 0.03 + Math.abs(fl) * 0.01, twist * 1.15 * fl, -sway * 0.025);
+  p.set(CH, 0.05, twist * 0.6 * fl, -sway * 0.02);
+  p.set(HD, -(lean + 0.03) * 0.8, -twist * 0.7 * fl, -turn * 0.4);
+  const aa = (0.2 + 0.045 * Math.min(v, 12)) * f.armSwing * (sprint ? 1.15 : 1) * (f.gait ? 0.5 + 0.5 * gaitK : 1);
   const spreadL = p.r[AL * 3 + 2], spreadR = p.r[AR * 3 + 2];
-  p.set(AL, fl * aa, 0, spreadL * 0.5 + 0.1); p.set(AR, fr * aa, 0, spreadR * 0.5 - 0.1);
-  const eb = f.gait ? lerp(0.22, 1.0, g) : (f.stance === 'hulk' ? 0.8 : 1.0);
-  p.set(EL, -eb - 0.35 * Math.max(0, -fl) - (sprint ? 0.3 : 0));
-  p.set(ER, -eb - 0.35 * Math.max(0, -fr) - (sprint ? 0.3 : 0));
-  p.set(H, (0.1 + sp * 0.014) * f.lean * (sprint ? 1.25 : 1) * (f.gait ? 0.35 + 0.65 * g : 1), fl * 0.14 * (f.gait ? 0.5 + 0.5 * g : 1), 0);
-  p.set(SP, 0.03, -fl * 0.2, 0); p.set(CH, 0.05, 0, fl * 0.035);
-  p.set(HD, -0.1 * f.lean, fl * 0.05, 0);
-  p.hp[1] = Math.abs(Math.cos(ph)) * 0.03 * f.bob * clamp(sp / 6, 0.4, 1.6);
-  p.flat = 0.75;
-  if (f.stance === 'wiry') { // low predator sprint: spine snaking, arms thrown wide and back, long strides
-    const sq = Math.max(0, Math.sin(ph * 2)) * 0.06;
-    p.set(H, 0.62 + sq, fl * 0.3, fl * 0.04); p.set(CH, 0.25, -fl * 0.35); p.set(SP, 0.1, -fl * 0.22); p.set(HD, -0.62, fl * 0.1);
+  const eb = f.gait ? lerp(0.22, 1.0, gaitK) : (f.stance === 'hulk' ? 0.8 : lerp(0.3, 1.1, clamp(v / 6, 0, 1)));
+  p.set(AL, fl * aa - 0.08, 0, spreadL * 0.5 + 0.1); p.set(AR, fr * aa - 0.08, 0, spreadR * 0.5 - 0.1);
+  p.set(EL, -eb - 0.3 * Math.max(0, -fl) - (sprint ? 0.3 : 0)); p.set(ER, -eb - 0.3 * Math.max(0, -fr) - (sprint ? 0.3 : 0));
+  p.hp[0] = sway * 0.03 * kk * f.bob;
+  if (f.stance === 'wiry') { // low predator sprint: arms thrown wide and back, snaking spine
+    p.set(H, 0.62 + lean * 0.3, -fl * 0.3, sway * 0.04); p.set(CH, 0.25, fl * 0.35); p.set(SP, 0.1, fl * 0.22); p.set(HD, -0.62, -fl * 0.1);
     p.set(AL, -0.55 - fl * 0.9, 0, 0.55); p.set(AR, -0.55 - fr * 0.9, 0, -0.55); p.set(EL, -1.0 - Math.max(0, -fl) * 0.5); p.set(ER, -1.0 - Math.max(0, -fr) * 0.5);
-    p.hp[1] = Math.abs(Math.cos(ph)) * 0.07 - 0.1;
   } else if (f.stance === 'saint') { // upright, smooth, minimal bob
-    p.set(H, 0.05 + sp * 0.006, fl * 0.05, 0); p.set(CH, -0.02, -fl * 0.08); p.set(HD, 0.0, 0); p.hp[1] *= 0.4;
+    p.set(H, 0.05 + v * 0.006, -fl * 0.05, sway * 0.02); p.set(CH, -0.02, fl * 0.08); p.set(HD, 0, 0);
     p.set(AL, fl * aa * 0.7, 0, 0.22); p.set(AR, fr * aa * 0.7, 0, -0.22);
   }
-  if (f.knuckle) { // Hulk: heavy gorilla run, knuckles near the ground, body slammed forward on each step
-    const sq = Math.max(0, Math.sin(ph * 2)) * 0.05;
-    p.set(H, 0.5 + sq, fl * 0.2, fl * 0.05); p.set(CH, 0.3, -fl * 0.25); p.set(SP, 0.1, -fl * 0.15); p.set(HD, -0.55, 0);
+  if (f.knuckle) { // gorilla run: body slammed forward on each step, knuckles near the ground
+    p.set(H, 0.5 + Math.max(0, Math.sin(ph * 2 * TAU)) * 0.05, -fl * 0.2, sway * 0.05); p.set(CH, 0.3, fl * 0.25); p.set(SP, 0.1, fl * 0.15); p.set(HD, -0.55, 0);
     p.set(AL, -0.15 + fl * 0.65, 0, 0.32 + f.wide); p.set(AR, -0.15 + fr * 0.65, 0, -0.32 - f.wide); p.set(EL, -0.18 - Math.max(0, -fl) * 0.4); p.set(ER, -0.18 - Math.max(0, -fr) * 0.4);
-    p.hp[1] -= 0.04; p.hp[1] += Math.abs(Math.cos(ph)) * 0.05;
   }
+  // ---- legs
+  const hx = p.r[H * 3];
+  const zc = (0.03 + 0.04 * mv) * kk;
+  const lift = (0.05 + 0.014 * Math.min(v, 12)) * kk * (f.stance === 'saint' ? 0.7 : 1);
+  const toeMax = 0.6;
+  for (let sd = 0; sd < 2; sd++) {
+    const x = sd ? xR : xL;
+    let z, y = -(G0 + bobS), toe = 0;
+    if (x < beta) { // stance: planted, moving back at ground speed
+      const u = x / beta;
+      z = zc + S * (0.5 - u);
+      toe = toeMax * sm((u - 0.72) / 0.28);
+    } else { // swing: Hermite from lift-off (moving back at vs) to touch-down (moving back at vs)
+      const w = (x - beta) / (1 - beta), Ts = (1 - beta) / fq, m0 = -vs * Ts;
+      const w2 = w * w, w3 = w2 * w;
+      z = (2 * w3 - 3 * w2 + 1) * (zc - S * 0.5) + (w3 - 2 * w2 + w) * m0 + (-2 * w3 + 3 * w2) * (zc + S * 0.5) + (w3 - w2) * m0;
+      y += lift * Math.sin(Math.PI * w) * (1 + 0.5 * (1 - w) * run);
+      toe = toeMax * (1 - sm(w / 0.3)) * 0.8 - 0.22 * sm((w - 0.72) / 0.28);
+    }
+    legIK(d, z, y);
+    const tj = sd ? TR : TL, kj = sd ? KR : KL, fj = sd ? FR : FL;
+    const swingOut = x >= beta ? Math.sin(Math.PI * (x - beta) / (1 - beta)) * 0.05 : 0;
+    p.set(tj, _ik.a - hx, 0, (0.04 + f.wide * 0.1 + swingOut) * (sd ? -1 : 1));
+    p.set(kj, _ik.k); p.set(fj, toe);
+  }
+  p.hp[1] = flight;
+  p.flat = 0.8; p.rate = 38; p.zeta = 1;
 }
 S.run = (m, p, c) => runCycle(m, p, c, false);
 S.sprint = (m, p, c) => runCycle(m, p, c, true);
@@ -233,35 +294,51 @@ S.charge = (m, p, c) => {
 S.jump = (m, p, c) => {
   m.fallSpeed = 4;
   stance(p, c.f, false);
-  p.ground = false; p.flat = 0; p.rate = 11;
-  p.set(AL, -1.9, 0, 0.55); p.set(AR, -1.9, 0, -0.55); p.set(EL, -0.35); p.set(ER, -0.35);
-  p.set(TL, -0.7, 0, 0.12); p.set(KL, 1.1); p.set(TR, 0.1, 0, -0.12); p.set(KR, 0.7);
-  p.set(H, 0.05); p.set(HD, -0.15); p.set(CH, -0.1);
-  p.set(FL, 0.5); p.set(FR, 0.7);
+  p.ground = false; p.flat = 0; p.rate = 15;
+  const up = c.vl.y > 0 ? clamp(c.vl.y / 10, 0, 1) : 0; // 1 right at take-off, fades toward the apex
+  const push = Math.exp(-c.t * 14);                   // take-off: legs drive fully straight, body stretches, arms swing up
+  p.set(AL, -2.2 + 0.5 * (1 - up), 0, 0.4); p.set(AR, -1.0, 0, -0.75); p.set(EL, -0.35); p.set(ER, -0.5);
+  p.set(TL, -0.95, 0, 0.12); p.set(KL, 1.35); p.set(TR, 0.3, 0, -0.12); p.set(KR, 0.95);
+  p.set(H, 0.08); p.set(HD, -0.15); p.set(CH, -0.08); p.set(SP, 0, 0.12);
+  p.set(FL, 0.4); p.set(FR, 0.8);
+  p.mix([[TL, 0.0, 0, 0.06], [TR, 0.1, 0, -0.06], [KL, 0.05, 0, 0], [KR, 0.1, 0, 0], [FL, 0.9, 0, 0], [FR, 0.9, 0, 0], [AL, -2.6, 0, 0.35], [AR, -2.4, 0, -0.35], [CH, -0.18, 0, 0]], push * 0.9);
+  p.set(SP, 0, 0.12 * (1 - push));
 };
 S.fall = (m, p, c) => {
   m.fallSpeed = Math.max(m.fallSpeed || 0, -(c.vl.y || 0));
   stance(p, c.f, false);
   p.ground = false; p.flat = 0; p.rate = 9;
-  const w = Math.sin(c.tm * 9) * 0.1;
-  p.set(AL, -1.25 + w, 0, 0.9); p.set(AR, -1.25 - w, 0, -0.9); p.set(EL, -0.5); p.set(ER, -0.5);
-  p.set(TL, -0.35, 0, 0.2); p.set(KL, 0.5 + w); p.set(TR, 0.25, 0, -0.2); p.set(KR, 0.6 - w);
-  p.set(H, 0.12); p.set(HD, -0.2); p.set(CH, 0.05);
-  p.set(FL, 0.4); p.set(FR, 0.4);
+  const w = Math.sin(c.tm * 9) * 0.12, fs = clamp((-(c.vl.y || 0)) / 14, 0, 1); // faster fall: arms flare wider and up, legs stretch
+  p.set(AL, -0.7 - fs * 0.7 + w, 0, 0.85 + fs * 0.35); p.set(AR, -0.7 - fs * 0.7 - w, 0, -0.85 - fs * 0.35); p.set(EL, -0.45 + fs * 0.2); p.set(ER, -0.45 + fs * 0.2);
+  p.set(TL, -0.3 + fs * 0.1, 0, 0.22); p.set(KL, 0.55 - fs * 0.3 + w); p.set(TR, 0.2, 0, -0.22); p.set(KR, 0.7 - fs * 0.35 - w);
+  p.set(H, 0.1); p.set(HD, -0.2); p.set(CH, 0.04 - fs * 0.1);
+  p.set(FL, 0.5); p.set(FR, 0.5);
+};
+/** Head-first dive (Spider-Man): arms swept back along the body, legs together and trailing. Hero code: setAnim('dive'). */
+S.dive = (m, p, c) => {
+  p.ground = false; p.flat = 0; p.rate = 12;
+  p.set(H, m.customRotation ? 0 : 1.35); p.set(CH, -0.1); p.set(SP, 0); p.set(HD, -0.7); p.set(NK, -0.25);
+  p.set(AL, 0.5, 0, 0.14); p.set(AR, 0.5, 0, -0.14); p.set(EL, -0.12); p.set(ER, -0.12); p.set(WL, 0.2); p.set(WR, 0.2);
+  const fl = Math.sin(c.tm * 11) * 0.04;
+  p.set(TL, 0.15 + fl, 0, 0.05); p.set(TR, 0.2 - fl, 0, -0.05); p.set(KL, 0.12); p.set(KR, 0.2); p.set(FL, 1.0); p.set(FR, 1.0);
 };
 const HEROLAND = [[H, 0.55, 0, 0], [CH, 0.35, 0, 0], [HD, -0.5, 0, 0], [TL, -1.7, 0, 0.2], [KL, 2.05, 0, 0], [TR, 0.75, 0, -0.25], [KR, 2.3, 0, 0], [FR, 1.0, 0, 0],
   [AR, -0.35, 0, -0.5], [ER, -0.2, 0, 0], [AL, 0.55, 0, 1.0], [EL, -0.35, 0, 0], [POSK, 0, -0.05, 0]];
 S.land = (m, p, c) => {
   S.idle(m, p, c);
   const fs = clamp((m.fallSpeed || 8) / 13, 0.3, 1.25);
-  if (c.f.landStyle === 'hero' && fs > 0.75) { // superhero landing: kneel, fist to the ground, hold, then rise
+  if ((c.f.landStyle === 'hero' || m.id === 'spiderman' || c.st === 'superland') && fs > 0.75) { // superhero landing: kneel, fist to the ground, hold, then rise
     const w = c.t < 0.55 ? sm(c.t / 0.12) : 1 - sm((c.t - 0.55) / 0.35);
     p.mix(HEROLAND, w); p.rate = 16; p.ground = true; return;
   }
-  p.mix(K.land, Math.exp(-c.t * 7) * 0.95 * fs);
-  p.hp[1] -= 0.04 * fs * Math.exp(-c.t * 8);
-  p.rate = 20; p.zeta = 0.65;
+  // squash on impact, then ease back up (recovery slower than the hit)
+  const imp = sm(c.t / 0.05) * Math.exp(-Math.max(0, c.t - 0.05) * 5.5);
+  p.mix(K.land, imp * 1.0 * fs);
+  p.add(CH, 0.1 * imp * fs); p.hp[1] -= 0.03 * fs * imp;
+  p.rate = 26; p.zeta = 0.7;
 };
+S.superland = (m, p, c) => S.land(m, p, c);
+S.wallcrawl = (m, p, c) => S.wallrun(m, p, c);
 S.swing = (m, p, c) => {
   const side = m.swingArm, v = c.vl;
   const hs = Math.hypot(v.x, v.z);
@@ -278,7 +355,9 @@ S.swing = (m, p, c) => {
   p.set(oJ, 1.0 + 0.12 * Math.sin(c.tm * 3), 0, -side * 0.6); p.set(oE, -0.55);
   // legs tuck at the bottom of the arc (falling / level) and stretch out as the swing rises toward release
   const tuck = clamp(0.95 - v.y * 0.07, 0.12, 1.0) + 0.05 * Math.sin(c.tm * 2.3);
-  p.set(TL, -0.55 * tuck - 0.1, 0, 0.1); p.set(KL, 1.5 * tuck); p.set(TR, 0.1 - 0.2 * tuck, 0, -0.1); p.set(KR, 1.3 * tuck + 0.2);
+  // SM2 swing: leading leg reaches forward and bends, trailing leg drops back; both stretch long at the top of the arc
+  p.set(TL, -0.95 + 0.55 * (1 - tuck), 0, 0.12); p.set(KL, 0.5 + 1.0 * tuck); p.set(TR, 0.45 - 0.4 * (1 - tuck), 0, -0.1); p.set(KR, 0.35 + 1.1 * tuck);
+  p.add(oJ, 0.4 * tuck, 0, 0);
   p.set(FL, 0.7); p.set(FR, 0.7);
   p.set(H, pitch, 0, -side * 0.12); p.set(CH, 0.1, side * 0.32, -side * 0.08); p.set(HD, -pitch * 0.5 - 0.1, 0, 0);
 };
@@ -515,6 +594,7 @@ S.dead = (m, p, c) => {
   p.set(FL, 0.4); p.set(FR, 0.3);
 };
 
+const ATTACKS = new Set(['punch1', 'punch2', 'punch3', 'kick', 'uppercut', 'throw', 'smash', 'catch', 'shoot', 'cast']);
 // states where the hunter holds the rifle with both hands (IK)
 const RIFLE_STATES = new Set(['idle', 'run', 'sprint', 'shoot', 'aim', 'jump', 'fall', 'land', 'swing', 'hover', 'fly', 'glide', 'zip', 'wallrun', 'wallidle']);
 
@@ -552,6 +632,8 @@ export class ProcModel {
     this.seed = Math.random() * 20; this.fallSpeed = 8; this.vel = new Float32Array(NJ * 3); this.hpVel = new Float32Array(3); this._sp = 0; this._acc = 0; this._look = 0; this._lookP = 0; this._aimP = 0;
     this.draw = 0; this._rec = 0; this._al = 0; this._ikp = 0; this._ikr = { x: 0, y: 0, z: 0, e: 0 }; this._cq = new THREE.Quaternion(); this._hq = new THREE.Quaternion();
     this.sx = this.sy = 1;
+    this.gph = Math.random(); this._gv = 0; this._spH = 0; this.from = new Float32Array(NJ * 3); this.fromHp = new Float32Array(3); this.blendT = 9; this.blendDur = 0.15;
+    this.hit = { t: 9, x: 0, z: 0, k: 0 }; this._hp = null; this._hv = new V3(); this._pvx = 0; this._pvz = 0; this.landT = 9; this.air = 0;
     this._ctx = { t: 0, sp: 0, dt: 0.016, tm: 0, vl: this.vl, st: 'idle', f: this.prof, yawRate: 0, m: this };
   }
 
@@ -637,18 +719,37 @@ export class ProcModel {
     }
 
     const cam = entity && entity.game && entity.game.cam;
-    const spH = Math.hypot(this.vl.x, this.vl.z);
+    const spH = Math.hypot(this.vl.x, this.vl.z); this._spH = spH;
     if (dt > 0) { this._acc = lerp(this._acc, clamp((spH - this._sp) / dt, -40, 40), 1 - Math.exp(-6 * dt)); this._sp = spH; }
     this._aimP += (((st === 'aim' || st === 'shoot') && cam ? clamp(cam.pitch || 0, -1.0, 0.9) : 0) - this._aimP) * (1 - Math.exp(-10 * dt));
     // bow draw / gun recoil envelopes
     this.draw += ((st === 'aim' ? 1 : 0) - this.draw) * (1 - Math.exp(-(st === 'shoot' ? 45 : st === 'aim' ? 6 : 8) * dt));
     this._rec *= Math.exp(-14 * dt);
+    // hit reaction: explicit hitReact() or an hp drop on the entity (direction from the knockback velocity change)
+    if (entity && typeof entity.hp === 'number') {
+      if (this._hp !== null && entity.hp < this._hp - 0.01 && entity.hp > 0 && this.hit.t > 0.12) {
+        const v = entity.vel; let dx = v ? v.x - this._pvx : 0, dz = v ? v.z - this._pvz : 0;
+        if (dx * dx + dz * dz < 0.25) { dx = -Math.sin(entity.yaw || 0); dz = -Math.cos(entity.yaw || 0); }
+        this.hitReact(_t3.set(dx, 0, dz).normalize(), clamp((this._hp - entity.hp) / 25, 0.4, 1.3), true);
+      }
+      this._hp = entity.hp;
+    }
+    if (entity && entity.vel) { this._pvx = entity.vel.x; this._pvz = entity.vel.z; }
+    this.hit.t += dt;
     const p = this.pose; p.reset();
     const c = this._ctx; c.t = t; c.sp = sp; c.dt = dt; c.tm = this.time; c.st = st; c.yawRate = this.yawRate;
     (S[st] || S.idle)(this, p, c);
 
-    // turn / acceleration lean (grounded locomotion only)
-    if (p.ground && (st === 'run' || st === 'sprint' || st === 'charge' || st === 'idle')) {
+    this._extras(p, st, c, dt);
+    // time-based cross-fade from the pose captured at the last state change
+    if (this.blendT < this.blendDur) {
+      this.blendT += dt;
+      const w = sm(this.blendT / this.blendDur), fr = this.from, tr0 = p.r;
+      for (let i = 0; i < NJ * 3; i++) tr0[i] = fr[i] + (tr0[i] - fr[i]) * w;
+      for (let i = 0; i < 3; i++) p.hp[i] = this.fromHp[i] + (p.hp[i] - this.fromHp[i]) * w;
+    }
+    // turn / acceleration lean (standing only; the gait handles its own)
+    if (p.ground && st === 'idle') {
       const mv = clamp(spH / 8, 0, 1);
       p.r[H * 3] += clamp(this._acc * 0.010, -0.1, 0.14) * mv; p.r[H * 3 + 2] += -clamp(this.yawRate * 0.028, -0.3, 0.3) * mv;
     }
@@ -726,7 +827,33 @@ export class ProcModel {
     if (this.hooks && this.hooks.update) this.hooks.update(c, this);
   }
 
+  /** Directional flinch. dirWorld = direction the hit pushes the body (horizontal), strength ~0.4..1.3. Hero.takeDamage calls this; enemies are detected via hp drop. */
+  hitReact(dirWorld, strength = 1, auto = false) {
+    const sy = Math.sin(this.lastYaw || 0), cy = Math.cos(this.lastYaw || 0), h = this.hit;
+    h.x = dirWorld.x * cy - dirWorld.z * sy; h.z = dirWorld.x * sy + dirWorld.z * cy; h.k = strength; h.t = 0;
+  }
+
+  _extras(p, st, c, dt) {
+    const h = this.hit;
+    if (h.t < 0.7 && st !== 'dead' && st !== 'dodge' && st !== 'stunned') {
+      const e = h.k * Math.exp(-h.t * 7.5) * sm(h.t / 0.035), lx = h.x, lz = h.z;
+      const bk = -lz * e, fw = Math.max(0, lz) * e;
+      p.add(CH, -0.42 * bk + 0.4 * fw, lx * 0.3 * e, -lx * 0.3 * e); p.add(H, -0.12 * bk + 0.12 * fw, 0, -lx * 0.1 * e); p.add(SP, -0.1 * bk, lx * 0.3 * e, 0);
+      p.add(HD, -0.35 * bk + 0.2 * fw, -lx * 0.3 * e, lx * 0.25 * e);
+      p.add(AL, 0.5 * bk - 0.3 * fw, 0, 0.35 * e); p.add(AR, 0.5 * bk - 0.3 * fw, 0, -0.35 * e);
+      p.add(TL, 0, 0, 0.0); p.add(KL, 0.25 * e); p.add(KR, 0.25 * e);
+      p.hp[2] += lz * 0.05 * e; p.hp[0] += lx * 0.03 * e;
+      p.rate = Math.max(p.rate, 26); p.zeta = Math.min(p.zeta, 0.7);
+    }
+  }
+
   _stateChange(prev, next) {
+    this.from.set(this.cur); this.fromHp.set(this.hpCur);
+    const fast = ATTACKS.has(next), wasAtk = ATTACKS.has(prev);
+    this.blendDur = next === 'dead' ? 0.1 : fast ? 0.07 : wasAtk ? 0.16 : (next === 'idle' && (prev === 'run' || prev === 'sprint')) ? 0.2 : 0.15;
+    this.blendT = 0;
+    if (next === 'land') this.landT = 0;
+    if (prev === 'fall' || prev === 'jump' || prev === 'swing' || prev === 'glide') { /* keep fallSpeed */ }
     if (prev === 'dodge' && this.cur) this.cur[H * 3] = ((this.cur[H * 3] % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
     if (next === 'swing' && !this._fixedSide) this.swingArm *= -1;
     if (next === 'dodge') this.flipDir = 1;
