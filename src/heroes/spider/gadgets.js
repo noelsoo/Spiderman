@@ -5,6 +5,8 @@
 //   Ricochet Web   bounces between up to 4 enemies (and off walls to the nearest one)
 //   Concussion     air-burst shockwave that blasts groups back
 //   Upshot         launches the target into the air, then auto-webs it in mid-air
+//   Web Grabber    web blob that drags every nearby enemy together into a webbed bundle
+//   Sonic Burst    cone shockwave that stuns everything in front (R1 + face button chords reach the four SM2 gadgets)
 // Each gadget has charges that recharge in the background (like SM2 gadget cooldowns).
 import * as THREE from 'three';
 
@@ -15,6 +17,8 @@ export const GADGETS = [
   { id: 'ricochet',   name: 'Ricochet Web',     max: 2, rech: 6.0, rate: 0.6,  auto: false, color: 0xffffff },
   { id: 'concussion', name: 'Concussion Blast', max: 2, rech: 8.0, rate: 0.8,  auto: false, color: 0xcfeaff },
   { id: 'upshot',     name: 'Upshot',           max: 2, rech: 7.0, rate: 0.8,  auto: false, color: 0xffffff },
+  { id: 'grabber',    name: 'Web Grabber',      max: 2, rech: 7.0, rate: 0.8,  auto: false, color: 0xffffff },
+  { id: 'sonic',      name: 'Sonic Burst',      max: 2, rech: 8.0, rate: 0.8,  auto: false, color: 0xbfe8ff },
 ];
 
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
@@ -52,6 +56,23 @@ export class Gadgets {
     this.pins = [];
     this.decals = [];
     this._emptyT = 0;
+    this.assist = null;
+  }
+
+  /** R1 + face button quick-fire: selects gadget `id`, aims at `enemy` (or the crosshair) and fires without entering aim mode. */
+  fireChord(id, enemy = null) {
+    const i = GADGETS.findIndex((g) => g.id === id);
+    if (i < 0 || this.rateT > 0) return false;
+    if (this.charges[i] < 1) {
+      this.h._fx('text', this.h._center(new THREE.Vector3()).setY(this.h.pos.y + 2.3), 'RECHARGING', '#9fb0c8', { size: 0.8, life: 0.6 });
+      return false;
+    }
+    const prev = this.sel; this.sel = i; this.assist = enemy;
+    this.charges[i] -= 1; this.rateT = GADGETS[i].rate;
+    this['_' + id]();
+    this.assist = null; this.sel = prev;
+    this.h._fx('text', this.h._center(new THREE.Vector3()).setY(this.h.pos.y + 2.7), GADGETS[i].name.toUpperCase(), 0xffffff, { size: 0.9, life: 0.7 });
+    return true;
   }
 
   get cur() { return GADGETS[this.sel]; }
@@ -127,7 +148,7 @@ export class Gadgets {
   _proj(kind, speed, o) {
     const h = this.h, ray = this.aimRay();
     const muzzle = this._muzzle();
-    const dir = _d.copy(ray.point).sub(muzzle);
+    const dir = _d.copy(this.assist ? this.assist.center : ray.point).sub(muzzle);
     if (dir.lengthSq() < 4) dir.copy(ray.dir);
     dir.normalize();
     const range = 120;
@@ -454,5 +475,67 @@ export class Gadgets {
       }
       return false;
     });
+  }
+
+  // ---- Web Grabber -----------------------------------------------------------
+  _grabber() {
+    const h = this.h, mul = h._dmgMul();
+    this._proj('web', 60, {
+      damage: 6 * mul, radius: 0.4, size: 0.24, webTime: 0.1, knockback: 0, up: 0, stun: 0.3, life: 1.2,
+      onHit: (e, p) => { p.user.done = true; this._gather(p.pos.clone(), e); this._hitFeedback(false, p.pos, true); },
+      onExpire: (p) => { if (p.user.done) return; p.user.done = true; this._gather(p.pos.clone(), null); },
+    });
+    this._fired(0.3, 0.06);
+  }
+  _gather(pos, first) {
+    const h = this.h, g = h.game, fx = g.fx, mul = h._dmgMul();
+    const c = first ? first.center.clone() : pos;
+    const list = [];
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || e.untargetable) continue;
+      if (e.center.distanceTo(c) < 11) list.push(e);
+    }
+    fx.ring(c, 5, 0xffffff, 0.35); fx.burst(c, 0xffffff, 18, 6, 0.4, 0.2); fx.flash(c, 0xe8f6ff, 3, 0.15);
+    for (const e of list) {
+      if (!e.isBoss) {
+        fx.beam(e.center, c, 0xffffff, 0.06, 0.3);
+        e.launched = false; e.web?.(3);
+        _a.set(c.x - e.pos.x, 0, c.z - e.pos.z); const d = _a.length();
+        if (d > 1) e.vel.set((_a.x / d) * Math.min(22, d * 4.5), 3, (_a.z / d) * Math.min(22, d * 4.5));
+      } else e.web?.(1);
+      this._dmg(e, 5 * mul, { stun: 1.2, kind: 'web', point: e.center });
+    }
+    if (list.length >= 2) h._fx('text', _a.set(c.x, c.y + 1.6, c.z), `GRABBED x${list.length}`, 0xffffff, { size: 1.0, life: 0.9 });
+    h._play('thwip', { pos: c, pitch: 0.8 });
+  }
+
+  // ---- Sonic Burst -----------------------------------------------------------
+  _sonic() {
+    const h = this.h, g = h.game, fx = g.fx, mul = h._dmgMul();
+    const o = h._center(new THREE.Vector3());
+    const fwd = _d.set(Math.sin(h.yaw), 0, Math.cos(h.yaw));
+    if (this.assist || h.aiming) { g.cam.aimDirection(fwd); fwd.y = 0; if (fwd.lengthSq() < 1e-4) fwd.set(Math.sin(h.yaw), 0, Math.cos(h.yaw)); fwd.normalize(); h.yaw = Math.atan2(fwd.x, fwd.z); }
+    const dir = fwd.clone();
+    let n = 0;
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || e.untargetable) continue;
+      _a.set(e.pos.x - h.pos.x, 0, e.pos.z - h.pos.z); const d = _a.length();
+      if (d > 14 || d < 0.01) continue;
+      if (_a.multiplyScalar(1 / d).dot(dir) < Math.cos(0.62)) continue;
+      n++;
+      e.interrupt?.();
+      this._dmg(e, 8 * mul, { stun: e.isBoss ? 0.7 : 3.0, kind: 'sonic', point: e.center, kb: _b.copy(_a).multiplyScalar(5).setY(1).clone() });
+      fx.ring(e.center, 1.6, 0xbfe8ff, 0.3); fx.burst(e.center, 0xbfe8ff, 10, 4, 0.4, 0.15);
+    }
+    for (let i = 0; i < 5; i++) { // expanding cone rings
+      const dist = 2 + i * 2.6;
+      _b.copy(o).addScaledVector(dir, dist);
+      fx.ring(_b, 1.2 + i * 0.9, 0xbfe8ff, 0.3 + i * 0.04);
+    }
+    fx.flash(o, 0xbfe8ff, 5, 0.2);
+    h.setAnim('cast', 1.4); h.shootT = 0.3;
+    g.cam.shake(0.3); h._rumble(0.6, 0.6, 160); h._play('explosion', { volume: 0.4, pitch: 2 }); h._play('whoosh');
+    if (n) h._fx('text', _a.set(h.pos.x + dir.x * 3, h.pos.y + 2.2, h.pos.z + dir.z * 3), n > 1 ? `STUNNED x${n}` : 'STUNNED', 0xbfe8ff, { size: 1.0, life: 0.9 });
+    this.h.addFocus(2 * n);
   }
 }

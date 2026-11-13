@@ -433,6 +433,9 @@ export class BlackSuit {
       this._tendrilStrike(yaw - 0.55, BS.reach + 0.2, 100, 9 * k, 3, 1.0, 0.25, 0.55, -1);
       h._later(0.07, () => this._tendrilStrike(h.yaw, BS.reach + 0.2, 100, 9 * k, 3, 1.0, 0.25, 0.55, 1));
       h._later(0.14, () => this._tendrilStrike(h.yaw + 0.55, BS.reach + 0.2, 100, 10 * k, 5, 1.5, 0.4, 0.65, -1));
+    } else if (st === 2) { // Tendril Cross: one heavy wide tendril sweep
+      this._tendrilStrike(yaw + 0.4, BS.reach + 0.4, 130, 16 * k, 6, 1.5, 0.5, 0.8, 1);
+      h._later(0.08, () => this._tendrilStrike(h.yaw - 0.3, BS.reach + 0.4, 130, 14 * k, 8, 2, 0.5, 0.8, -1));
     } else { // Symbiote Slam: two tendril fists hammer down; goo pins whatever they hit to the ground
       const hits = this._tendrilStrike(yaw, BS.reach + 0.4, 140, 26 * k, 8, 2, 1.2, 1.1, 1, true);
       const o = h._center(_o), fwd = _f.set(Math.sin(yaw), 0, Math.cos(yaw));

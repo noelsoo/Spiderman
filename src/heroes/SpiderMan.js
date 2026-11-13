@@ -20,6 +20,8 @@ import { TendrilPool } from './spider/tendrils.js';
 import { Gadgets } from './spider/gadgets.js';
 import * as P from './spider/powers.js';
 import { BlackSuit, BS } from './spider/blacksuit.js';
+import { SpiderArms } from './spider/arms.js';
+import * as M from './spider/moves.js';
 
 // ---- tuning ---------------------------------------------------------------
 const TUNE = {
@@ -36,7 +38,7 @@ const TUNE = {
   // slingshot
   slingMin: 0.16, slingMax: 1.1, slingSpeed: 30, slingBonus: 30,
   // combat
-  lungeRange: 8, dodgeSpeed: 18, dodgeTime: 0.42, perfectWindow: 0.25, parryWindup: 0.15, parryRange: 5.5,
+  lungeRange: 8, dodgeSpeed: 18, dodgeTime: 0.42, perfectWindow: 0.25, parryWindup: M.PARRY_RED, parryRange: 5.5,
   holdAttack: 0.32,
   symDamage: 1.7,
 };
@@ -48,6 +50,7 @@ const _w = new THREE.Vector3(), _hp = new THREE.Vector3(), _hp2 = new THREE.Vect
 const _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
 
 const clamp = THREE.MathUtils.clamp;
+const input_down = (input, a) => input.down(a);
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
 export class SpiderMan extends Hero {
@@ -71,6 +74,11 @@ export class SpiderMan extends Hero {
     this.tendrils = new TendrilPool(game.scene);
     this.gadgets = new Gadgets(this);
     this.bs = new BlackSuit(this);
+    this.arms = new SpiderArms(this);
+    this.parryFx = new M.ParryIndicator(this);
+    this.wind = new M.WindField(this);
+    this.props = new M.PropThrow(this);
+    this.slingLines = [new RopeLine(game.scene), new RopeLine(game.scene)];
     this.symbiote = false;
     this.consumesWeaponWheel = false; // true while aiming: the weapons system should not cycle guns with the wheel / D-pad down
     this._resetState();
@@ -106,7 +114,9 @@ export class SpiderMan extends Hero {
     this.state = 'free'; // free | swing | wall | zip | glide | ult
     this.symbiote = false; this.model.setVariant?.('classic');
     this.lines = this.linesClassic; for (const l of Object.values(this.linesSym)) l.hide();
-    this.bs.reset();
+    this.bs.reset(); this.arms.reset(); this.parryFx.hide(); this.wind.reset(); this.props.reset();
+    for (const l of this.slingLines) l.hide();
+    this.chordT = 0; this.chord = null; this.sChord = false; this.ultHold = 0; this.healT = 0; this.loop = null; this.glidePitch = 0; this.plQueued = false; this.plT = 0; this.cornerT = 0;
     this.anchor = new THREE.Vector3(); this.ropeLen = 20; this.ropeTarget = 20; this.swingT = 0;
     this.wingAssist = false; this.wingCd = 0; this.wingT = 0; this.noAnchorT = 0;
     this.hand = 0; this.swingLock = 0; this.swingTry = 0; this.reattach = 0;
@@ -142,7 +152,8 @@ export class SpiderMan extends Hero {
   onDeactivate() {
     for (const l of Object.values(this.linesClassic)) l.hide();
     for (const l of Object.values(this.linesSym)) l.hide();
-    this.tendrils.clear(); this.bs.reset();
+    this.tendrils.clear(); this.bs.reset(); this.arms.reset(); this.parryFx.hide(); this.wind.reset(); this.props.reset();
+    for (const l of this.slingLines) l.hide();
     if (this._xh) this.game.hud?.setCrosshair?.(null);
     this._xh = false; this.consumesWeaponWheel = false;
     this.model.customRotation = false; this.game.cam.fovKick = 0; this.gravityScale = 1;
@@ -155,15 +166,24 @@ export class SpiderMan extends Hero {
 
   get abilityHints() {
     if (this.symbiote) return this.bs.hints();
-    const sym = this.symbiote, G = this.gadgets;
+    const sym = this.symbiote, G = this.gadgets, A = this.arms;
+    const f = (id) => A.cdFrac(id);
     return [
       { action: 'swing', key: 'swing', label: 'Web Swing', cooldown: 0, active: this.state === 'swing' },
-      { action: 'special', key: 'special', label: sym ? 'Symbiote Strike' : 'Web Shot', cooldown: this.cooldownFrac('special') },
-      { action: 'ability', key: 'ability', label: this.aiming ? 'Next Gadget' : 'Web Zip', cooldown: this.aiming ? 0 : this.cooldownFrac('zip'), active: this.state === 'zip' },
-      { action: 'ability2', key: 'ability2', label: sym ? 'Classic Suit' : 'Symbiote Suit', cooldown: this.cooldownFrac('suit'), active: sym },
-      { action: 'dodge', key: 'dodge', label: 'Dodge / Parry', cooldown: this.cooldownFrac('dodge') },
+      { action: 'special', key: 'special', label: 'Web Shot  / Hold: Pull / Throw   + L1/Atk/Jump/Dodge: Gadgets', cooldown: this.cooldownFrac('special') },
+      { action: 'ability', key: 'ability', label: this.aiming ? 'Next Gadget' : 'Web Zip   + Atk Barrage  + Jump Rush  + Dodge Shock  + R1 Whiplash', cooldown: this.aiming ? 0 : this.cooldownFrac('zip'), active: this.state === 'zip' },
+      { action: 'ability', key: 'ability', label: 'Spider Barrage  (L1 + Attack)', cooldown: f('barrage') },
+      { action: 'ability', key: 'ability', label: 'Spider Rush  (L1 + Jump)', cooldown: f('rush') },
+      { action: 'ability', key: 'ability', label: 'Spider Shock  (L1 + Dodge)', cooldown: f('shock') },
+      { action: 'ability', key: 'ability', label: 'Spider Whiplash  (L1 + R1)', cooldown: f('whiplash') },
+      { action: 'special', key: 'special', label: 'Web Grabber  (R1 + Attack)', cooldown: G.frac(6) },
+      { action: 'special', key: 'special', label: 'Upshot  (R1 + Jump)', cooldown: G.frac(5) },
+      { action: 'special', key: 'special', label: 'Ricochet Web  (R1 + Dodge)', cooldown: G.frac(3) },
+      { action: 'special', key: 'special', label: 'Sonic Burst  (R1 + L1)', cooldown: G.frac(7) },
+      { action: 'ability2', key: 'ability2', label: 'Symbiote Suit  (hold: Heal, 1 focus bar)', cooldown: this.cooldownFrac('suit'), active: sym },
+      { action: 'dodge', key: 'dodge', label: 'Dodge / Parry (on RED ring)', cooldown: this.cooldownFrac('dodge'), active: this.parryFx.red > 0 },
       { action: 'aim', key: 'aim', label: G.label(), cooldown: G.frac(), active: this.aiming },
-      { action: 'ultimate', key: 'ultimate', label: sym ? 'Rampage' : 'Web Bomb', cooldown: 1 - this.focus / 100, active: this.focus >= 100 },
+      { action: 'ultimate', key: 'ultimate', label: 'Web Bomb  (hold Q: Heal)', cooldown: 1 - this.focus / 100, active: this.focus >= 100 },
     ];
   }
 
@@ -383,6 +403,7 @@ export class SpiderMan extends Hero {
     this.rollT = Math.max(0, this.rollT - dt);
     this.boostT = Math.max(0, this.boostT - dt);
     this.vaultT = Math.max(0, this.vaultT - dt);
+    this.plT = Math.max(0, this.plT - dt); this.healT = Math.max(0, this.healT - dt);
     this.atkReset = Math.max(0, this.atkReset - dt);
     this.shootT = Math.max(0, this.shootT - dt);
     this.trickT = this.onGround ? 0 : Math.max(0, this.trickT - dt);
@@ -393,17 +414,23 @@ export class SpiderMan extends Hero {
     this._tickTasks(dt);
     this.gadgets.update(dt);
     this.bs.update(dt);
+    this.props.update(dt);
+    this.parryFx.update(dt);
     this._updateSense(dt);
     this._updateAimState(dt, input);
 
     if (this.state !== 'ult') {
       if (this.pressedAbility2()) this._toggleSuit();
+      const chorded = this._chords(dt, input);
       if (input.pressed('ultimate') && this.focus >= 100) this._startUltimate();
-      else if (input.pressed('dodge')) this._startDodge(input);
+      else if (!chorded && input.pressed('dodge')) this._startDodge(input);
+      this._healHold(dt, input);
     }
 
     // dodge keeps control briefly
     if (this.dodgeT > 0) this._updateDodge(dt);
+
+    if (this.plT > 0 && input.pressed('jump') && (this.state === 'free' || this.state === 'wall')) { input.consume('jump'); this._pointLaunch(); }
 
     switch (this.state) {
       case 'free': this._updateFree(dt, input); break;
@@ -415,6 +442,71 @@ export class SpiderMan extends Hero {
     }
     this._updateFov(dt);
     this._preVy = this.vel.y;
+  }
+
+  // ---- CHORDS: "L1 / R1 held + face button" read through the input abstraction --------------------------
+  //   L1 (ability) held + Attack = Spider Barrage, + Jump = Spider Rush, + Dodge = Spider Shock, + R1 = Spider Whiplash
+  //   R1 (special) held + Attack = Web Grabber, + Jump = Upshot, + Dodge = Ricochet Web, + L1 = Sonic Burst
+  // Plain L1 (Web Zip) fires when the chord window (0.28 s) ends or L1 is released; plain R1 (web shot) fires on release.
+  // Returns true when a chord consumed this frame's dodge press.
+  _chords(dt, input) {
+    if (this.symbiote || this.aiming || this.dead) { this.chord = null; if (!input.down('special')) this.spHold = 0; else this.spHold = (this.spHold || 0) + dt; return false; }
+    const sd = input.down('special');
+    this.spHold = sd ? (this.spHold || 0) + dt : 0;
+    let usedDodge = false;
+    const calm = !this.atk && !this.spin && this.dodgeT <= 0 && !this.charging && !this.props.busy && !(this.lash && this.lash.kind !== 'prop');
+    // R1 first: gadget chords
+    if (sd && this.spHold > 0 && this.spHold < 0.45 && calm && !this.sChord) {
+      const id = input.pressed('attack') ? 'grabber' : input.pressed('jump') ? 'upshot' : input.pressed('dodge') ? 'ricochet' : (input.pressed('ability') && !this.chord) ? 'sonic' : null;
+      if (id) {
+        usedDodge = input.pressed('dodge');
+        input.consume('attack', 'jump', 'dodge', 'ability');
+        this.sChord = true;
+        const tgt = id === 'sonic' ? null : (this._aimTarget(45, 30) ?? this._aimTargetNear(20));
+        this.gadgets.fireChord(id, tgt);
+        return usedDodge;
+      }
+    }
+    if (!sd) this.sChord = false;
+    // L1: arms chord window
+    if (!this.chord) {
+      if (input.pressed('ability') && this.state === 'free' && calm && !(sd && this.spHold < 0.45) && this._foesNear(20)) this.chord = { t: 0 };
+      return false;
+    }
+    const C = this.chord; C.t += dt;
+    const pick = input.pressed('attack') ? 'barrage' : input.pressed('jump') ? 'rush' : input.pressed('dodge') ? 'shock' : input.pressed('special') ? 'whiplash' : null;
+    if (pick) {
+      usedDodge = input.pressed('dodge');
+      input.consume('attack', 'jump', 'dodge', 'special'); this.sChord = true;
+      this.chord = null;
+      if (!this.arms.fire(pick)) this._fx('text', _a.set(this.pos.x, this.pos.y + 2.3, this.pos.z), this.arms.ready(pick) ? 'NO TARGET' : 'COOLDOWN', '#9fb0c8', { size: 0.8, life: 0.6 });
+      return usedDodge;
+    }
+    if (!input.down('ability') || C.t >= 0.28) { this.chord = null; if (this.state === 'free') this._tryZip(input); }
+    return false;
+  }
+  /** True on the frame L1 opened a chord window (zip is deferred to the window's end). */
+  _chordOpened(input) { return !!this.chord && input.pressed('ability'); }
+  _foesNear(r) {
+    const list = this.game.enemies?.list; if (!list) return false;
+    const r2 = r * r;
+    for (const e of list) { if (!e.alive || e.untargetable) continue; const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z; if (dx * dx + dz * dz < r2) return true; }
+    return false;
+  }
+
+  /** Hold Q / R3 with Focus >= 1 bar (33) and damaged: spend the bar to heal (Web Bomb still fires on a press at 100). */
+  _healHold(dt, input) {
+    if (!input.down('ultimate')) { this.ultHold = 0; this._healDone = false; return; }
+    this.ultHold += dt;
+    if (this.ultHold >= 0.4 && !this._healDone && this.focus >= 33 && this.hp < this.maxHp && this.state !== 'ult') {
+      this._healDone = true; this.focus -= 33;
+      const amt = Math.min(this.maxHp - this.hp, 40);
+      this.heal(amt);
+      this._fx('text', _a.set(this.pos.x, this.pos.y + 2.6, this.pos.z), `HEAL +${Math.round(amt)}`, 0x7dff9a, { size: 1.2, life: 1 });
+      this._fx('ring', _b.set(this.pos.x, this.pos.y + 0.2, this.pos.z), 2.8, 0x7dff9a, 0.5); this._fx('burst', this._center(_c), 0x7dff9a, 24, 4, 0.8, 0.18);
+      this._play('perfect', { pitch: 0.8 }); this._rumble(0.3, 0.5, 120);
+      this.healT = 0.6;
+    }
   }
 
   // ---- AIM (Spider-Man 2 web-shooter aim) -------------------------------------
@@ -482,7 +574,7 @@ export class SpiderMan extends Hero {
     }
 
     if (!aiming) {
-      if (this.symbiote ? this.bs.ability(dt, input) : (input.pressed('ability') && this._tryZip(input))) return;
+      if (this.symbiote ? this.bs.ability(dt, input) : (!this.chord && !this._chordOpened(input) && input.pressed('ability') && this._tryZip(input))) return;
       if (input.down('swing') && this.swingLock <= 0 && this.reattach <= 0 && this.swingTry <= 0 && !this.dodgeT && !this.spin && !this.sling) {
         this.swingTry = 0.1;
         if (this._tryStartSwing(input)) return;
@@ -707,6 +799,7 @@ export class SpiderMan extends Hero {
   }
 
   _endSwing(boost) {
+    this.loop = null;
     this.state = 'free'; this.lines.swing.hide(); this.gravityScale = 1;
     if (boost) {
       const hv = _a.set(this.vel.x, 0, this.vel.z); const hs = hv.length();
@@ -739,6 +832,8 @@ export class SpiderMan extends Hero {
       this.setAnim('jump', hs); this.boostT = 0.3;
       return;
     }
+    if (this.loop) { this._updateLoop(dt); return; }
+    if (input.pressed('attack') && !this.symbiote && M.swingKick(this)) return;      // swing kick
     if (!input.down('swing')) { this._endSwing(true); this._play('whoosh', { volume: 0.5 }); return; }
     if (input.pressed('ability') && this._tryZip(input)) { this.lines.swing.hide(); return; }
 
@@ -771,6 +866,9 @@ export class SpiderMan extends Hero {
 
     // rope length: reel toward target, never let the arc touch the ground
     const lenCap = this.anchor.y - TUNE.groundClear;
+    // swing height control: hold sprint to reel the line in (climb, tighter arc), stick back to pay it out (lower, wider arc)
+    if (input.down('sprint')) this.ropeTarget = Math.max(10, this.ropeTarget - 13 * dt);
+    else if (input.move.y < -0.6) this.ropeTarget = Math.min(lenCap, this.ropeTarget + 10 * dt);
     this.ropeTarget = Math.min(this.ropeTarget, lenCap);
     this.ropeLen = approach(this.ropeLen, Math.max(7, this.ropeTarget), (this.ropeTarget < lenCap - 0.01 ? TUNE.swingReel : 28) * dt);
     if (this.ropeLen < 7.5 && this.swingT > 0.3) { this._endSwing(true); return; }
@@ -811,6 +909,46 @@ export class SpiderMan extends Hero {
     _d.set(this.vel.x, 0, this.vel.z);
     this._setPoseSwing(toA, _d);
     if (this.swingT % 0.6 < dt) this._play('swing', { volume: 0.4, pitch: 0.8 + sp / 90 });
+  }
+  /** Loop-the-loop: dodge while swinging fast = one full vertical loop around the anchor, exits with extra speed. */
+  _startLoop() {
+    if (this.state !== 'swing') return false;
+    const sp = this.vel.length();
+    if (sp < 20 || !this.useCooldown('loop', 3)) return false;
+    const r = _a.copy(this._center(_c)).sub(this.anchor);
+    const axis = new THREE.Vector3().crossVectors(r, this.vel);
+    if (axis.lengthSq() < 1e-3) { this.cooldowns.loop = 0; return false; }
+    axis.normalize();
+    this.loop = { ang: 0, t: 0, axis, speed: clamp(sp, 26, 42), radius: clamp(Math.min(r.length(), this.anchor.y - 6), 9, 24), dir: 1 };
+    this.addFocus(10); this.invuln = Math.max(this.invuln, 0.3);
+    this._fx('text', _a.set(this.pos.x, this.pos.y + 2.5, this.pos.z), 'LOOP', 0xffffff, { size: 1.1, life: 0.8 });
+    this._play('whoosh', { pitch: 1.4 }); this._rumble(0.3, 0.3, 90);
+    return true;
+  }
+  _updateLoop(dt) {
+    const L = this.loop; L.t += dt; this.gravityScale = 0;
+    const c = this._center(_c), r = _a.copy(c).sub(this.anchor);
+    let d = r.length();
+    const da = (L.speed / Math.max(d, 6)) * dt;
+    L.ang += da;
+    r.applyAxisAngle(L.axis, da);
+    d = approach(d, L.radius, 10 * dt); r.setLength(d);
+    const want = _b.copy(this.anchor).add(r);
+    this.vel.copy(want).sub(c).multiplyScalar(1 / Math.max(dt, 1e-3));
+    if (this.vel.length() > 70) this.vel.setLength(70);
+    this.ropeLen = d;
+    // blocked by geometry (building in the loop) or finished: leave the loop with a fling along the tangent
+    const off = L.expect ? c.distanceTo(L.expect) : 0; (L.expect ||= new THREE.Vector3()).copy(want);
+    const done = L.ang >= Math.PI * 2 || L.t > 2.4 || off > 4 || !input_down(this.game.input, 'swing');
+    this.setAnim('swing', L.speed);
+    this._setPoseSwing(_c.copy(this.anchor).sub(c).normalize(), _d.copy(this.vel).setY(0));
+    this.tricks = (this.tricks || 0);
+    if (done) {
+      const tg = _d.crossVectors(L.axis, _a.copy(c).sub(this.anchor)).normalize();
+      this.vel.copy(tg).multiplyScalar(Math.min(L.speed + 6, 48));
+      if (L.ang >= Math.PI * 1.8) { this._fx('text', _a.set(this.pos.x, this.pos.y + 2.5, this.pos.z), 'LOOP BONUS', 0xffffff, { size: 1, life: 0.7 }); this.addFocus(8); }
+      this.loop = null; this._endSwing(false); this.reattach = 0.1; this.boostT = 0.4; this.swingLock = 0;
+    }
   }
   _setPoseSwing(toAnchor, hdir) {
     // hang from the rope: body "up" leans toward the anchor, head leads travel
@@ -975,8 +1113,10 @@ export class SpiderMan extends Hero {
 
   _updateZip(dt, input) {
     this.gravityScale = 0; this.zipT += dt;
-    if (input.pressed('jump')) { // bail out with a hop
-      this.vel.y = Math.max(this.vel.y, 0) + 8; this.state = 'free'; this.lines.zip.hide(); this.jumpArmed = false; return; }
+    if (input.pressed('jump')) {
+      if (this.zipT > 0.08 && _a.copy(this.zipTarget).sub(this.pos).length() < 18) this.plQueued = true;   // jump just before arriving = POINT LAUNCH
+      else { this.vel.y = Math.max(this.vel.y, 0) + 8; this.state = 'free'; this.lines.zip.hide(); this.jumpArmed = false; return; }
+    }
     const to = _a.copy(this.zipTarget).sub(this.pos); const dist = to.length();
     if (dist < 1.1 || this.zipT > 1.6) { this._finishZip(); return; }
     this.zipSpeed = approach(this.zipSpeed, TUNE.zipSpeed, 150 * dt);
@@ -993,9 +1133,24 @@ export class SpiderMan extends Hero {
     this.setAnim('zip', sp);
     this._leanPose(to, 1.0, 0, 12);
   }
+  /** Point Launch: spring off the zip point with a big boost along the camera heading. */
+  _pointLaunch() {
+    const dir = this.game.cam.aimDirection(new THREE.Vector3());
+    const h = new THREE.Vector3(dir.x, 0, dir.z); if (h.lengthSq() < 1e-4) h.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); h.normalize();
+    if (this.state === 'wall') this._leaveWall();
+    this.state = 'free'; this.gravityScale = 1; this.onGround = false; this.groundT = 1; this.jumpArmed = false; this.perchT = 0; this.ledgePerch = false; this.sling = null;
+    this.vel.set(h.x * 30, 21 + Math.max(0, dir.y) * 8, h.z * 30);
+    this.yaw = Math.atan2(h.x, h.z); this.boostT = 0.8; this.plT = 0; this.plQueued = false; this.wallLock = 0.3;
+    this.setAnim('jump', 30); this._play('zip'); this._play('whoosh'); this._rumble(0.5, 0.4, 120); this.game.cam.shake(0.25);
+    this._fx('text', _a.set(this.pos.x, this.pos.y + 2.5, this.pos.z), 'POINT LAUNCH', 0xffffff, { size: 1.0, life: 0.7 });
+    this._fx('burst', this.pos.clone().setY(this.pos.y + 0.3), 0xffffff, 22, 8, 0.5, 0.2); this._fx('ring', this.pos.clone().setY(this.pos.y + 0.1), 3, 0xffffff, 0.35);
+    this.addFocus(5);
+  }
   _finishZip() {
     this.lines.zip.hide();
     const kind = this.zipKind;
+    if (this.plQueued) { this.state = 'free'; this._pointLaunch(); return; }
+    this.plT = 0.5;
     this.state = 'free'; this.gravityScale = 1;
     const dir = _a.copy(this.vel); const sp = dir.length();
     if (kind === 'ledge') {
@@ -1028,8 +1183,12 @@ export class SpiderMan extends Hero {
     const wish = this._wish(input, _w); const mag = Math.min(1, wish.length());
     let turn = 0;
     // stick back = boost dive (trade height for speed), stick forward after a dive = pull up
-    const dive = input.move.y < -0.45;
+    // continuous PITCH: stick back = nose down (0..1 dive amount: faster, steeper), neutral = level glide, stick forward = flare / pull up
+    const dp = clamp((-input.move.y - 0.15) / 0.85, 0, 1);
+    this.glidePitch = dp;
+    const dive = dp > 0.45;
     const boost = input.down('sprint');
+    const W = this.wind.probe(dt, true);
     this.bs.dive = dive;
     if (mag > 0.1 && !dive) {
       const want = Math.atan2(wish.x, wish.z); const d = angDiff(this.yaw, want);
@@ -1037,15 +1196,16 @@ export class SpiderMan extends Hero {
     } else if (dive && Math.abs(input.move.x) > 0.2) {
       turn = -input.move.x * TUNE.glideTurn * 0.6 * dt; this.yaw += turn;
     }
-    const topSpeed = dive ? DS : boost ? GS * 1.5 : GS;
-    this.glideSpeed = approach(this.glideSpeed, topSpeed, (this.glideSpeed > topSpeed ? 5 : dive ? (sym ? 34 : 22) : 9) * dt);
+    const topSpeed = (boost ? GS * 1.5 : GS) + (DS - (boost ? GS * 1.5 : GS)) * dp + W.along;
+    this.glideSpeed = approach(this.glideSpeed, topSpeed, (this.glideSpeed > topSpeed ? 5 : dp > 0.05 ? (sym ? 34 : 22) * (0.4 + 0.6 * dp) : 9) * dt);
     this.vel.x = Math.sin(this.yaw) * this.glideSpeed; this.vel.z = Math.cos(this.yaw) * this.glideSpeed;
-    let fall = dive ? DF : TUNE.glideFall;
-    if (!dive && this.glideSpeed > GS + 4 && input.move.y > 0.3) fall = 3 + (this.glideSpeed - GS) * 0.25; // pull up: bleed speed into lift
-    this.vel.y = approach(this.vel.y, fall, (dive ? 40 : this.wingT > 0 && this.vel.y > 0 ? TUNE.wingLift : 22) * dt);
-    if (!dive && fall > 0) this.glideSpeed = Math.max(GS, this.glideSpeed - 6 * dt);
+    let fall = TUNE.glideFall + (DF - TUNE.glideFall) * dp;
+    if (dp < 0.05 && this.glideSpeed > GS + 4 && input.move.y > 0.3) fall = 3 + (this.glideSpeed - GS) * 0.25; // pull up: bleed speed into lift
+    fall += W.up;      // street-canyon updraft carries you
+    this.vel.y = approach(this.vel.y, fall, (dp > 0.3 ? 40 : this.wingT > 0 && this.vel.y > 0 ? TUNE.wingLift : 22) * dt);
+    if (!dive && fall > 0 && W.up <= 0.1) this.glideSpeed = Math.max(GS, this.glideSpeed - 6 * dt);
     this.setAnim('glide', this.glideSpeed);
-    this._leanPose(_a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), dive ? 1.45 : 1.05, clamp(-turn / Math.max(dt, 1e-3) * 0.25, -0.5, 0.5), 8);
+    this._leanPose(_a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), 1.05 + 0.4 * dp, clamp(-turn / Math.max(dt, 1e-3) * 0.25, -0.5, 0.5), 8);
     if (dive && Math.random() < 0.5) this._fx('burst', this.pos.clone().setY(this.pos.y + 1), 0xffffff, 1, 1, 0.2, 0.08);
   }
 
@@ -1071,8 +1231,9 @@ export class SpiderMan extends Hero {
     if (sdown) this.holdSpecial += dt;
     const free = !this.atk && !this.lash && !this.spin;
     if (!this.symbiote) {
-      if ((input.pressed('special') || tap) && free) this._webShot(input);
-      if (sdown && this.holdSpecial > 0.4 && !this.pullUsed) this._webPull();
+      // tap fires on RELEASE so R1 + face-button gadget chords can claim the press first
+      if (((input.released('special') && this.holdSpecial < 0.25 && !this.pullUsed && !this.sChord) || tap) && free) this._webShot(input);
+      if (sdown && this.holdSpecial > 0.4 && !this.pullUsed && !this.sChord && !this.props.busy) this._webPull();
     } else {
       // black suit: tap = Tendril Lash (quick-fire whip), hold = Symbiote Grab (pull in, aim, release to throw)
       if (sdown && this.holdSpecial >= 0.35 && !this.pullUsed && free && this.bs.grab()) this.pullUsed = true;
@@ -1084,9 +1245,40 @@ export class SpiderMan extends Hero {
   _attackPressed(input) {
     // PARRY counter window: next attack is a huge counter
     if (this.counterT > 0 && this.counterTarget?.alive && this._counterStrike()) return;
+    if (!this.symbiote && this.state === 'free') {
+      // stealth web-strike takedown from a perch on an unaware enemy
+      if (this.canStealth()) {
+        const st = this._stealthTarget();
+        if (st && this.useCooldown('stealth', 1.5)) { M.stealthTakedown(this, st); return; }
+      }
+      // web strike: nobody in lunge reach but an enemy within web range = zip-pull in and hit
+      if (!this._aimTargetNear(TUNE.lungeRange + 1)) {
+        const wt = this._aimTarget(26, 45);
+        if (wt && Math.hypot(wt.pos.x - this.pos.x, wt.pos.z - this.pos.z) > TUNE.lungeRange + 1 && M.webStrike(this, wt)) return;
+      }
+    }
     // air trick: attack in mid-air with nobody nearby
     if (!this.onGround && !this.aiming && this.state === 'free' && !this._aimTargetNear(10) && this.airT > 0.12 && this.useCooldown('trick', 0.9)) { this._airTrick(); return; }
     this._startAttack(input);
+  }
+
+  /** Perched (ledge / rooftop edge / after a zip) and high above the street: stealth takedowns are available. */
+  canStealth() { return this.state === 'free' && this.onGround && !this.aiming && this.pos.y > 8 && (this.ledgePerch || this.nearEdge || this.perchT > 0); }
+  /** Undetected proxy (enemy AI has no stealth state): not attacking, untouched, and either far away or looking away. */
+  unaware(e) {
+    if (!e.alive || e.isBoss || e.attacking || e.hitCount > 0 || e.stunned || e.webbed) return false;
+    if (this.pos.y < e.pos.y + 5) return false;
+    const dx = this.pos.x - e.pos.x, dz = this.pos.z - e.pos.z, d = Math.hypot(dx, dz) || 1;
+    return d > 18 || (Math.sin(e.yaw) * dx + Math.cos(e.yaw) * dz) / d < 0.15;
+  }
+  _stealthTarget() {
+    let best = null, bd = 34 * 34;
+    for (const e of this.game.enemies?.list ?? []) {
+      if (!this.unaware(e)) continue;
+      const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = e; }
+    }
+    return best;
   }
 
   _airTrick() {
@@ -1116,7 +1308,9 @@ export class SpiderMan extends Hero {
         } else {
           this.holdUsed = true;
           const t = this._aimTargetNear(22);
-          const far = t && Math.hypot(t.pos.x - this.pos.x, t.pos.z - this.pos.z) > 6;
+          const dd = t ? Math.hypot(t.pos.x - this.pos.x, t.pos.z - this.pos.z) : 99;
+          if (t && dd <= 5.5 && M.airLauncher(this, t)) return;   // hold attack next to an enemy = Air Launcher
+          const far = t && dd > 6;
           if (far) P.spiderSlam(this, t); else P.armSpin(this);
         }
       }
@@ -1135,12 +1329,16 @@ export class SpiderMan extends Hero {
   _beginStep(step, air, input) {
     // anticipation (wind-up) -> impact -> recovery
     const sym = this.symbiote;
-    const dur = (sym ? [0.31, 0.33, 0.5] : [0.36, 0.36, 0.56])[step], hitAt = (sym ? [0.1, 0.1, 0.21] : [0.13, 0.13, 0.24])[step];
+    const dur = (sym ? [0.31, 0.33, 0.36, 0.5] : [0.36, 0.36, 0.4, 0.58])[step], hitAt = (sym ? [0.1, 0.1, 0.12, 0.21] : [0.13, 0.13, 0.15, 0.25])[step];
     this.atk = { step, t: 0, dur, hitAt, hit: false, queued: false, air };
-    const names = air ? ['punch1', 'kick', 'smash'] : ['punch1', 'punch2', this.symbiote ? 'uppercut' : 'kick'];
+    const names = air ? ['punch1', 'kick', 'punch2', 'smash'] : ['punch1', 'punch2', 'kick', 'uppercut'];
     this.setAnim(names[step], 1);
     // web finisher: a webbed enemy gets yanked in and slammed
-    if (step === 2 && !air && !this.symbiote) {
+    if (step === 3 && !air) {   // focus finisher: a full bar + a target in reach spends it on a cinematic finisher
+      const ft = this.game.enemies?.findTarget?.(this._center(new THREE.Vector3()), this.forward, 7, 120) ?? null;
+      if (ft && this.focus >= 33 && M.focusFinisher(this, ft)) { this.atk.hit = true; this.atk.dur = 0.9; this.atk.hitAt = 99; this.atk.finisher = true; this.vel.x = 0; this.vel.z = 0; return; }
+    }
+    if (step === 3 && !air && !this.symbiote) {
       const wt = this._webbedNear(14);
       if (wt) {
         this.atk.yank = wt; this.atk.hitAt = 0.19;
@@ -1174,21 +1372,21 @@ export class SpiderMan extends Hero {
     }
     if (!a.hit && a.t >= a.hitAt) { a.hit = true; this._doMelee(a); }
     if (a.t >= a.dur) {
-      const next = (a.step + 1) % 3;
+      const next = (a.step + 1) % 4;
       this.atk = null; this.atkStep = next; this.atkReset = 0.7;
       if (a.queued) { this._beginStep(next, !this.onGround, input); }
     }
   }
 
   _doMelee(a) {
-    const mul = this._dmgMul(); const air = a.air; const fin = a.step === 2;
+    const mul = this._dmgMul(); const air = a.air; const fin = a.step === 3;
     if (a.yank) { if (a.yank.alive) P.yankSlam(this, a.yank); return; }
     if (this.symbiote) { // tendril-extended black-suit combo (reach ~4 m): Jab > Lash > Symbiote Slam
       this.bs.melee(a);
       if (air && fin) { this.slam = true; this.slamPower = 'air'; this.vel.y = -26; this.vel.x *= 0.3; this.vel.z *= 0.3; }
       return;
     }
-    const dmg = (air ? [13, 13, 22] : [15, 15, 28])[a.step] * mul;
+    const dmg = (air ? [13, 13, 15, 22] : [15, 15, 17, 28])[a.step] * mul;
     const origin = this._center(new THREE.Vector3());
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const hits = this.game.combat?.melee?.({
@@ -1247,7 +1445,8 @@ export class SpiderMan extends Hero {
       if (P.webThrow(this, wt)) { this.yaw = Math.atan2(wt.pos.x - this.pos.x, wt.pos.z - this.pos.z); return; }
     }
     const tgt = this._aimTarget(32, 25);
-    if (!tgt || tgt.isBoss) { this.pullUsed = true; return; }
+    if (!tgt) { this.pullUsed = true; if (this.onGround) this.props.begin(); return; }   // nothing to pull: web up a nearby object
+    if (tgt.isBoss) { this.pullUsed = true; return; }
     const d = Math.hypot(tgt.pos.x - this.pos.x, tgt.pos.z - this.pos.z);
     if (d < 4) { this.pullUsed = true; return; }
     if (!this.useCooldown('pull', 2.5)) { this.pullUsed = true; return; }
@@ -1285,7 +1484,7 @@ export class SpiderMan extends Hero {
   }
   _updateLash(dt) {
     const L = this.lash; L.t += dt;
-    if (this.onGround) { this.vel.x = approach(this.vel.x, 0, 40 * dt); this.vel.z = approach(this.vel.z, 0, 40 * dt); }
+    if (this.onGround && !['rush', 'barrage', 'webstrike'].includes(L.kind)) { this.vel.x = approach(this.vel.x, 0, 40 * dt); this.vel.z = approach(this.vel.z, 0, 40 * dt); }
     while (L.pulse < 3 && L.t >= 0.1 + L.pulse * 0.13) {
       const last = L.pulse === 2; L.pulse++;
       const origin = this._center(new THREE.Vector3());
@@ -1346,7 +1545,7 @@ export class SpiderMan extends Hero {
     const dir = new THREE.Vector3(e.pos.x - this.pos.x, 0, e.pos.z - this.pos.z); const dist = dir.length(); dir.normalize();
     this.yaw = Math.atan2(dir.x, dir.z);
     this.vel.x = dir.x * clamp((dist - 1.3) / 0.1, 0, 38); this.vel.z = dir.z * clamp((dist - 1.3) / 0.1, 0, 38);
-    this.atk = { step: 2, t: 0, dur: 0.6, hitAt: 99, hit: true, queued: false, air: false, special: true };
+    this.atk = { step: 3, t: 0, dur: 0.6, hitAt: 99, hit: true, queued: false, air: false, special: true };
     this.setAnim(this.symbiote ? 'uppercut' : 'smash', 1); this._play('whoosh');
     this._later(0.1, () => {
       const origin = this._center(new THREE.Vector3());
@@ -1364,6 +1563,7 @@ export class SpiderMan extends Hero {
   _startDodge(input) {
     if (this.dodgeT > 0) return;
     if (this._tryParry()) return;
+    if (this.state === 'swing' && !this.loop && !this._windupNear(18) && this._startLoop()) return;
     if (!this.useCooldown('dodge', 0.7)) return;
     const wish = this._wish(input, _a);
     if (wish.lengthSq() > 0.04) this.dodgeDir.copy(wish).setY(0).normalize();
@@ -1408,6 +1608,11 @@ export class SpiderMan extends Hero {
     const r = super.takeDamage(amount, fromPos);
     if (r) { this.bs.chord = null; this.atk = null; this.lash = null; this.spin = null; this.sling = null; this.charging = false; this.slingK = 0; this.trickT = 0; }
     return r;
+  }
+
+  _windupNear(r) {
+    for (const e of this.game.enemies?.list ?? []) { if (!e.alive || !(e.windup > 0)) continue; const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z; if (dx * dx + dz * dz < r * r) return true; }
+    return false;
   }
 
   _updateSense(dt) {
@@ -1516,9 +1721,28 @@ export class SpiderMan extends Hero {
   }
 
   // ---- visuals ---------------------------------------------------------------
+  /** Slingshot: two webs stretch from the hands to anchor points either side of the hero while charging. */
+  _slingVisuals(dt) {
+    const on = !!this.sling && this.sling.t > 0.05 && !this.dead;
+    const [l0, l1] = this.slingLines;
+    if (!on) { l0.hide(); l1.hide(); this._slingOn = false; return; }
+    if (!this._slingOn) { this._slingOn = true; l0.begin(0.3); l1.begin(0.3); }
+    const k = this.slingK, f = this.forward, rx = f.z, rz = -f.x;
+    const back = 0.4 + k * 0.9;      // hero crouches back: webs stretch
+    for (let i = 0; i < 2; i++) {
+      const sd = i ? -1 : 1, h = (i ? this.model.handL : this.model.handR) ?? this.model.chest;
+      h.getWorldPosition(_hp);
+      _hp2.set(this.pos.x + f.x * (2.2 - back) + rx * sd * 2.4, this.pos.y + 0.9 + k * 0.5, this.pos.z + f.z * (2.2 - back) + rz * sd * 2.4);
+      this.slingLines[i].update(dt, _hp, _hp2, 0.4 + 0.6 * k);
+    }
+  }
+
   updateVisuals(dt) {
     const L = this.lines;
     this.tendrils.update(dt);
+    this.arms.update(dt);
+    this.wind.update(dt, this.state === 'glide');
+    this._slingVisuals(dt);
     this.bs.visuals(dt, this.state);
     if (this.dead) {
       L.swing.hide(); L.zip.hide(); L.pull.hide();
