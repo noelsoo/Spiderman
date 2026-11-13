@@ -3,5 +3,6 @@
 import { core } from './core.mjs';
 import { vehicles } from './vehicles.mjs';
 import { vehicles2 } from './vehicles2.mjs';
+import { weapons } from './weapons.mjs';
 
-export const ALL_CHECKS = [...core, ...vehicles, ...vehicles2];
+export const ALL_CHECKS = [...core, ...vehicles, ...vehicles2, ...weapons];

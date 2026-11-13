@@ -86,6 +86,7 @@ function installQA() {
         v = vs.list.find((c) => c.active && !c.reserve && !c.wrecked && c.kind !== 'bus' && c.kind !== 'police' && Math.hypot(c.pos.x - spot.x, c.pos.z - spot.z) > 15);
         vs._releaseModel(v); v.setKind(kind);
       }
+      for (const o of vs.list) if (o !== v && o.active && !o.reserve && Math.hypot(o.pos.x - spot.x, o.pos.z - spot.z) < 14) { if (!vs._relocate(o)) vs._deactivate(o); }
       v.place(spot.x, spot.z, spot.yaw, speed);
       v.driver = ai ? 'ai' : null; v.ai = null; v.parked = !ai; v.asleep = !ai && speed === 0;
       if (ai) { vs._giveAI(v); v.driver = 'ai'; v.speed = speed; v.vel.set(Math.sin(v.yaw) * speed, 0, Math.cos(v.yaw) * speed); }
