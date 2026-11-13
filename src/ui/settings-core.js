@@ -1,6 +1,8 @@
 // Settings model: defaults, persistence and the code that APPLIES each setting to the running game (live).
 // The menu itself lives in settings.js. Everything here is idempotent: applyAll(game) can run at any time.
 
+import { ACTIONS } from '../core/input.js';
+
 export const SETTINGS_KEY = 'sm-settings';
 
 export const DEFAULTS = {
@@ -20,12 +22,59 @@ export const DEFAULTS = {
   map: 'nyc',
 };
 
+// ---- validation of anything read back from localStorage (never trust stored data) -----------------
+const ENUMS = {
+  difficulty: ['story', 'normal', 'hard'], subSize: ['small', 'medium', 'large'], shoulder: ['left', 'centre', 'right'],
+  quality: ['low', 'medium', 'high', 'ultra'], shadowRes: ['low', 'medium', 'high', 'ultra'],
+  colorBlind: ['off', 'protanopia', 'deuteranopia', 'tritanopia'], map: ['nyc', 'singapore'],
+};
+const RANGES = { // [min, max]
+  aimAssist: [0, 1.5], shake: [0, 1.5], vibStrength: [0, 1],
+  sensitivity: [0.2, 3], aimSens: [0.3, 2], stickSensitivity: [0.3, 2.5], deadzone: [0.02, 0.5],
+  fov: [60, 100], camDist: [3, 12], camHeight: [0.8, 3],
+  renderScale: [0.5, 1.5], bloom: [0, 1.5], vignette: [0, 2], chroma: [0, 2], brightness: [0.6, 1.6],
+  volume: [0, 1], music: [0, 1], sfx: [0, 1], voice: [0, 1], hudScale: [0.75, 1.5],
+};
+const FPS_CAPS = [0, 30, 60, 120];
+const BOOLS = new Set(Object.keys(DEFAULTS).filter((k) => typeof DEFAULTS[k] === 'boolean'));
+
+/** Returns a clean settings object: unknown keys dropped, types coerced, numbers clamped, enums checked. */
+export function sanitizeSettings(raw) {
+  const out = { ...DEFAULTS };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const key of Object.keys(DEFAULTS)) {
+    if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
+    const v = raw[key];
+    if (ENUMS[key]) { if (typeof v === 'string' && ENUMS[key].includes(v)) out[key] = v; }
+    else if (RANGES[key]) { if (typeof v === 'number' && Number.isFinite(v)) out[key] = Math.min(RANGES[key][1], Math.max(RANGES[key][0], v)); }
+    else if (key === 'fpsCap') { if (FPS_CAPS.includes(v)) out[key] = v; }
+    else if (BOOLS.has(key)) { if (typeof v === 'boolean') out[key] = v; }
+    else if (key === 'keys') {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const k = {};
+        for (const [a, codes] of Object.entries(v)) {
+          if (!ACTIONS.includes(a) || !Array.isArray(codes)) continue;
+          k[a] = codes.filter((c) => typeof c === 'string' && /^[A-Za-z0-9]{1,24}$/.test(c)).slice(0, 6);
+        }
+        out.keys = Object.keys(k).length ? k : null;
+      }
+    } else if (key === 'padRemap') {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const m = {};
+        for (const [std, rawIdx] of Object.entries(v)) {
+          if (/^\d{1,2}$/.test(std) && Number.isInteger(rawIdx) && rawIdx >= 0 && rawIdx < 64) m[std] = rawIdx;
+        }
+        out.padRemap = Object.keys(m).length ? m : null;
+      }
+    }
+  }
+  return out;
+}
+
 export function loadSettings() {
-  const def = { ...DEFAULTS };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    return { ...def, ...saved };
-  } catch { return def; }
+    return sanitizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+  } catch { return { ...DEFAULTS }; }
 }
 
 const DIFF = { story: 0.5, normal: 1, hard: 1.5 };
@@ -146,7 +195,7 @@ const APPLY = {
   subSize: (g) => { g.hud.root.dataset.subs = g.settings.subSize; },
   colorBlind: applyColorBlind,
   highContrast: (g) => { g.hud.root.classList.toggle('hc', !!g.settings.highContrast); },
-  hudScale: (g) => { g.hud.root.style.setProperty('--hs', String(g.settings.hudScale)); },
+  hudScale: (g) => { g.hud.setScale?.(g.settings.hudScale); },
 };
 const HEAVY = new Set(['renderScale', 'quality', 'shadows', 'shadowRes']);
 const timers = {};
@@ -165,6 +214,10 @@ export function applyAll(game) {
 export function installSettings(game) {
   if (game._settingsInstalled) return;
   game._settingsInstalled = true;
+  // main.js loads the raw stored JSON; make sure what the game runs on is valid (unknown keys dropped, values clamped)
+  const clean = sanitizeSettings(game.settings);
+  for (const k of Object.keys(game.settings)) if (!(k in clean)) delete game.settings[k];
+  Object.assign(game.settings, clean);
   const s = () => game.settings;
 
   const cb = game.combat;
