@@ -20,6 +20,7 @@ const info = [];
 const t0 = performance.now();
 const models = names.map((id, i) => {
   const m = buildCharacter(id, {});
+  if (qs.get('variant')) m.setVariant(qs.get('variant'));
   m.group.position.x = i * 3; scene.add(m.group);
   for (let k = 0; k < (qs.get('state') ? 20 : 2); k++) m.update(0.016, { state: animState, speed: 0, t: k * 0.016 }, {});
   if (qs.get('tint')) m.setTint(0xffffff, Number(qs.get('tint')));

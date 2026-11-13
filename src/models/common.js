@@ -41,12 +41,12 @@ export function glowInstance(color, k = 2, o = {}) {
 
 /** Glossy black symbiote with a bluish fresnel rim. */
 export function symMat(o = {}) {
-  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a', normalMap = null, normalScale = 0.7 } = o;
-  const key = 'sym' + color + rim + rimK + rough + id + (normalMap ? normalMap.uuid : '');
+  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a', normalMap = null, normalScale = 0.7, clearcoat = 1 } = o;
+  const key = 'sym' + color + rim + rimK + rough + clearcoat + id + (normalMap ? normalMap.uuid : '');
   return M(key, () => {
     const m = new THREE.MeshPhysicalMaterial({
-      color, roughness: rough, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1,
-      iridescence: 0.5, iridescenceIOR: 1.5, iridescenceThicknessRange: [120, 420], map,
+      color, roughness: rough, metalness: 0.3, clearcoat, clearcoatRoughness: clearcoat < 1 ? 0.3 : 0.1,
+      iridescence: clearcoat < 1 ? 0.12 : 0.5, iridescenceIOR: 1.5, iridescenceThicknessRange: [120, 420], map,
       normalMap, normalScale: new THREE.Vector2(normalScale, normalScale),
     });
     m.onBeforeCompile = (sh) => {
@@ -147,8 +147,29 @@ export function drawWeb(ctx, W, H, o) {
   ctx.globalAlpha = 1;
 }
 
-const RED = '#c0101f', BLUE = '#1b3a9c';
+const RED = '#a50f1d', BLUE = '#142560';
 const texCache = new Map();
+/** fine hexagonal fabric cells (Advanced Suit micro-texture) */
+function drawHex(ctx, W, H, r, color, alpha, lw = 1) {
+  ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.lineWidth = lw;
+  const dx = r * Math.sqrt(3), dy = r * 1.5;
+  for (let row = -1, y = 0; y < H + dy; row++, y += dy) for (let x = (row & 1) ? dx / 2 : 0; x < W + dx; x += dx) {
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+}
+function bluePanels(ctx, W, H, color) {
+  ctx.fillStyle = color;
+  for (const cx of [W * 0.25, W * 0.75]) {
+    ctx.beginPath();
+    ctx.moveTo(cx - 16, H); ctx.lineTo(cx + 16, H);
+    ctx.lineTo(cx + 50, H * 0.42); ctx.lineTo(cx + 44, H * 0.18); ctx.lineTo(cx + 18, 0);
+    ctx.lineTo(cx - 18, 0); ctx.lineTo(cx - 44, H * 0.18); ctx.lineTo(cx - 50, H * 0.42);
+    ctx.closePath(); ctx.fill();
+  }
+}
 /** kind: torso | red | blue | black | wing */
 export function webTexture(kind) {
   if (texCache.has(kind)) return texCache.get(kind);
@@ -156,22 +177,26 @@ export function webTexture(kind) {
   const [c, ctx] = canvas(W, H);
   if (kind === 'torso') {
     ctx.fillStyle = RED; ctx.fillRect(0, 0, W, H);
-    // blue side panels (u=.25 and .75), v=0 bottom -> canvas bottom
-    ctx.fillStyle = BLUE;
-    for (const cx of [W * 0.25, W * 0.75]) {
-      ctx.beginPath();
-      ctx.moveTo(cx - 14, H); ctx.lineTo(cx + 14, H);
-      ctx.lineTo(cx + 46, H * 0.42); ctx.lineTo(cx + 40, H * 0.18); ctx.lineTo(cx + 16, 0);
-      ctx.lineTo(cx - 16, 0); ctx.lineTo(cx - 40, H * 0.18); ctx.lineTo(cx - 46, H * 0.42);
-      ctx.closePath(); ctx.fill();
-    }
-    drawWeb(ctx, W, H, { line: '#0b0b12', cols: 16, rows: 14, lw: 2.6 });
+    drawWeb(ctx, W, H, { line: '#1a0509', cols: 16, rows: 14, lw: 2.8, alpha: 0.95 });
+    bluePanels(ctx, W, H, BLUE); // raised webbing lives on the red only
+    drawHex(ctx, W, H, 5, '#000000', 0.16, 1);
   } else if (kind === 'red') {
-    ctx.fillStyle = RED; ctx.fillRect(0, 0, W, H); drawWeb(ctx, W, H, { line: '#0b0b12', cols: 12, rows: 8 });
+    ctx.fillStyle = RED; ctx.fillRect(0, 0, W, H); drawWeb(ctx, W, H, { line: '#1a0509', cols: 12, rows: 8, lw: 2.6, alpha: 0.95 });
+    drawHex(ctx, W, H, 5, '#000000', 0.16, 1);
   } else if (kind === 'blue') {
-    ctx.fillStyle = BLUE; ctx.fillRect(0, 0, W, H); drawWeb(ctx, W, H, { line: '#080a1c', cols: 12, rows: 8 });
+    ctx.fillStyle = BLUE; ctx.fillRect(0, 0, W, H);
+    drawHex(ctx, W, H, 5, '#000010', 0.22, 1);
   } else if (kind === 'black') {
-    ctx.fillStyle = '#08080c'; ctx.fillRect(0, 0, W, H); drawWeb(ctx, W, H, { line: '#2c3050', cols: 12, rows: 8, lw: 2, alpha: 0.7 });
+    ctx.fillStyle = '#07070a'; ctx.fillRect(0, 0, W, H);
+    // organic ropey veins instead of a web grid
+    const r = rng(5); ctx.lineCap = 'round';
+    for (let i = 0; i < 70; i++) {
+      let x = r() * W, y = r() * H, a = r() * 6.28; ctx.strokeStyle = r() < 0.5 ? '#171a24' : '#0d0f16'; ctx.lineWidth = 2 + r() * 5; ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.moveTo(x, y);
+      for (let k = 0; k < 7; k++) { a += (r() - 0.5) * 1.2; x += Math.cos(a) * 26; y += Math.sin(a) * 26; ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1; drawHex(ctx, W, H, 5, '#2a2f44', 0.12, 1);
   } else if (kind === 'wing') {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(14,24,60,0.55)'; ctx.fillRect(0, 0, W, H);
@@ -180,9 +205,51 @@ export function webTexture(kind) {
   const t = tex(c); texCache.set(kind, t); return t;
 }
 
+/** tapered stroke along a cubic bezier: width w0 -> w1 */
+function taperedLeg(ctx, p, w0, w1, N = 28) {
+  const pt = (t) => { const u = 1 - t; return [u * u * u * p[0][0] + 3 * u * u * t * p[1][0] + 3 * u * t * t * p[2][0] + t * t * t * p[3][0], u * u * u * p[0][1] + 3 * u * u * t * p[1][1] + 3 * u * t * t * p[2][1] + t * t * t * p[3][1]]; };
+  const L = [], R = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, a = pt(Math.max(0, t - 0.01)), b = pt(Math.min(1, t + 0.01)), q = pt(t);
+    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, w = (w0 + (w1 - w0) * Math.pow(t, 0.8)) / 2;
+    L.push([q[0] - dy / l * w, q[1] + dx / l * w]); R.push([q[0] + dy / l * w, q[1] - dx / l * w]);
+  }
+  ctx.beginPath(); L.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); for (let i = R.length - 1; i >= 0; i--) ctx.lineTo(R[i][0], R[i][1]); ctx.closePath(); ctx.fill();
+  return pt;
+}
+/** Advanced Suit 2.0 spider: slim tapered body, long sweeping legs that climb toward the shoulders (style 'adv'); jagged symbiote version ('advjag'). */
+function drawAdvSpider(ctx, S, jag) {
+  const cx = S / 2, r = rng(jag ? 31 : 4);
+  const bodyY = [[0.30, 0.036, 0.05], [0.58, 0.058, 0.17]];
+  ctx.beginPath(); ctx.ellipse(cx, S * 0.29, S * 0.034, S * 0.052, 0, 0, 6.3); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx, S * 0.36); ctx.bezierCurveTo(cx + S * 0.07, S * 0.42, cx + S * 0.055, S * 0.7, cx, S * 0.9); ctx.bezierCurveTo(cx - S * 0.055, S * 0.7, cx - S * 0.07, S * 0.42, cx, S * 0.36); ctx.fill();
+  void bodyY;
+  const legs = [
+    [[0.03, 0.33], [0.16, 0.20], [0.30, 0.02], [0.485, 0.07]],
+    [[0.035, 0.38], [0.20, 0.30], [0.36, 0.18], [0.495, 0.30]],
+    [[0.04, 0.44], [0.20, 0.50], [0.40, 0.55], [0.47, 0.80]],
+    [[0.04, 0.50], [0.16, 0.66], [0.26, 0.78], [0.31, 0.98]],
+  ];
+  for (const sd of [-1, 1]) for (const leg of legs) {
+    const pts = leg.map(([x, y]) => [cx + sd * x * S, y * S]);
+    const f = taperedLeg(ctx, pts, S * (jag ? 0.05 : 0.044), S * (jag ? 0.006 : 0.012));
+    if (jag) for (let k = 0; k < 4; k++) { // thorns along the leg
+      const t = 0.2 + k * 0.2 + r() * 0.08, a = f(t), b = f(t + 0.03), dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * (r() < 0.5 ? 1 : -1), ny = dx / l * (r() < 0.5 ? 1 : -1);
+      const w = S * 0.018 * (1 - t * 0.6), len = S * (0.03 + r() * 0.04);
+      ctx.beginPath(); ctx.moveTo(a[0] - dx / l * w, a[1] - dy / l * w); ctx.lineTo(a[0] + nx * len + dx / l * len * 0.4, a[1] + ny * len + dy / l * len * 0.4); ctx.lineTo(a[0] + dx / l * w, a[1] + dy / l * w); ctx.closePath(); ctx.fill();
+    }
+  }
+}
 export function emblemTexture(color = '#ffffff', style = 'spider') {
   const key = 'emb' + color + style;
   if (texCache.has(key)) return texCache.get(key);
+  if (style === 'adv' || style === 'advjag') {
+    const S = 512; const [c, ctx] = canvas(S, S);
+    ctx.clearRect(0, 0, S, S); ctx.fillStyle = color;
+    drawAdvSpider(ctx, S, style === 'advjag');
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    texCache.set(key, t); return t;
+  }
   const S = 256; const [c, ctx] = canvas(S, S);
   ctx.clearRect(0, 0, S, S);
   ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -398,13 +465,16 @@ export function webNormal(kind) {
   const W = texRes(), s = W / 512;
   const [c, ctx] = canvas(W, W);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W);
-  blurOn(ctx, 0.8 * s);
-  drawWeb(ctx, W, W, { line: '#fff', cols: kind === 'torso' ? 16 : 12, rows: kind === 'torso' ? 14 : 8, lw: 3.0 * s, alpha: 1 });
-  blurOff(ctx);
+  if (kind !== 'blue') {
+    blurOn(ctx, 0.8 * s);
+    drawWeb(ctx, W, W, { line: '#fff', cols: kind === 'torso' ? 16 : 12, rows: kind === 'torso' ? 14 : 8, lw: 3.0 * s, alpha: 1 });
+    blurOff(ctx);
+    if (kind === 'torso') { ctx.save(); ctx.scale(s, s); bluePanels(ctx, 512, 512, '#000'); ctx.restore(); }
+  }
+  drawHex(ctx, W, W, 5 * s, '#5a5a5a', 1, 1.2 * s);
   const h = heightOf(ctx, W, W);
-  weaveInto(h, W, W, Math.max(4, 5 * s), 0.16);
-  noiseInto(h, W, W, rng(3), 0.05);
-  const t = ntex(heightToNormal(h, W, W, 2.4)); texCache.set(key, t); return t;
+  noiseInto(h, W, W, rng(3), 0.04);
+  const t = ntex(heightToNormal(h, W, W, 2.2)); texCache.set(key, t); return t;
 }
 
 /** smooth matte fabric normal: very fine soft grain plus subtle seam lines (spandex / flight suit, not a basket weave) */
@@ -846,10 +916,10 @@ export function antiStreakTexture() {
 // ================================================================== anatomy v3: muscle-shaped limbs, hands, feet
 // radius multipliers along a limb (t = 0 at the joint, 1 at the next joint) and forward/back offsets (fraction of radius)
 const MUSCLE = {
-  arm:   { r: [[0, 0.86], [0.1, 1.0], [0.3, 1.14], [0.55, 1.04], [0.8, 0.9], [1, 0.9]], z: [[0, 0], [0.3, 0.14], [0.6, 0.06], [1, 0]] },
-  fore:  { r: [[0, 1.0], [0.18, 1.12], [0.4, 1.0], [0.75, 0.78], [1, 0.74]], z: [[0, 0.02], [0.2, 0.08], [1, 0]] },
-  thigh: { r: [[0, 0.98], [0.25, 1.12], [0.5, 1.04], [0.8, 0.88], [1, 0.84]], z: [[0, 0], [0.3, 0.1], [1, 0.02]] },
-  shin:  { r: [[0, 0.9], [0.22, 1.14], [0.45, 0.98], [0.8, 0.72], [1, 0.7]], z: [[0, 0], [0.22, -0.2], [0.5, -0.1], [1, 0]] },
+  arm:   { r: [[0, 0.86], [0.1, 1.0], [0.3, 1.14], [0.55, 1.04], [0.8, 0.84], [1, 0.74]], z: [[0, 0], [0.3, 0.14], [0.6, 0.06], [1, 0]] },
+  fore:  { r: [[0, 0.9], [0.18, 1.1], [0.4, 1.0], [0.75, 0.74], [1, 0.62]], z: [[0, 0.02], [0.2, 0.08], [1, 0]] },
+  thigh: { r: [[0, 0.98], [0.25, 1.12], [0.5, 1.02], [0.8, 0.84], [1, 0.76]], z: [[0, 0], [0.3, 0.1], [1, 0.02]] },
+  shin:  { r: [[0, 0.78], [0.22, 1.14], [0.45, 0.98], [0.8, 0.68], [1, 0.58]], z: [[0, 0], [0.22, -0.2], [0.5, -0.1], [1, 0]] },
 };
 function keyLerp(keys, t) {
   if (t <= keys[0][0]) return keys[0][1];
@@ -904,11 +974,12 @@ export function handGeo(hx, hy, hz, fingers = true, curl = 0.35, seg = 6) {
 
 /** Shoe/foot: heel + arch + toe box + ankle, one merged geometry. Origin at the ankle joint (y=0), toes toward +Z, sole at y = -h. */
 export function footGeo(w, h, l, seg = 10) {
-  return mergeParts(`foot${w.toFixed(4)}_${h.toFixed(4)}_${l.toFixed(4)}_${seg}`, [
-    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.55, -l * 0.28], scale: [w * 0.82, h * 0.5, l * 0.36] },
-    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.62, l * 0.12], scale: [w, h * 0.38, l * 0.5] },
-    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.66, l * 0.5], scale: [w * 0.9, h * 0.3, l * 0.3] },
-    { geo: new THREE.SphereGeometry(1, seg, seg - 2), pos: [0, -h * 0.28, -l * 0.08], scale: [w * 0.7, h * 0.55, l * 0.3] },
+  return mergeParts(`foot2${w.toFixed(4)}_${h.toFixed(4)}_${l.toFixed(4)}_${seg}`, [
+    { geo: new THREE.SphereGeometry(1, Math.max(7, seg - 2), Math.max(5, seg - 5)), pos: [0, -h * 0.72, -l * 0.3], scale: [w * 0.78, h * 0.28, l * 0.3] }, // heel block
+    { geo: new THREE.SphereGeometry(1, Math.max(7, seg - 2), Math.max(5, seg - 5)), pos: [0, -h * 0.72, l * 0.14], scale: [w * 0.96, h * 0.27, l * 0.52] }, // flat sole + midfoot
+    { geo: new THREE.SphereGeometry(1, Math.max(7, seg - 2), Math.max(5, seg - 5)), pos: [0, -h * 0.66, l * 0.5], scale: [w * 0.82, h * 0.24, l * 0.3] }, // toe cap
+    { geo: new THREE.SphereGeometry(1, Math.max(7, seg - 2), Math.max(5, seg - 5)), pos: [0, -h * 0.4, l * 0.12], scale: [w * 0.8, h * 0.34, l * 0.4] }, // instep
+    { geo: new THREE.SphereGeometry(1, Math.max(7, seg - 2), Math.max(5, seg - 5)), pos: [0, -h * 0.2, -l * 0.1], scale: [w * 0.66, h * 0.42, l * 0.22] }, // ankle collar
   ]);
 }
 
