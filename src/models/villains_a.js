@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { buildRig, makeDims, ProcModel, J } from './rig.js';
 import { registerModel } from './index.js';
 import { P, addHook, buildBody, addFace, finish } from './characters.js';
+import { bakeSkinned } from './skinbake.js';
 import {
   G, std, metal, glow, symMat, sphereGeo, boxGeo, cylGeo, coneGeo, mergeParts, rng, drawTex, grainNormal, fabricNormal, skinMaps, seg,
 } from './common.js';
@@ -165,7 +166,7 @@ export function buildKraven() {
     { geo: cylGeo(0.022, 0.022, 0.2, 6), pos: [0, -0.7, 0] },
   ]);
   const spearMesh = P(model, cj, spear, std(0x4a3320, { roughness: 0.8 }), { pos: [0.12 * k, 0.2 * k, -0.17 * k], rot: [0.12, 0, 0.5] });
-  model.spear = spearMesh;
+  model.spear = spearMesh; spearMesh.userData.noBake = true;
   // claws (rage)
   const clawM = glow(0xd070ff, 1.6);
   const claws = [];
@@ -173,13 +174,14 @@ export function buildKraven() {
     const cl = [];
     for (let i = -1; i <= 1; i++) cl.push({ geo: coneGeo(0.012 * k, 0.17 * k, 5), pos: [i * 0.03 * k, -0.11 * k, 0.05 * k], rot: [Math.PI + 0.3, 0, i * 0.1] });
     const m = P(model, model.j[s > 0 ? J.WL : J.WR], mergeParts('kravenclaw' + k, cl), clawM, { pos: [0, -dims.hand * 0.5, 0], cast: false });
-    m.visible = false; claws.push(m);
+    m.visible = false; m.userData.noBake = true; claws.push(m);
   }
   model.setRage = (on) => {
     for (const c of claws) c.visible = !!on;
     skin.emissiveIntensity = on ? 1.5 : 0.55;
     model.extra.rage = !!on;
   };
+  bakeSkinned(model);
   return finish(model);
 }
 
@@ -265,6 +267,7 @@ export function buildLizard(opts = {}) {
     const r0 = 0.092 * k * (small ? 0.8 : 1);
     tail.rebuild((u) => (r0 * (1 - u * 0.93)) + 0.008);
   }, () => tail.dispose());
+  bakeSkinned(model);
   return finish(model);
 }
 
@@ -383,6 +386,7 @@ export function buildDocOck() {
     }
   });
   addHook(model, null, () => { for (const t of tents) { t.tube.dispose(); t.hubMat.dispose(); } });
+  bakeSkinned(model);
   return finish(model);
 }
 

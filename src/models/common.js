@@ -41,12 +41,12 @@ export function glowInstance(color, k = 2, o = {}) {
 
 /** Glossy black symbiote with a bluish fresnel rim. */
 export function symMat(o = {}) {
-  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a', normalMap = null, normalScale = 0.7, clearcoat = 1 } = o;
+  const { color = 0x050508, rim = 0x3a64ff, rimK = 0.4, rough = 0.2, map = null, id = 'a', normalMap = null, normalScale = 0.7, clearcoat = 0.75 } = o;
   const key = 'sym' + color + rim + rimK + rough + clearcoat + id + (normalMap ? normalMap.uuid : '');
   return M(key, () => {
     const m = new THREE.MeshPhysicalMaterial({
-      color, roughness: rough, metalness: 0.3, clearcoat, clearcoatRoughness: clearcoat < 1 ? 0.3 : 0.1,
-      iridescence: clearcoat < 1 ? 0.12 : 0.5, iridescenceIOR: 1.5, iridescenceThicknessRange: [120, 420], map,
+      color, roughness: rough, metalness: 0.3, clearcoat, clearcoatRoughness: clearcoat < 0.7 ? 0.3 : 0.16,
+      iridescence: clearcoat < 0.7 ? 0.12 : 0.4, iridescenceIOR: 1.5, iridescenceThicknessRange: [120, 420], map,
       normalMap, normalScale: new THREE.Vector2(normalScale, normalScale),
     });
     m.onBeforeCompile = (sh) => {
