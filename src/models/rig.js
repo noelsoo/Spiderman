@@ -836,7 +836,7 @@ export class ProcModel {
   _extras(p, st, c, dt) {
     const h = this.hit;
     if (h.t < 0.7 && st !== 'dead' && st !== 'dodge' && st !== 'stunned') {
-      const e = h.k * Math.exp(-h.t * 7.5) * sm(h.t / 0.035), lx = h.x, lz = h.z;
+      const e = h.k * 1.5 * Math.exp(-h.t * 5.5) * sm(h.t / 0.04), lx = h.x, lz = h.z;
       const bk = -lz * e, fw = Math.max(0, lz) * e;
       p.add(CH, -0.42 * bk + 0.4 * fw, lx * 0.3 * e, -lx * 0.3 * e); p.add(H, -0.12 * bk + 0.12 * fw, 0, -lx * 0.1 * e); p.add(SP, -0.1 * bk, lx * 0.3 * e, 0);
       p.add(HD, -0.35 * bk + 0.2 * fw, -lx * 0.3 * e, lx * 0.25 * e);
