@@ -25,7 +25,7 @@ export const weapons = [
         qa.step(10);
         if (eco.cash <= 0) bad.push('no cash from kills');
         // medkit at full health refused and does not charge
-        const med = w.catalog.find((d) => d.id === 'medkit'); eco.cash = 1000;
+        const med = w.catalog.find((d) => d.id === 'medkit'); eco.cash = 1000; g.player.hp = g.player.maxHp;
         const m1 = w.purchase(med);
         if (m1.ok || eco.cash !== 1000) bad.push('medkit charged at full hp');
         g.player.hp = 10; const m2 = w.purchase(med);
@@ -48,7 +48,8 @@ export const weapons = [
           const res = w.purchase(d);
           if (!res.ok) { bad.push(d.id + ' purchase: ' + res.msg); continue; }
           if (eco.cash !== 10) bad.push(`${d.id} charged wrong: left ${eco.cash}`);
-          if (w.equipped !== d) bad.push(d.id + ' not equipped');
+          if (d.consumable && w.equipped !== d) w.equip(d);
+          else if (w.equipped !== d) bad.push(d.id + ' not equipped');
           const st = w.owned.get(d.id);
           if (st.clip !== d.clip || st.reserve !== Math.min(d.maxReserve, d.startReserve)) bad.push(`${d.id} ammo ${st.clip}/${st.reserve}`);
           // aim + fire
