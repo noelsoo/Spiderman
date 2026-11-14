@@ -97,12 +97,33 @@
 i.ps.x { color: #7fb8ff; } i.ps.o { color: #ff7f8c; }
 i.xb.a { background: #2f9e44; border-color: #2f9e44; } i.xb.b { background: #d03a3a; border-color: #d03a3a; }
 
-@media (max-width: 860px) {
-  .ws-body { grid-template-columns: 1fr; grid-template-rows: 200px 1fr; }
-  .ws-list { border-right: 0; border-bottom: 1px solid var(--line); }
-  .ws-hero { height: 90px; }
-  .ws-title h1 { font-size: 24px; }
+/* ---------- compact layouts: nothing may clip or overlap the footer ---------- */
+.ws-panel { width: min(1060px, 96vw); height: min(640px, 94vh); }
+.ws-detail { overflow-y: auto; scrollbar-width: thin; min-height: 0; }
+.ws-body { overflow: hidden; }
+.ws-foot { flex-wrap: wrap; gap: 8px 20px; flex: none; }
+.ws-foot span { white-space: nowrap; }
+@media (max-height: 600px), (max-width: 860px) {
+  .ws-head { padding: 10px 18px 8px; }
+  .ws-title h1 { font-size: 22px; } .ws-cash b { font-size: 24px; }
+  .ws-body { grid-template-columns: minmax(250px, 38%) 1fr; }
+  .ws-row { padding: 4px 12px 4px 10px; grid-template-columns: 56px 1fr auto auto; } .ws-nm, .ws-pr { font-size: 13px; }
+  .ws-detail { padding: 10px 18px 8px; }
+  .ws-hero { height: 64px; margin-bottom: 4px; } .ws-hero svg { max-height: 60px; }
+  .ws-detail h2 { font-size: 18px; } .ws-desc { font-size: 12px; margin: 2px 0 6px; }
+  .ws-stats { gap: 4px; } .ws-stat { grid-template-columns: 78px 1fr; } .bar { height: 7px; }
+  .ws-own { margin-top: 6px; font-size: 12px; }
+  .ws-btn { padding: 8px 10px; font-size: 12px; }
+  .ws-msg { bottom: 56px; }
+  .ws-foot { padding: 6px 12px; font-size: 10.5px; gap: 6px 14px; }
 }
+@media (max-width: 860px) {
+  .ws-body { grid-template-columns: 1fr; grid-template-rows: minmax(110px, 34%) 1fr; }
+  .ws-list { border-right: 0; border-bottom: 1px solid var(--line); }
+  .ws-btns { flex-wrap: wrap; } .ws-btn { flex: 1 1 140px; }
+  .ws-foot span:nth-child(n+3) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ws-hero svg, .wshop, .ws-panel { animation: none !important; transition: none !important; } }
 
 /* ---------- in-world HUD bits owned by the weapons system ---------- */
 .wpn-xh { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; opacity: 0; transition: opacity 0.12s; --s: 14px; --c: #fff; }

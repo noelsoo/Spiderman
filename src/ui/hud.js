@@ -2,10 +2,12 @@
 // All DOM lives inside #hud. Menus are driven by keyboard, mouse and gamepad. Gamepad reads go ONLY through the
 // input abstraction (input.padButton / input.move / input.rightStick / input.padInfo / input.lastRawButton), never
 // through raw navigator.getGamepads() buttons, so they work for every controller profile.
+import * as THREE from 'three';
 import './hud.css';
 import { installCampaignUI } from './campaign-ui.js';
 import { installSettingsUI } from './settings.js';
 import './menu.css';
+import './ingame.css';
 
 const PAD_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10c2.5 0 4 1.8 4.6 5l.7 4.4c.3 2-1.100 3.200-2.800 2.200L16 16.500H8l-3.500 2.100c-1.700 1-3.100-.2-2.800-2.200l.7-4.400C3 8.800 4.500 7 7 7z" opacity=".35"/><path d="M7.500 9.500h1.200v1.300h1.300V12H8.700v1.300H7.500V12H6.200v-1.200h1.300z"/><circle cx="15.500" cy="10.500" r=".9"/><circle cx="17.600" cy="12.600" r=".9"/></svg>';
 const LOGO_SVG = `<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img">
@@ -117,7 +119,8 @@ const STD_NAME = Object.fromEntries(STD_BTN);
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtTime = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const cssColor = (c, fb = '#e8213a') => (c === undefined || c === null ? fb : typeof c === 'number' ? `#${c.toString(16).padStart(6, '0')}` : c);
+const cssColor = (c, fb = '#e8213a') => (c === undefined || c === null ? fb : typeof c === 'number' ? `#${(c >>> 0).toString(16).padStart(6, '0').slice(-6)}` : /^#[0-9a-f]{3,8}$|^[a-z]{3,20}$|^(rgb|hsl)a?\([0-9.,%\s]+\)$/i.test(String(c)) ? String(c) : fb);
+const _hv = new THREE.Vector3();
 const isEmbedded = () => { try { return window.top !== window.self; } catch { return true; } };
 
 function prettyPad(id = '') {
@@ -212,43 +215,51 @@ export class HUD {
     r.innerHTML = `
       <div class="hud-game" data-r="game">
         <div class="vignette" data-r="vig"></div>
+        <div data-r="ddc"></div>
         <div class="scope" data-r="scope">${SCOPE_SVG}<div class="zm" data-r="scopez">8x</div></div>
         <div class="hitm" data-r="hitm"><i></i><i></i><i></i><i></i></div>
         <div class="zoomi" data-r="zoomi"></div>
         <div class="xhair" data-r="xhair"></div>
         <div class="wp hidden" data-r="wp"><div class="dm"></div><div class="ds" data-r="wpd"></div></div>
-        <div class="obj hidden" data-r="obj"><div class="k">OBJECTIVE</div><div class="tx" data-r="objtx"></div><div class="ds" data-r="objds"></div><div class="pg hidden" data-r="objpg"><b></b></div></div>
+        <div class="sring" data-r="sring"><svg viewBox="-34 -34 68 68"><circle r="20"/><path d="M0 -26v-6M18 -19l4 -4M-18 -19l-4 -4M26 0h6M-26 0h-6"/></svg></div>
+        <div class="hz obj hidden" data-r="obj"><div class="k">OBJECTIVE</div><div class="tx" data-r="objtx"></div><div class="ds" data-r="objds"></div><div class="pg hidden" data-r="objpg"><b></b></div></div>
         <div class="boss" data-r="boss"><div class="nm" data-r="bossnm"></div><div class="bar"><b data-r="bossbar"></b></div></div>
-        <div class="rcol" data-r="rcol">
+        <div class="hz rcol" data-r="rcol">
           <div class="strip" data-r="strip"></div>
-          <div class="shint" data-r="shint">Tab / D-pad ↑ &mdash; switch hero</div>
-          <div class="mm" data-r="mm"><canvas data-r="mmc" width="336" height="336"></canvas></div>
-          <div class="cash" data-r="cash"><span class="cur">$</span><b data-r="cashn">0</b><div class="cfl" data-r="cashf"></div></div>
-          <div class="wanted" data-r="wanted"><i>★</i><i>★</i><i>★</i><i>★</i><i>★</i></div>
+          <div class="shint" data-r="shint">Tab / D-pad &uarr; &mdash; switch hero</div>
+          <div class="mm" data-r="mm"><canvas data-r="mmc" width="400" height="400"></canvas></div>
+          <div class="cash glass" data-r="cash"><span class="cur">$</span><b data-r="cashn">0</b><div class="cfl" data-r="cashf"></div></div>
+          <div class="wanted" data-r="wanted"><i>&#9733;</i><i>&#9733;</i><i>&#9733;</i><i>&#9733;</i><i>&#9733;</i></div>
         </div>
         <div class="toasts" data-r="toasts"></div>
-        <div class="sense" data-r="sense">!</div>
-        <div class="prompt" data-r="prompt"></div>
-        <div class="ctxp" data-r="ctxp"></div>
-        <div class="dhint" data-r="dhint"></div>
-        <div class="combo" data-r="combo"><div class="n" data-r="combon">0</div><div class="l">HIT COMBO</div><div class="t"><b data-r="combot"></b></div></div>
-        <div class="badge">
-          <div class="portrait" data-r="portrait"></div>
-          <div class="bars">
+        <div class="hz combo" data-r="combo"><div class="n" data-r="combon">0</div><div class="l">HIT COMBO</div><div class="t"><b data-r="combot"></b></div></div>
+        <div class="hz cb">
+          <div class="prompt glass" data-r="prompt"></div>
+          <div class="ctxp glass" data-r="ctxp"></div>
+          <div class="dhint glass" data-r="dhint"></div>
+        </div>
+        <div class="hz vit" data-r="vit">
+          <div class="emb" data-r="emb"></div>
+          <div class="col">
             <div class="hname"><span data-r="hname">-</span><small data-r="hhp"></small></div>
-            <div class="hp" data-r="hp"></div>
-            <div class="focus" data-r="focus"><div class="ult" data-r="ult">ULTIMATE READY</div><b data-r="focusb"></b></div>
+            <div class="hp" data-r="hp"><div class="g" data-r="hpg"></div><div class="f" data-r="hpf"></div></div>
+            <div class="foc" data-r="focus"><i><b></b></i><i><b></b></i><i><b></b></i><span class="ult" data-r="ult">ULT</span></div>
             <div class="rage hidden" data-r="rage"><b data-r="rageb"></b><span>RAGE</span></div>
           </div>
         </div>
-        <div class="wpn hidden" data-r="wpn"><div class="wn" data-r="wpnn"></div><div class="wa"><b data-r="wpnc"></b><span data-r="wpnr"></span></div><div class="rl"><b data-r="wpnrl"></b></div></div>
-        <div class="rally hidden" data-r="rally">RALLY</div>
-        <div class="speedo hidden" data-r="speedo">
-          <svg viewBox="0 0 120 70"><path class="tr" d="M10 62A50 50 0 0 1 110 62" pathLength="100"/><path class="fl" data-r="spdarc" d="M10 62A50 50 0 0 1 110 62" pathLength="100" stroke-dasharray="0 100"/></svg>
-          <div class="sv"><b data-r="spdn">0</b><small>KM/H</small></div>
-          <div class="ch"><span data-r="carn">CAR</span><div class="cb"><b data-r="carhp"></b></div></div>
+        <div class="hz rb" data-r="rb">
+          <div class="wpn glass hidden" data-r="wpn"><div class="wn" data-r="wpnn"></div><div class="wa"><b data-r="wpnc"></b><span data-r="wpnr"></span></div><div class="rl"><b data-r="wpnrl"></b></div></div>
+          <div class="rbrow">
+            <div class="side" data-r="side"></div>
+            <div class="dia" data-r="abil"></div>
+            <div class="speedo hidden" data-r="speedo">
+              <svg viewBox="0 0 120 70"><path class="tr" d="M10 62A50 50 0 0 1 110 62" pathLength="100"/><path class="fl" data-r="spdarc" d="M10 62A50 50 0 0 1 110 62" pathLength="100" stroke-dasharray="0 100"/></svg>
+              <div class="sv"><b data-r="spdn">0</b><small>KM/H</small></div>
+              <div class="ch"><span data-r="carn">CAR</span><div class="cb"><b data-r="carhp"></b></div></div>
+            </div>
+          </div>
         </div>
-        <div class="abil" data-r="abil"></div>
+        <div class="rally hidden" data-r="rally">RALLY</div>
         <div class="wheel" data-r="wheel">
           <div class="wh-ring" data-r="whring">
             <div class="wh-c"><div class="wh-ndl" data-r="whndl"></div><b data-r="whn"></b><small data-r="whh"></small><em data-r="whe">Aim with stick / mouse &middot; release to switch</em></div>
@@ -259,11 +270,20 @@ export class HUD {
     this.$ = {};
     r.querySelectorAll('[data-r]').forEach((el) => { this.$[el.dataset.r] = el; });
     this.mmCtx = this.$.mmc.getContext('2d');
-    this.$.hp.innerHTML = '<i></i>'.repeat(this.SEG = 20);
-    this.hpSegs = [...this.$.hp.children];
+    this.focSegs = [...this.$.focus.querySelectorAll('i b')];
+    this.ddEls = [];
+    for (let i = 0; i < 4; i++) {
+      const d = document.createElement('div'); d.className = 'dd'; d.appendChild(document.createElement('i'));
+      this.$.ddc.appendChild(d); this.ddEls.push({ el: d, a: 0, t: 0 });
+    }
+    this._ddI = 0; this._senseT = 0; this._hitFromT = 0;
+    this._hs = 1;
+    this._resize = () => this._applyScale();
+    addEventListener('resize', this._resize);
+    this._applyScale();
     this.starEls = [...this.$.wanted.children];
     // hero strip (compact)
-    this.$.strip.innerHTML = ORDER.map((id, i) => `<div class="hs" data-id="${id}" style="--c:${HERO_INFO[id].color}" title="${HERO_INFO[id].name}"><div class="pt">${EMBLEM[id]}</div><div class="mb"><b></b></div><div class="kk">${i + 1}</div></div>`).join('');
+    this.$.strip.innerHTML = ORDER.map((id, i) => `<div class="hs" data-id="${id}" style="--c:${HERO_INFO[id].color}" title="${esc(HERO_INFO[id].name)} (${i + 1})"><div class="pt">${EMBLEM[id]}</div><div class="mb"><b></b></div><div class="kk">${i + 1}</div></div>`).join('');
     this.stripEls = ORDER.map((id) => this.$.strip.querySelector(`[data-id="${id}"]`));
     this.stripEls.forEach((el, i) => el.addEventListener('click', () => this.game.state === 'playing' && this.game.switchHero?.(ORDER[i])));
     this.$.strip.style.pointerEvents = 'auto';
@@ -277,6 +297,18 @@ export class HUD {
       this.$.whring.appendChild(el);
       return el;
     });
+  }
+
+  // ------------------------------------------------------------------ scale
+  /** HUD scale setting (0.75 to 1.5), multiplied with the viewport based factor. */
+  setScale(v) { this._hs = Math.max(0.75, Math.min(1.5, +v || 1)); this._applyScale(); }
+  _applyScale() {
+    const w = innerWidth || 1280, h = innerHeight || 720;
+    const portrait = w < h;
+    const base = Math.min(w / (portrait ? 640 : 1280), h / 720);
+    const ui = Math.max(0.55, Math.min(2.5, base)) * (this._hs || 1);
+    this.root.style.setProperty('--ui', ui.toFixed(3));
+    this._ui = ui;
   }
 
   // ------------------------------------------------------------------ public API
@@ -339,11 +371,44 @@ export class HUD {
     this.lastHero = hero.id;
     const css = cssColor(hero.color ?? HERO_INFO[hero.id]?.color);
     this.root.style.setProperty('--hero', css);
-    this.$.portrait.innerHTML = EMBLEM[hero.id] || '';
+    this.$.emb.innerHTML = EMBLEM[hero.id] || '';
+    this._hookDamage(hero);
     this.$.hname.textContent = hero.name || HERO_INFO[hero.id]?.name || hero.id;
     this._sig.hp = -1; this._sig.abil = '';
     const c = this.game.economy?.cash ?? 0;
     if (!this._cashInit) { this._cash.shown = this._cash.target = c; this._cashInit = true; }
+  }
+
+  /** Remember where the last hit came from (hero.takeDamage passes the attacker position) for the direction indicator. */
+  _hookDamage(hero) {
+    if (hero._hudHooked || typeof hero.takeDamage !== 'function') return;
+    hero._hudHooked = true;
+    const orig = hero.takeDamage.bind(hero);
+    hero.takeDamage = (amount, fromPos) => {
+      const ok = orig(amount, fromPos);
+      if (ok && fromPos && Number.isFinite(fromPos.x) && Number.isFinite(fromPos.z)) this._showHitDir(fromPos.x, fromPos.z);
+      return ok;
+    };
+  }
+
+  _showHitDir(x, z) {
+    const d = this.ddEls[this._ddI++ % this.ddEls.length];
+    d.wx = x; d.wz = z; d.t = 1.4;
+  }
+
+  _updateHitDirs(dt, p) {
+    const cam = this.game.camera;
+    let fx = 0, fz = -1;
+    if (cam) { const e = cam.matrixWorld.elements; fx = -e[8]; fz = -e[10]; const l = Math.hypot(fx, fz) || 1; fx /= l; fz /= l; }
+    for (const d of this.ddEls) {
+      if (d.t <= 0) continue;
+      d.t -= dt;
+      if (d.t <= 0) { d.el.style.opacity = '0'; continue; }
+      const ax = d.wx - p.pos.x, az = d.wz - p.pos.z, l = Math.hypot(ax, az) || 1;
+      const ang = Math.atan2((ax * -fz + az * fx) / l, (ax * fx + az * fz) / l);
+      d.el.style.transform = `rotate(${(ang * 180 / Math.PI).toFixed(1)}deg)`;
+      d.el.style.opacity = String(Math.min(1, d.t / 0.7));
+    }
   }
 
   toast(text) {
@@ -376,7 +441,8 @@ export class HUD {
 
   prompt(action, text) {
     if (action === 'sense' || action === 'spidersense' || text === '!') {
-      const s = this.$.sense; s.classList.remove('on'); void s.offsetWidth; s.classList.add('on');
+      const s = this.$.sring; s.classList.remove('on'); void s.offsetWidth; s.classList.add('on');
+      this._senseT = 0.9;
       return;
     }
     const pad = this._usePad();
@@ -645,7 +711,7 @@ export class HUD {
   // ---- generic settings rows
   _mkRow(rows, label) {
     const r = document.createElement('div'); r.className = 'row';
-    r.innerHTML = `<span class="lbl">${label}</span><span class="ctl-r"></span>`;
+    r.innerHTML = `<span class="lbl">${esc(label)}</span><span class="ctl-r"></span>`;
     rows.appendChild(r); return r;
   }
   _rowCycle(scr, rows, label, get, set, opts, fmt = (v) => String(v).toUpperCase()) {
@@ -981,10 +1047,11 @@ export class HUD {
 
     // hp / name
     const frac = Math.max(0, p.hp / p.maxHp);
-    const filled = Math.ceil(frac * this.SEG - 1e-6);
-    if (this._sig.hp !== filled) {
-      this.hpSegs.forEach((s, i) => s.classList.toggle('f', i < filled));
-      this._sig.hp = filled;
+    const hq = Math.round(frac * 200);
+    if (this._sig.hp !== hq) {
+      this._sig.hp = hq;
+      this.$.hpf.style.width = `${(hq / 2).toFixed(1)}%`;
+      this.$.hpg.style.width = `${(hq / 2).toFixed(1)}%`;
     }
     this.$.hp.classList.toggle('low', frac < 0.3 && frac > 0);
     const hpTxt = `${Math.ceil(p.hp)} / ${p.maxHp}`;
@@ -993,14 +1060,20 @@ export class HUD {
     this._lastHp = p.hp; this._lastHero = p;
     const low = frac < 0.28 && frac > 0 && g.state === 'playing';
     if (low !== this._sig.low) { this._sig.low = low; this.$.vig.classList.toggle('low', low); }
+    this._updateHitDirs(dt, p);
 
-    // focus
+    // focus: three segments under the health bar, ring round the emblem
     const f = Math.max(0, Math.min(100, p.focus || 0));
-    this.$.focusb.style.width = `${f}%`;
+    const fq = Math.round(f);
+    if (fq !== this._sig.fq) {
+      this._sig.fq = fq;
+      for (let i = 0; i < 3; i++) this.focSegs[i].style.width = `${Math.max(0, Math.min(1, (f - i * 33.34) / 33.33)) * 100}%`;
+      this.$.emb.style.setProperty('--f', (f / 100).toFixed(3));
+    }
     const full = f >= 99.5;
     if (full !== this._sig.full || this._sig.ultPad !== this._usePad()) {
-      this._sig.full = full; this._sig.ultPad = this._usePad(); this.$.focus.classList.toggle('full', full);
-      this.$.ult.innerHTML = `ULTIMATE READY &nbsp;${this._glyph('ultimate')}`;
+      this._sig.full = full; this._sig.ultPad = this._usePad(); this.$.focus.classList.toggle('full', full); this.$.emb.classList.toggle('full', full);
+      this.$.ult.innerHTML = `ULT ${this._glyph('ultimate')}`;
     }
 
     // black-suit rage bar (Spider-Man symbiote suit only)
@@ -1012,24 +1085,26 @@ export class HUD {
       if (rg !== this._sig.raging) { this._sig.raging = rg; this.$.rage.classList.toggle('raging', rg); }
     }
 
-    // abilities (rebuild only when something changes); hidden while driving
+    // spider-sense ring follows the hero's head while it plays
+    if (this._senseT > 0) {
+      this._senseT -= dt;
+      const cam = g.camera, sr = this.$.sring;
+      if (cam && this._senseT > 0) {
+        _hv.set(p.pos.x, p.pos.y + (p.height || 1.8) + 0.45, p.pos.z).project(cam);
+        if (_hv.z < 1) sr.style.transform = `translate(${((_hv.x * 0.5 + 0.5) * innerWidth).toFixed(1)}px, ${((-_hv.y * 0.5 + 0.5) * innerHeight).toFixed(1)}px)`;
+      } else sr.classList.remove('on');
+    }
+
+    // abilities: diamond of four, gadget / extra pills beside it. Hidden while driving.
     const pad = this._usePad();
     this.$.abil.classList.toggle('hidden', !!driving);
+    this.$.side.classList.toggle('hidden', !!driving);
+    this.$.abil.classList.toggle('pad', pad);
     const hints = p.abilityHints || [];
-    const sig = pad + (this._xbox() ? 'x' : '') + hints.map((h) => h.action + h.label).join('|');
-    if (sig !== this._sig.abil) {
-      this._sig.abil = sig;
-      this.$.abil.className = `abil${pad ? ' pad' : ''}${driving ? ' hidden' : ''}`;
-      this.$.abil.innerHTML = hints.map((h) => `<div class="ab"><div class="ic">${this._glyph(h.action, pad)}<div class="cd"></div></div><div class="lb">${esc(h.label)}</div></div>`).join('');
-      this._abEls = [...this.$.abil.children];
-    }
-    for (let i = 0; i < hints.length; i++) {
-      const h = hints[i], el = this._abEls?.[i]; if (!el) continue;
-      const cd = Math.max(0, Math.min(1, h.cooldown || 0));
-      el.firstChild.lastChild.style.height = `${cd * 100}%`;
-      el.classList.toggle('ready', cd <= 0.01);
-      el.classList.toggle('act', !!h.active);
-    }
+    const extra = p.id === 'hawkeye' && Number.isInteger(p.trick) ? p.trick : -1;
+    const sig = pad + (this._xbox() ? 'x' : '') + p.id + hints.map((h) => `${h.action}:${h.label}`).join('|') + (extra >= 0 ? `#${extra}` : '');
+    if (sig !== this._sig.abil) { this._sig.abil = sig; this._buildAbilities(hints, pad, extra); }
+    this._paintAbilities(hints);
 
     // combo
     const combo = p.combo || 0;
@@ -1037,6 +1112,8 @@ export class HUD {
     const showC = combo >= 2;
     this.$.combo.classList.toggle('on', showC);
     if (showC) {
+      const ck = Math.min(1, combo / 30).toFixed(2);
+      if (ck !== this._sig.ck) { this._sig.ck = ck; this.$.combo.style.setProperty('--k', ck); this.$.combo.classList.toggle('hot', combo >= 15); }
       if (this._sig.combo !== combo) {
         this._sig.combo = combo; this.$.combon.textContent = combo;
         this.$.combon.classList.remove('bump'); void this.$.combon.offsetWidth; this.$.combon.classList.add('bump');
@@ -1195,6 +1272,58 @@ export class HUD {
     if (txt) this.$.ctxp.innerHTML = `${this._glyph('interact', pad)}<span>${txt}</span>`;
   }
 
+  /** Assign hints to the diamond (top, right, bottom, left) by action; leftovers become pills beside it. */
+  _buildAbilities(hints, pad, trickIdx) {
+    const PREF = [['special', 'attack'], ['ability', 'swing'], ['dodge', 'jump'], ['ability2']];
+    const used = new Set(), slots = [null, null, null, null];
+    PREF.forEach((acts, i) => { for (const a of acts) { const k = hints.findIndex((h, j) => !used.has(j) && h.action === a); if (k >= 0) { slots[i] = k; used.add(k); break; } } });
+    for (let i = 0; i < 4; i++) {
+      if (slots[i] !== null) continue;
+      const k = hints.findIndex((h, j) => !used.has(j) && h.action !== 'ultimate' && h.action !== 'aim');
+      if (k >= 0) { slots[i] = k; used.add(k); }
+    }
+    const rest = hints.map((h, j) => j).filter((j) => !used.has(j));
+    rest.sort((a, b) => (hints[a].action === 'aim' ? -1 : 0) - (hints[b].action === 'aim' ? -1 : 0) || (hints[a].action === 'ultimate' ? 1 : 0) - (hints[b].action === 'ultimate' ? 1 : 0));
+    const mk = (tag, cls, html) => { const e = document.createElement(tag); e.className = cls; e.innerHTML = html; return e; };
+    const dia = this.$.abil, side = this.$.side;
+    dia.textContent = ''; side.textContent = '';
+    this._abEls = [];
+    slots.forEach((k, i) => {
+      if (k === null) return;
+      const h = hints[k], full = String(h.label || '');
+      const el = mk('div', `ab s${i}`, `<div class="ic">${abilityIcon(h)}<i class="cdr"></i><span class="bk">${this._glyph(h.action, pad)}</span></div><div class="lb"></div>`);
+      el.querySelector('.lb').textContent = shortLabel(full);
+      el.title = full;
+      dia.appendChild(el); this._abEls.push({ el, idx: k, cd: -1, pill: false });
+    });
+    if (trickIdx >= 0) {
+      const pips = mk('div', 'pips', '<i></i>'.repeat(11));
+      pips.children[Math.max(0, Math.min(10, trickIdx))].classList.add('on');
+      pips.title = 'Trick arrow'; side.appendChild(pips);
+    }
+    rest.slice(0, 4).forEach((k) => {
+      const h = hints[k], full = String(h.label || '');
+      const el = mk('div', `pill glass${h.action === 'aim' ? ' gad' : ''}`, `${this._glyph(h.action, pad)}<span class="t"></span>`);
+      el.querySelector('.t').textContent = shortLabel(full);
+      el.title = full;
+      side.appendChild(el); this._abEls.push({ el, idx: k, cd: -1, pill: true });
+    });
+  }
+
+  _paintAbilities(hints) {
+    for (const a of this._abEls || []) {
+      const h = hints[a.idx]; if (!h) continue;
+      const cd = Math.round(Math.max(0, Math.min(1, h.cooldown || 0)) * 100) / 100;
+      const ready = cd <= 0.01, act = !!h.active;
+      if (cd !== a.cd) {
+        if (a.cd > 0.01 && ready && !a.pill) { a.el.classList.remove('pop'); void a.el.offsetWidth; a.el.classList.add('pop'); }
+        a.cd = cd; a.el.style.setProperty('--cd', cd);
+        a.el.classList.toggle('ready', ready); a.el.classList.toggle('cool', !ready);
+      }
+      if (act !== a.act) { a.act = act; a.el.classList.toggle('act', act); }
+    }
+  }
+
   _showDriveHint() {
     const pad = this._usePad();
     const items = [['throttle', 'Gas'], ['brake', 'Brake / reverse'], ['steer', 'Steer'], ['handbrake', 'Handbrake'], ['horn', 'Horn'], ['interact', 'Exit car']];
@@ -1338,6 +1467,46 @@ export class HUD {
     ctx.restore();
   }
 }
+
+// ---- ability icons: picked from the hint label / action so each hero reads sensibly -------------------
+const ICON_PATHS = {
+  web: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/><circle cx="12" cy="12" r="5"/>',
+  arrow: '<path d="M4 20 20 4M20 4h-7M20 4v7M4 20l1-4M4 20l4-1"/>',
+  zip: '<path d="M4 20c0-8 6-14 15-15M19 5h-5M19 5v5"/>',
+  suit: '<path d="M12 3c3 3 7 4 7 9a7 7 0 0 1-14 0c0-5 4-6 7-9z"/>',
+  dash: '<path d="M5 6l6 6-6 6M12 6l6 6-6 6"/>',
+  missile: '<path d="M12 2c3 3 4 7 3 12H9c-1-5 0-9 3-12zM9 14l-3 4M15 14l3 4M12 17v4"/>',
+  beam: '<circle cx="6" cy="12" r="3"/><path d="M11 12h11M11 8l10-3M11 16l10 3"/>',
+  bolt: '<path d="M13 2 5 14h6l-1 8 8-12h-6z"/>',
+  claw: '<path d="M6 4l2 16M12 3l1 18M18 4l-1 16"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>',
+  hammer: '<path d="M5 4h10v6H5zM10 10v11"/>',
+  hex: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="2"/>',
+  bomb: '<circle cx="11" cy="14" r="6"/><path d="M15 9l4-4M17 3l4 4"/>',
+  heal: '<path d="M12 5v14M5 12h14"/>',
+  fist: '<path d="M6 10h10a3 3 0 0 1 0 6H8a3 3 0 0 1-2-6zM8 10V7M11 10V6M14 10V7"/>',
+  hook: '<path d="M12 3v12a4 4 0 0 1-8 0M12 3l-3 3M12 3l3 3"/>',
+  gadget: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
+  ult: '<path d="M12 2l2.6 6.4L21 9l-5 4.4L17.6 20 12 16.6 6.4 20 8 13.4 3 9l6.4-.6z"/>',
+};
+const ICON_RULES = [
+  [/missile|rocket|legion|lock/, 'missile'], [/laser|beam|repulsor|proton|cannon|blast|unibeam/, 'beam'], [/lightning|thunder|storm|bifrost/, 'bolt'],
+  [/claw|feral|pounce|berserk|slash|blade/, 'claw'], [/shield|block|nano/, 'shield'], [/hammer|mjolnir/, 'hammer'], [/grapple|hook/, 'hook'],
+  [/zip|pull|leap/, 'zip'], [/suit|symbiote|rampage|rage|venom|carnage/, 'suit'], [/bomb|grenade|burst/, 'bomb'],
+  [/heal|cleanse|purg|regen|aura/, 'heal'], [/hex|chaos|reality|telekin|mind|lift|warp|levit/, 'hex'],
+  [/dodge|dash|roll|vault|parry|flip|evade/, 'dash'], [/swing|web wing|glide|fly/, 'web'], [/shot|shoot|bow|arrow|nock|volley|trick|shooter|gadget/, 'arrow'],
+  [/palm|thruster|strike|smash|slam|pound|punch|attack|clap|throw/, 'fist'],
+];
+const ACTION_ICON = { swing: 'web', dodge: 'dash', ultimate: 'ult', aim: 'gadget', attack: 'fist', special: 'arrow', ability: 'zip', ability2: 'hex' };
+function abilityIcon(h) {
+  const t = `${h.label || ''} ${h.key || ''}`.toLowerCase();
+  let k = null;
+  for (const [re, name] of ICON_RULES) if (re.test(t)) { k = name; break; }
+  k = k || ACTION_ICON[h.action] || 'gadget';
+  return `<svg viewBox="0 0 24 24">${ICON_PATHS[k]}</svg>`;
+}
+/** "Repulsor | Hold: Laser" -> "Repulsor", "Triple Shot (K / R1)" -> "Triple Shot". Full text stays in the tooltip. */
+const shortLabel = (l) => String(l).split(/\s*(?:\||\()/)[0].trim() || String(l);
 
 const SCOPE_SVG = `<svg viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet" fill="none" stroke="#000" stroke-width="0.5">
   <circle r="62" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/><circle r="61" stroke="rgba(0,0,0,0.9)" stroke-width="2"/>

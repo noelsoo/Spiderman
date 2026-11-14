@@ -37,8 +37,10 @@ export function installCampaignUI(HUD, H) {
     this.$.subtx.textContent = text || '';
     this.$.subs.style.setProperty('--sc', color);
     this.$.subs.classList.add('on');
+    // lift the prompt stack above the subtitle bar so they never overlap
+    requestAnimationFrame(() => this.root.style.setProperty('--subh', `${this.$.subs.offsetHeight + 8}px`));
   };
-  P.hideSubtitle = function () { this.$.subs?.classList.remove('on'); };
+  P.hideSubtitle = function () { this.$.subs?.classList.remove('on'); this.root.style.setProperty('--subh', '0px'); };
 
   P.setLetterbox = function (on) {
     this.cine.classList.toggle('lbox', !!on);
