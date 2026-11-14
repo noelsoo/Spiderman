@@ -405,7 +405,11 @@ class Game {
 function loadSettings() {
   const def = { ...DEFAULTS };
   try {
-    const saved = JSON.parse(localStorage.getItem('sm-settings') || '{}');
+    const raw = JSON.parse(localStorage.getItem('sm-settings') || '{}');
+    // stored data is untrusted: keep plain-object input only and drop values whose type differs from the default
+    // (ranges and enums are checked by sanitizeSettings in src/ui/settings-core.js when the settings UI installs)
+    const saved = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    for (const k of Object.keys(saved)) if (k in def && def[k] !== null && typeof saved[k] !== typeof def[k]) delete saved[k];
     const o = { ...def, ...saved };
     o.map = o.map === 'singapore' ? 'singapore' : 'nyc';
     if (saved.shadows === undefined) o.shadows = o.quality !== 'low';   // untouched: follow the preset
