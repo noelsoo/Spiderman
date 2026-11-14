@@ -6,13 +6,13 @@ import {
   fabricNormal, matteFabricNormal, grainNormal, scaleMaps, capChestTexture, capStripesTexture, starTexture, shieldTexture, domeGeo, drawTex, faceTexture, faceShell, M,
 } from './common.js';
 import { P, addHook, buildBody, addFace, finish, curvedPlane, skullHead, patch, strand, addEars } from './characters.js';
-import { tab, hairMaterial, skullMetres } from './face.js';
+import { tab, hairMaterial, skullMetres, hairCardsGeo, hairCardMaterial } from './face.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
 const fab = (name = 'h2fab', p = 6) => ({ normalMap: fabricNormal(p, 0.55, name), normalScale: new V2(0.7, 0.7) });
 const matte = () => ({ normalMap: matteFabricNormal('h2matte', 3, 0.35), normalScale: new V2(0.45, 0.45) });
-const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.6, ...fab(), sheen: 0.3, sheenRoughness: 0.6, sheenColor: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.3), ...o }), 0xcfe0ff, 0.1);
+const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.6, ...fab(), sheen: 0.25, sheenRoughness: 0.65, sheenColor: new THREE.Color(color).multiplyScalar(1.5), ...o }), new THREE.Color(color).multiplyScalar(1.6).getHex(), 0.06);
 const leather = (color, o = {}) => std(color, { roughness: 0.7, normalMap: grainNormal('leather', 5, 2.4), normalScale: new V2(0.9, 0.9), ...o });
 
 /** lagged-chain cloth panel (cape / coat tail / hair curtain) hung from `joint`. Same secondary motion as Thor's cape. */
@@ -103,6 +103,8 @@ export function buildWolverine() {
     patch(model, H, 'wolvlens' + s, { aMin: s > 0 ? 0.1 : -0.64, aMax: s > 0 ? 0.64 : -0.1, na: 12, nb: 5, top: (a) => lensC(a) + lensH(a), bot: (a) => lensC(a) - lensH(a) * 0.75, thick: () => 0.052 }, lensM);
     patch(model, H, 'wolvchop' + s, { aMin: s > 0 ? 0.98 : -1.5, aMax: s > 0 ? 1.5 : -0.98, na: 10, nb: 8, top: (a) => lerp(-0.02, -0.16, sm01(0, 1, (Math.abs(a) - 0.98) / 0.52)), bot: (a) => { const u = clamp((Math.abs(a) - 0.98) / 0.52, 0, 1); return lerp(-0.74, -0.165, Math.pow(u, 0.6)); }, pw: 1.5, thick: (a, l, t) => 0.046 + 0.03 * t * (1 - 0.5 * Math.abs(a) / 1.5), post: (p, a, l, t) => { p.z += 0.05 * t * (1 - Math.abs(Math.abs(a) - 1.0)); } }, sideHair);
   }
+  // swept-back hair tufts and sideburn cards beside the cowl
+  P(model, hj, hairCardsGeo(H, 'wolv', { a0: 1.0, a1: 1.5, n: 9, len: 0.09, lenJit: 0.5, w: 0.022, thick: 0.05, lat0: 0.05, latMid: -0.25, layers: 2, flare: 0.012, seed: 9 }), hairCardMaterial('#2a1a10', '#5a3a22', { seed: 9 }), { pos: [0, H.y0, 0], cast: false });
   addEars(model, H, skin);
   // belt + buckle, boots, cuffs
   P(model, model.j[J.SP], cylGeo(0.16 * k, 0.165 * k, 0.06 * k, seg(18, 10)), yellow, { pos: [0, 0.05 * k, 0], scale: [1.36, 1, 0.9] });
@@ -287,6 +289,7 @@ export function buildHawkeye() {
   P(model, hj, boxGeo(hr * 0.16, hr * 0.035, hr * 0.05), frameM, { pos: [0, H.y0 + hr * 0.12, hr * H.sz * 1.0], cast: false });
   const hairM = hairMaterial('#2a1d14', { hi: '#5a4028', seed: 13, rough: 0.7, sheen: 0x665544 });
   patch(model, H, 'hawkhair', { na: seg(40, 24), nb: 12, top: () => Math.PI / 2, bot: tab([[0, 0.62], [0.5, 0.57], [0.9, 0.34], [1.3, 0.1], [1.8, -0.1], [3.14, -0.28]]), thick: (a, l, t) => 0.04 + 0.014 * Math.sin(a * 9) * t }, hairM, { cast: true });
+  P(model, hj, hairCardsGeo(H, 'hawk', { a0: 0.2, a1: 2.9, n: 14, len: 0.035, lenJit: 0.4, w: 0.022, thick: 0.05, lat0: 0.72, latMid: 0.4, layers: 2, flare: 0.006, seed: 13 }), hairCardMaterial('#2a1d14', '#5a4028', { seed: 13 }), { pos: [0, H.y0, 0], cast: false });
   addEars(model, H, skin);
   // bandolier: a tilted leather band wrapped round the torso (right shoulder to left hip), buckle, plus the belt
   const cr = info.chestRad(0.2 * k);
@@ -408,6 +411,7 @@ export function buildScarlet() {
   patch(model, H, 'schair', { na: seg(44, 26), nb: 16, top: () => Math.PI / 2, bot: tab([[0, 0.58], [0.45, 0.5], [0.85, 0.08], [1.2, -0.3], [1.8, -0.45], [3.14, -0.5]]), pw: 1.1,
     thick: (a, l, t) => 0.045 + 0.06 * t + 0.012 * Math.sin(a * 11 + t * 3) * t,
     post: (p, a, l, t) => { const k = sm01(0.7, 1.5, Math.abs(a)), d = sm01(0.7, 1, t) * k; p.y -= (3.4 + 0.3 * Math.sin(a * 15)) * d; p.x += Math.sin(t * 7 + a * 2) * 0.05 * d; p.x *= 1 + 0.08 * d; p.z += (Math.abs(a) < 1.5 ? 0.1 : -0.06) * d; } }, hairM, { cast: true });
+  P(model, hj, hairCardsGeo(H, 'sc', { a0: 0.7, a1: 2.9, n: 16, len: 0.4, w: 0.036, thick: 0.085, lat0: 0.5, latMid: -0.3, flare: 0.02, seed: 17 }), hairCardMaterial('#8a2a16', '#e0602e', { seed: 17 }), { pos: [0, H.y0, 0], cast: false });
   addEars(model, H, skin);
   // tiara: gold circlet with a crown of points across the brow
   const gold = phys(0xd2a23c, { roughness: 0.3, metalness: 0.8, emissive: 0x2a1a06, emissiveIntensity: 1 });

@@ -10,6 +10,7 @@ import {
   fabricNormal, grainNormal, drawTex, Tendril,
 } from './common.js';
 import { P, addHook, buildBody, addFace, finish } from './characters.js';
+import { bakeSkinned } from './skinbake.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const lerp = THREE.MathUtils.lerp, clamp = THREE.MathUtils.clamp;
@@ -85,7 +86,7 @@ function addCape(model, joint, o) {
   const { R = 7, C = 2, len, w0, w1, anchor, mat, ph = 0 } = o;
   const geo = new THREE.PlaneGeometry(1, 1, C, R);
   const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.castShadow = true;
-  joint.add(mesh); model.parts.push(mesh); mesh.userData.mat = mat;
+  joint.add(mesh); model.parts.push(mesh); mesh.userData.mat = mat; mesh.userData.noBake = true;
   const ang = new Float32Array(R + 1).fill(0.1), rol = new Float32Array(R + 1), cp = new Float32Array((R + 1) * 3);
   addHook(model, (c) => {
     const dt = c.dt, v = c.vl;
@@ -306,7 +307,7 @@ function buildLokiImpl(illusion) {
   const sc = new THREE.Group();
   const stM = illusion ? Mt.gold : metal(0xcfa030, { roughness: 0.25 });
   const gemM = illusion ? Mt.gold : glow(0x58ff9a, 3);
-  const mk = (geo, mat, o) => { const m = new THREE.Mesh(geo, mat); m.position.set(...(o.pos || [0, 0, 0])); if (o.rot) m.rotation.set(...o.rot); if (o.scale) m.scale.set(...o.scale); m.castShadow = !illusion; sc.add(m); model.parts.push(m); m.userData.mat = mat; return m; };
+  const mk = (geo, mat, o) => { const m = new THREE.Mesh(geo, mat); m.position.set(...(o.pos || [0, 0, 0])); if (o.rot) m.rotation.set(...o.rot); if (o.scale) m.scale.set(...o.scale); m.castShadow = !illusion; m.userData.noBake = true; sc.add(m); model.parts.push(m); m.userData.mat = mat; return m; };
   mk(cylGeo(0.016 * k, 0.018 * k, 1.6 * k, 8), stM, { pos: [0, 0.3 * k, 0] });
   mk(coneGeo(0.06 * k, 0.32 * k, 4), stM, { pos: [0, 1.28 * k, 0] });
   mk(boxGeo(0.012 * k, 0.26 * k, 0.1 * k), stM, { pos: [0, 1.1 * k, 0], rot: [0, 0, 0] });
@@ -326,6 +327,7 @@ function buildLokiImpl(illusion) {
     model.group.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     for (const p of model.parts) p.castShadow = false;
   }
+  if (!illusion) bakeSkinned(model);
   return finish(model);
 }
 export function buildLoki() { return buildLokiImpl(false); }
@@ -561,6 +563,7 @@ export function buildCarnage() {
     const out = c.st === 'dead' ? 0.4 : 1;
     tongue.update((u, o) => { o.set(Math.sin(c.tm * 7 + u * 6) * 0.02 * u, H.y0 - hr * 0.55 - u * 0.2 * out + Math.sin(c.tm * 3 + u * 4) * 0.02 * u, hr * H.sz * 0.88 + u * 0.24 * out); });
   }, () => { tends.forEach((x) => x.t.dispose()); whips.forEach((x) => x.t.dispose()); tongue.dispose(); });
+  bakeSkinned(model);
   return finish(model);
 }
 

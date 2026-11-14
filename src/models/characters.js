@@ -9,7 +9,7 @@ import {
 } from './common.js';
 
 import { bakeSkinned } from './skinbake.js';
-import { skullPoint, SKULL_DEFAULT, skullGeo, shellGeo, tab, ribbonGeo, skullMetres, faceMaterial, hairMaterial, earsGeo } from './face.js';
+import { skullPoint, SKULL_DEFAULT, skullGeo, shellGeo, tab, ribbonGeo, skullMetres, faceMaterial, hairMaterial, earsGeo, hairCardsGeo, hairCardMaterial } from './face.js';
 
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const _dv = new V3(), _sv = new V3();
@@ -184,9 +184,9 @@ export function buildBody(model, s) {
     // deltoid: teardrop cap over the shoulder, blends into the upper arm
     if (!s.noShoulderBall) P(model, sh, sphereGeo(1, SS, 10), mt('shoulder'), { slot: sl('shoulder'), pos: [side * u0 * 0.22, -0.012 * k, -0.004 * k], rot: [0, 0, -side * 0.18], scale: [u0 * sb * 1.12, u0 * sb * 1.55, u0 * sb * 1.2] });
     P(model, sh, muscleLimb('arm', d.upper, u0, u1, MU, SL), mt('upperArm'), { slot: sl('upperArm') });
-    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 0.95, u1 * 1.0, u1 * 0.95] });
+    P(model, el, sphereGeo(1, 10, 8), mt('upperArm'), { slot: sl('upperArm'), scale: [u1 * 0.8, u1 * 0.86, u1 * 0.8] });
     P(model, el, muscleLimb('fore', d.fore, f0 * 1.08, f1, MU, SL), mt('foreArm'), { slot: sl('foreArm') });
-    P(model, wr, handGeo(hand[0] * k * 0.92, hand[1] * k * 1.12, hand[2] * k * 1.0, s.fingers !== false, s.fist ?? 0.35), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.15, 0.0] });
+    P(model, wr, handGeo(hand[0] * k * 0.86, hand[1] * k * 1.02, hand[2] * k * 0.94, s.fingers !== false, s.fist ?? 0.35), mt('hand'), { slot: sl('hand'), pos: [0, -d.hand * 0.15, 0.0] });
   }
   // legs
   const L = s.leg || {};
@@ -196,7 +196,7 @@ export function buildBody(model, s) {
     const th = j[side > 0 ? J.TL : J.TR], kn = j[side > 0 ? J.KL : J.KR], ft = j[side > 0 ? J.FL : J.FR];
     const MU = s.muscle ?? 1;
     P(model, th, muscleLimb('thigh', d.thigh, t0 * 1.04, t1, MU, SL), mt('thigh'), { slot: sl('thigh') });
-    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 0.9, t1 * 1.0, t1 * 0.95] });
+    P(model, kn, sphereGeo(1, 10, 8), mt('thigh'), { slot: sl('thigh'), scale: [t1 * 0.78, t1 * 0.86, t1 * 0.82] });
     P(model, kn, muscleLimb('shin', d.shin, s0 * 1.05, s1, MU, SL), mt('shin'), { slot: sl('shin') });
     P(model, ft, footGeo(foot[0] * k * 1.05, d.footH * 1.02, foot[2] * k * 0.95, seg(12, 8)), mt('foot'), { slot: sl('foot'), pos: [0, 0, foot[2] * k * 0.2] });
   }
@@ -254,27 +254,30 @@ export function finish(model, variant) {
 
 // ================================================================== SPIDER-MAN
 const SPIDER_VARIANTS = () => {
-  const nS = new V2(0.85, 0.85);
-  const suit = (kind, o = {}) => withRim(phys(0xffffff, {
-    map: webTexture(kind), normalMap: webNormal(kind), normalScale: new V2(1.25, 1.25), roughness: 0.5, metalness: 0.06,
-    sheen: 1, sheenRoughness: 0.45, sheenColor: new THREE.Color(0x8fa2ff), clearcoat: 0.18, clearcoatRoughness: 0.45, ...o,
-  }), 0xa8c0ff, 0.16);
-  const sym = (id, kind = 'black') => symMat({ id, map: webTexture(kind), normalMap: webNormal(kind), normalScale: 1.1, color: 0xffffff });
-  const symPlain = symMat({ id: 'p', normalMap: fabricNormal(5, 0.5, 'symfab'), normalScale: 0.5 });
-  const eyeW = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.2 });
-  const emb = std(0xffffff, { map: emblemTexture('#ffffff'), transparent: true, alphaTest: 0.4, roughness: 0.4, emissive: 0xffffff, emissiveIntensity: 0.15, side: THREE.DoubleSide });
-  const rim = std(0x050505, { roughness: 0.4 });
-  const cloth = (color, o = {}) => withRim(phys(color, { roughness: 0.55, normalMap: fabricNormal(6, 0.55, 'spfab'), normalScale: nS, sheen: 0.8, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xff9aa0), ...o }), 0xa8c0ff, 0.12);
+  const nS = new V2(0.8, 0.8);
+  // matte stretch fabric: low sheen tinted by the suit colour (no white/lavender wash), no clearcoat
+  const suit = (kind, sheen, o = {}) => withRim(phys(0xffffff, {
+    map: webTexture(kind), normalMap: webNormal(kind), normalScale: new V2(1.15, 1.15), roughness: 0.68, metalness: 0,
+    sheen: 0.6, sheenRoughness: 0.6, sheenColor: new THREE.Color(sheen), ...o,
+  }), sheen, 0.07);
+  const sym = (id, kind = 'black') => symMat({ id, map: webTexture(kind), normalMap: webNormal(kind), normalScale: 1.1, color: 0xffffff, rough: 0.34, clearcoat: 0.55, rimK: 0.12, rim: 0x5a6a9a });
+  const symPlain = symMat({ id: 'p', normalMap: fabricNormal(5, 0.5, 'symfab'), normalScale: 0.5, rough: 0.34, clearcoat: 0.55, rimK: 0.12, rim: 0x5a6a9a });
+  const eyeW = std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.4, roughness: 0.18 });
+  const emb = std(0xffffff, { map: emblemTexture('#f4f4f4', 'adv'), transparent: true, alphaTest: 0.4, roughness: 0.62, emissive: 0xffffff, emissiveIntensity: 0.06, side: THREE.DoubleSide });
+  const embSym = std(0xffffff, { map: emblemTexture('#f2f2f2', 'advjag'), transparent: true, alphaTest: 0.4, roughness: 0.5, emissive: 0xffffff, emissiveIntensity: 0.12, side: THREE.DoubleSide });
+  const rim = std(0x050505, { roughness: 0.45 });
+  const cloth = (color, sheen, o = {}) => withRim(phys(color, { roughness: 0.7, normalMap: fabricNormal(6, 0.45, 'spfab'), normalScale: nS, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(sheen), ...o }), sheen, 0.06);
+  const leather = (color) => phys(color, { roughness: 0.5, normalMap: grainNormal('spboot', 4, 1.6), normalScale: new V2(0.6, 0.6) });
   return {
     classic: {
-      torso: suit('torso'), arms: suit('red'), legs: suit('blue'),
-      boots: cloth(0xa00c1a), gloves: cloth(0xb40f1e),
-      head: suit('red', { roughness: 0.42 }),
-      eyes: eyeW, rim, emblem: emb, belt: cloth(0x12204f),
+      torso: suit('torso', 0x7a2a30), arms: suit('red', 0x7a2a30), legs: suit('blue', 0x2a3a7a),
+      boots: cloth(0x8f0c18, 0x7a2a30), gloves: cloth(0x9a0e1c, 0x7a2a30),
+      head: suit('red', 0x7a2a30, { roughness: 0.6 }),
+      eyes: eyeW, rim, emblem: emb, belt: cloth(0x101c4a, 0x2a3a7a),
     },
     symbiote: {
       torso: sym('t'), arms: sym('a'), legs: sym('l'), boots: symPlain, gloves: symPlain, head: sym('h'),
-      eyes: std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.1, roughness: 0.2 }), rim: std(0x000000, { roughness: 0.3 }), emblem: emb, belt: symPlain,
+      eyes: std(0xffffff, { emissive: 0xffffff, emissiveIntensity: 1.0, roughness: 0.2 }), rim: std(0x000000, { roughness: 0.3 }), emblem: embSym, belt: symPlain,
     },
   };
 };
@@ -285,7 +288,7 @@ export function buildSpiderMan(opts = {}) {
   const model = new ProcModel('spiderman', rig, { prof: { stance: 'ready', cadence: 1.05, stride: 1.05, lean: 1.1, flipDodge: true, shoot: 'web', aimStyle: 'web' } });
   model.variants = SPIDER_VARIANTS();
   const v0 = model.variants.classic;
-  const SPpts = [[0.006, -0.026], [0.060, -0.016], [0.108, 0.026], [0.100, 0.056], [0.046, 0.040], [0.006, 0.012]];
+  const SPpts = [[0.012, -0.034], [0.050, -0.034], [0.100, -0.006], [0.122, 0.040], [0.104, 0.072], [0.052, 0.054], [0.012, 0.014]];
   const SPskull = { brow: 0.025, socket: 0, lid: 0, nose: 0.05, noseW: 1.3, cheek: 0.03, taper: 0.2, jawBone: 0.02, chin: 0.035, lips: 0, muzzle: 0, hollow: 0.15, back: 0.03, fore: 0.01, temple: 0.01,
     sock: { pts: SPpts, depth: 0, soft: 0.009, R: 0.108, sx: 0.9, sy: 1.08 } };
   const info = buildBody(model, {
@@ -299,12 +302,12 @@ export function buildSpiderMan(opts = {}) {
     foot: [0.05, 0.04, 0.13], hand: [0.036, 0.048, 0.045], fingers: false,
     pelvis: [0.34, 0.2, 0.24],
   });
-  addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0, lift: 0.0006, rimGrow: 1.2, bezel: 0.004 });
+  addEyes(model, info.headInfo, 'spider', v0.eyes, v0.rim, { slot: 'eyes', depth: 0, lift: 0.0006, rimGrow: 1.3, bezel: 0.005 });
   // chest + back emblem
   const cr = info.chestRad(0.2 * dims.k);
-  P(model, model.j[J.CH], curvedPlane(0.2 * dims.k * 1.55, 0.22 * dims.k * 1.5, cr.rx, cr.rz, 0.003), v0.emblem, { slot: 'emblem', pos: [0, 0.2 * dims.k, 0], cast: false });
-  const cb = info.chestRad(0.26 * dims.k);
-  const back = P(model, model.j[J.CH], curvedPlane(0.1 * dims.k * 1.5, 0.12 * dims.k * 1.5, cb.rx, cb.rz, 0.003), v0.emblem, { slot: 'emblem', pos: [0, 0.26 * dims.k, 0], rot: [0, Math.PI, 0], cast: false });
+  P(model, model.j[J.CH], curvedPlane(0.165 * dims.k * 2.0, 0.2 * dims.k * 1.85, cr.rx, cr.rz, 0.003), v0.emblem, { slot: 'emblem', pos: [0, 0.205 * dims.k, 0], cast: false });
+  const cb = info.chestRad(0.22 * dims.k);
+  P(model, model.j[J.CH], curvedPlane(0.17 * dims.k * 2.0, 0.2 * dims.k * 1.9, cb.rx, cb.rz, 0.003), v0.emblem, { slot: 'emblem', pos: [0, 0.22 * dims.k, 0], rot: [0, Math.PI, 0], cast: false });
   // web shooters
   for (const side of [1, -1]) P(model, model.j[side > 0 ? J.WL : J.WR], cylGeo(0.036 * dims.k, 0.033 * dims.k, 0.07 * dims.k, 10), std(0x1a1a24, { metalness: 0.5, roughness: 0.4 }), { pos: [0, 0.02, 0] });
 
@@ -428,8 +431,8 @@ export function buildIronMan() {
   const rig = buildRig(dims, 1.1);
   const model = new ProcModel('ironman', rig, { prof: { stance: 'relaxed', flyStyle: 'iron', hover: 'iron', flipDodge: false, cadence: 0.92, stride: 0.95, armSwing: 0.8, shoot: 'palm', lean: 1.0, landStyle: 'hero' } });
   const pm = armorMaps(1), nS = new V2(0.8, 0.8);
-  const red = withRim(phys(0xa50e18, { map: pm.map, roughness: 0.3, metalness: 0.88, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.4, sheenColor: new THREE.Color(0xff6a50), sheenRoughness: 0.3 }), 0xffc9a0, 0.14);
-  const gold = withRim(phys(0xe0aa3a, { map: pm.map, roughness: 0.26, metalness: 0.96, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.7, clearcoatRoughness: 0.08 }), 0xfff0c0, 0.12);
+  const red = withRim(phys(0xa50e18, { map: pm.map, roughness: 0.42, metalness: 0.72, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.45, clearcoatRoughness: 0.22 }), 0xa05040, 0.05);
+  const gold = withRim(phys(0xe0aa3a, { map: pm.map, roughness: 0.36, metalness: 0.88, roughnessMap: pm.rough, normalMap: pm.normal, normalScale: nS, clearcoat: 0.3, clearcoatRoughness: 0.25 }), 0xa08040, 0.05);
   const dark = std(0x24242a, { metalness: 0.7, roughness: 0.45 });
   const IMskull = { brow: 0.02, socket: 0, lid: 0, nose: 0.1, noseW: 1.2, cheek: 0.03, taper: 0.26, jawBone: 0.03, chin: 0.06, lips: 0, muzzle: 0.01, hollow: 0.1, back: 0.03, fore: 0.01, temple: 0.01 };
   const info = buildBody(model, {
@@ -618,6 +621,8 @@ export function buildThor() {
   const beardTop = tab([[0, -0.6], [0.3, -0.57], [0.6, -0.44], [1.0, -0.18], [1.45, 0.02]]), beardBot = tab([[0, -1.04], [0.5, -0.98], [1.0, -0.82], [1.45, -0.5]]);
   patch(model, H, 'thorbeard', { aMin: -1.45, aMax: 1.45, na: seg(30, 18), nb: 10, top: beardTop, bot: beardBot, pw: 1.1, thick: (a, l, t) => 0.04 + 0.05 * t, post: (p, a, l, t) => { p.y -= 0.34 * t * t * (1 - Math.abs(a) / 1.7); p.z += 0.05 * t * (1 - Math.abs(a) / 1.6); } }, hair, { cast: true });
   patch(model, H, 'thorstache', { aMin: -0.52, aMax: 0.52, na: 12, nb: 4, top: () => -0.4, bot: tab([[0, -0.49], [0.3, -0.47], [0.52, -0.5]]), thick: () => 0.05 }, hair);
+  // layered alpha strand cards over the shell: long locks past the shoulders
+  P(model, model.j[J.HD], hairCardsGeo(H, 'thor', { a0: 0.95, a1: 2.9, n: 11, len: 0.3, w: 0.034, thick: 0.075, lat0: 0.5, latMid: -0.25, seed: 3 }), hairCardMaterial('#c9993a', '#f2d27a', { seed: 3 }), { pos: [0, H.y0, 0], cast: false });
   addEars(model, H, skin);
 
   // shoulder cape clasps
