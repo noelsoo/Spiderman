@@ -112,9 +112,10 @@ const PROF = {
 function stance(p, f, legs = true) {
   switch (f.stance) {
     case 'ready':
-      p.set(AL, -0.35, 0, 0.22); p.set(AR, -0.35, 0, -0.22); p.set(EL, -1.35); p.set(ER, -1.35);
-      p.set(CH, 0.1, -0.1); p.set(SP, 0.05, -0.15); p.set(HD, -0.08, -0.1); p.set(H, 0.06, 0.2);
-      if (legs) { p.set(TL, -0.22, 0, 0.1); p.set(TR, 0.18, 0, -0.1); p.set(KL, 0.45); p.set(KR, 0.35); }
+      // relaxed but alert: arms hang slightly away from the body with a soft elbow bend, light stagger in the legs
+      p.set(AL, 0.06, 0, 0.2); p.set(AR, -0.04, 0, -0.2); p.set(EL, -0.38); p.set(ER, -0.46);
+      p.set(CH, 0.05, -0.06); p.set(SP, 0.03, -0.08); p.set(HD, -0.04, -0.06); p.set(H, 0.03, 0.12);
+      if (legs) { p.set(TL, -0.12, 0, 0.09); p.set(TR, 0.1, 0, -0.09); p.set(KL, 0.24); p.set(KR, 0.18); }
       break;
     case 'hulk':
       p.set(AL, 0.05, 0.1, 0.5 + f.wide); p.set(AR, 0.05, -0.1, -0.5 - f.wide); p.set(EL, -0.5); p.set(ER, -0.5);
