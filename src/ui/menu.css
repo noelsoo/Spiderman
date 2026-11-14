@@ -134,6 +134,15 @@
   .hsel h2 { font-size: 24px; } .hsub { margin: 4px 0 8px; }
   .hdet { padding: 10px 14px; } .hd-stats { margin-bottom: 8px; gap: 4px; } .hdet ul { line-height: 1.4; font-size: 12px; }
 }
+/* very short viewports (800x450): the title menu must not run into the controller badge */
+@media (max-height: 520px) and (min-width: 701px) {
+  .tt-logo { width: min(300px, 100%); }
+  .title .tt-main { gap: 6px; padding-bottom: 70px; }
+  .title .btn.tt-item { padding: 5px 18px; font-size: 14px; } .title .btn.tt-item.big { font-size: 16px; }
+  .tt-desc { display: none; }
+  .title .tt-bar { padding-bottom: 8px; }
+  .title .padind small { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .tt-logo, .tt-logo *, .title .btn.tt-item, .title kbd { animation: none !important; }
 }

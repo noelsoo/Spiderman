@@ -98,3 +98,18 @@
 
 .title .tagline { margin-top: 14px; font-size: clamp(11px, 1.8vmin, 16px); letter-spacing: 0.7em; text-transform: uppercase; color: #ffe58a; font-weight: 800; text-shadow: 0 0 14px #ffb400, 0 2px 6px #000; }
 .title .menu { gap: 14px; flex-wrap: wrap; justify-content: center; }
+
+/* short viewports (800x450 and similar): keep list + details side by side and inside the screen */
+@media (max-height: 600px) {
+  .camp { max-height: 98vh; gap: 6px; }
+  .camp-h h2 { font-size: clamp(18px, 5vh, 26px); }
+  .camp-sub { margin-top: 2px; font-size: 11px; }
+  .camp-b { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 10px; }
+  .camp-list { max-height: calc(100vh - 128px); gap: 4px; }
+  .camp-det { max-height: calc(100vh - 128px); padding: 10px 14px; }
+  .camp-det h3 { font-size: 20px; margin-bottom: 6px; } .brief { font-size: 12px; margin-bottom: 8px; }
+  .mrow { padding: 5px 10px; grid-template-columns: 28px 1fr auto; gap: 8px; } .mrow .n { font-size: 18px; } .mrow .mt b { font-size: 12.5px; letter-spacing: 0.06em; } .mrow .mt small { font-size: 10px; }
+  .facts b { font-size: 14px; } .facts div { padding: 5px 2px; } .vill .vp { width: 34px; height: 34px; font-size: 18px; } .vill b { font-size: 15px; }
+  .camp-f .btn { padding: 7px 18px; font-size: 12px; min-width: 120px; }
+  .mres { padding: 14px 20px; } .mstars { font-size: 40px; margin: 0; } .flags { font-size: 12px; } .stats b { font-size: 22px; } .stats { gap: 8px; margin: 6px 0 12px; }
+}

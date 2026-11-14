@@ -1090,7 +1090,7 @@ export class HUD {
       this._senseT -= dt;
       const cam = g.camera, sr = this.$.sring;
       if (cam && this._senseT > 0) {
-        _hv.set(p.pos.x, p.pos.y + (p.height || 1.8) + 0.45, p.pos.z).project(cam);
+        _hv.set(p.pos.x, p.pos.y + (p.height || 1.8) + 0.15, p.pos.z).project(cam);
         if (_hv.z < 1) sr.style.transform = `translate(${((_hv.x * 0.5 + 0.5) * innerWidth).toFixed(1)}px, ${((-_hv.y * 0.5 + 0.5) * innerHeight).toFixed(1)}px)`;
       } else sr.classList.remove('on');
     }
