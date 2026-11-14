@@ -57,6 +57,9 @@ export class Weapons {
     this.drivebyAiming = false;
   }
 
+  /** Shop catalogue (weapons + med kit); also used by the regression suite. */
+  get catalog() { return SHOP_ITEMS; }
+
   // ===================================================================== lifecycle
   async build() {
     const g = this.game;

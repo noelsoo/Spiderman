@@ -41,6 +41,7 @@ export class Economy {
   /** Take cash; false (and nothing changes) if the player cannot afford it. */
   spend(amount) {
     amount = Math.round(amount);
+    if (!(amount >= 0)) return false;     // negative / NaN spends used to mint cash
     if (this.cash < amount) return false;
     this.cash -= amount; this.spent += amount;
     this.game.events.emit('cash', { amount: -amount, total: this.cash });
