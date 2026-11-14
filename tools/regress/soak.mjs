@@ -44,8 +44,9 @@ export const soak = [
             for (const e of g.enemies.list) if (e.alive && !qa.finite(e.pos)) { bad.push('NaN enemy ' + e.kind); break; }
           }
           g.input.keys.clear(); g.input.mouseButtons.clear();
-          return { bad };
+          return { bad, heap: +(performance.memory.usedJSHeapSize / 1048576).toFixed(0), hero: g.player.id, st: g.state };
         }, { t, seed });
+        if (c.args.verbose) c.log(`t=${t + 10}s heap=${r.heap}MB hero=${r.hero} state=${r.st}`);
         c.assert(!r.bad.length, r.bad.slice(0, 3).join('; '));
         const simT = t + 10;
         if (marks.includes(simT)) {
@@ -61,7 +62,7 @@ export const soak = [
               heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null,
               geometries: mem.geometries, textures: mem.textures, programs: g.renderer.info.programs?.length ?? 0,
               sceneObjs: objs, meshes, sceneGeos: geos.size, sceneMats: mats.size, lights,
-              listeners: Object.values(g.events._map ?? g.events.listeners ?? {}).reduce((a, l) => a + (l?.length ?? l?.size ?? 0), 0),
+              listeners: [...g.events.map.values()].reduce((a, l) => a + l.size, 0),
               cars: g.vehicles.list.length, peds: g.peds.list?.length, enemies: g.enemies.list.length, state: g.state,
             };
           });

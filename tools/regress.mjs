@@ -129,6 +129,7 @@ for (const map of maps) {
     page.setDefaultTimeout(600000);
     errors.length = 0;
     page.on('console', (m) => { const t = m.text(); consoleLog.push(t); if (m.type() === 'error' && !/Failed to load resource/.test(t)) errors.push(t); });
+    page.on('crash', () => console.log('  !! page crashed'));
     page.on('pageerror', (e) => errors.push('pageerror: ' + String(e.stack || e).slice(0, 500)));
     page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
     await page.addInitScript(({ s, map }) => {
