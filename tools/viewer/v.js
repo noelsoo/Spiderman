@@ -20,12 +20,13 @@ const info = [];
 const t0 = performance.now();
 const models = names.map((id, i) => {
   const m = buildCharacter(id, {});
+  if (qs.get('variant')) m.setVariant(qs.get('variant'));
   m.group.position.x = i * 3; scene.add(m.group);
-  for (let k = 0; k < (qs.get('state') ? 20 : 2); k++) m.update(0.016, { state: animState, speed: 0, t: k * 0.016 }, {});
+  for (let k = 0; k < (qs.get('state') ? 20 : 2); k++) m.update(0.016, { state: animState, speed: 0, t: k * 0.016 }, { vel: new THREE.Vector3(), yaw: 0 });
   if (qs.get('tint')) m.setTint(0xffffff, Number(qs.get('tint')));
-  let tris = 0; const top = []; m.group.traverse((o) => { if (o.isMesh) { const g = o.geometry; const n = (g.index ? g.index.count : g.attributes.position.count) / 3; tris += n; top.push([Math.round(n), o.userData.slot || o.parent?.name || '?']); } });
+  let tris = 0, meshes = 0; const top = []; m.group.traverse((o) => { if (o.isMesh) { if (o.visible) meshes++; const g = o.geometry; const n = (g.index ? g.index.count : g.attributes.position.count) / 3; tris += n; top.push([Math.round(n), o.userData.slot || o.parent?.name || '?']); } });
   top.sort((a, b) => b[0] - a[0]);
-  info.push({ id, tris: Math.round(tris), h: m.height, top: qs.get('top') ? top.slice(0, 14) : undefined });
+  info.push({ id, meshes, tris: Math.round(tris), h: m.height, top: qs.get('top') ? top.slice(0, 14) : undefined });
   return m;
 });
 r.setScissorTest(true);

@@ -229,6 +229,7 @@ export class Hero {
     if (fromPos) {
       _tmp.subVectors(this.pos, fromPos).setY(0).normalize();
       this.vel.addScaledVector(_tmp, 6 / this.mass); this.vel.y += 3 / this.mass;
+      this.model.hitReact?.(_tmp, Math.min(1.3, 0.5 + amount / 40));
     }
     this.game.hud?.damageFlash?.();
     this.game.input.rumble(0.7, 0.4, 180);
