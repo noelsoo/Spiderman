@@ -2,6 +2,7 @@
 // ears, hair caps / strand ribbons, beard patches. All geometry lives in unit-ellipsoid coordinates and is
 // scaled by the head mesh transform (R*sx, R*sy, R*sz), so it can be cached and shared between instances.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { G, M, phys, std, seg, rng, texRes, mkCanvas, mkTex, mkNormalTex, heightToNormal, heightOf, sharedTexCache as texCache } from './common.js';
 
 const V3 = THREE.Vector3;
@@ -380,5 +381,48 @@ export function earsGeo(H, spec) {
     }
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
     return g;
+  });
+}
+
+
+// ------------------------------------------------------------------ layered strand cards
+/** alpha-tested strand-card texture: many fine strands, tapered tips, per-strand colour variation */
+function cardTexture(base, hi, seed) {
+  const key = 'card' + base + hi + seed;
+  if (texCache.has(key)) return texCache.get(key);
+  const W = 128, H = 256, [c, ctx] = mkCanvas(W, H), r = rng(seed * 13 + 1);
+  ctx.clearRect(0, 0, W, H);
+  const b = new THREE.Color(base), h = new THREE.Color(hi);
+  for (let i = 0; i < 46; i++) {
+    const x = (i + 0.5) / 46 * W + (r() - 0.5) * 2, tip = H * (0.62 + r() * 0.38), w = 1.6 + r() * 2.2;
+    const col = b.clone().lerp(h, Math.pow(r(), 2) * 0.9).multiplyScalar(0.7 + r() * 0.5);
+    ctx.fillStyle = '#' + col.getHexString();
+    ctx.beginPath(); ctx.moveTo(x - w, 0); ctx.lineTo(x + w, 0); ctx.quadraticCurveTo(x + w * 0.9 + (r() - 0.5) * 4, tip * 0.6, x + (r() - 0.5) * 3, tip); ctx.quadraticCurveTo(x - w * 0.9, tip * 0.6, x - w, 0); ctx.fill();
+  }
+  const t = mkTex(c); t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; texCache.set(key, t); return t;
+}
+export function hairCardMaterial(base, hi, o = {}) {
+  const seed = o.seed || 5;
+  return M('hairc' + base + hi + seed + (o.sheen ?? ''), () => new THREE.MeshStandardMaterial({
+    map: cardTexture(base, hi, seed), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.62, metalness: 0,
+  }));
+}
+/** one merged geometry of tapered strand cards falling from the scalp. spec = { a0, a1, n, lat0, latMid, len, lenJit, w, layers, thick, flare } (head-local metres) */
+export function hairCardsGeo(H, key, spec) {
+  const { a0 = 0.8, a1 = 2.4, n = 20, lat0 = 0.55, latMid = -0.3, len = 0.2, lenJit = 0.35, w = 0.03, layers = 2, thick = 0.04, flare = 0.014, sides = true, seed = 3 } = spec;
+  return G('hcards' + key + H.R + H.sx + H.sy + H.sz, () => {
+    const r = rng(seed * 7 + 2), parts = [];
+    for (let side = sides ? -1 : 1; side <= 1; side += 2) for (let L = 0; L < layers; L++) for (let i = 0; i < n; i++) {
+      const a = side * (a0 + (a1 - a0) * ((i + r() * 0.8) / n)), la = lat0 - L * 0.05 - r() * 0.08, th = thick + L * 0.022 + r() * 0.01;
+      const ln = len * (1 - lenJit * r()) * (1 + L * 0.06);
+      const p0 = skullMetres(H, H.skull, a, la, th), p1 = skullMetres(H, H.skull, a, latMid, th + 0.07 + L * 0.02);
+      const sa = Math.sin(a), ca = Math.cos(a), fl = flare * (0.6 + r() * 0.8) * (r() < 0.5 ? -1 : 1);
+      const p2 = [p1.x + sa * 0.012 + fl * 0.5, p1.y - ln * 0.5, p1.z + ca * 0.01 - (ca < 0 ? 0.012 : 0)];
+      const p3 = [p1.x + sa * 0.022 + fl, p1.y - ln, p1.z + ca * 0.014 - (ca < 0 ? 0.02 : 0)];
+      const wd = w * (0.7 + r() * 0.7);
+      parts.push(ribbonGeo(key + side + L + i + H.R, [[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z], p2, p3], wd * 0.7, wd, 0.2).clone());
+    }
+    for (const g of parts) for (const nm of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(nm)) g.deleteAttribute(nm);
+    return mergeGeometries(parts);
   });
 }
