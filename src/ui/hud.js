@@ -308,6 +308,7 @@ export class HUD {
     const base = Math.min(w / (portrait ? 640 : 1280), h / 720);
     const ui = Math.max(0.55, Math.min(2.5, base)) * (this._hs || 1);
     this.root.style.setProperty('--ui', ui.toFixed(3));
+    this.root.style.setProperty('--hs', String(this._hs));
     this._ui = ui;
   }
 
