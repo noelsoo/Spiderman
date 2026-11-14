@@ -116,7 +116,7 @@ export class SpiderMan extends Hero {
     this.lines = this.linesClassic; for (const l of Object.values(this.linesSym)) l.hide();
     this.bs.reset(); this.arms.reset(); this.parryFx.hide(); this.wind.reset(); this.props.reset();
     for (const l of this.slingLines) l.hide();
-    this.chordT = 0; this.chord = null; this.sChord = false; this.ultHold = 0; this.healT = 0; this.loop = null; this.glidePitch = 0; this.plQueued = false; this.plT = 0; this.cornerT = 0;
+    this.underT = 0; this.cornerT = 0; this.cornerDir = new THREE.Vector3(); this.spHold = 0; this._healDone = false; this.chordT = 0; this.chord = null; this.sChord = false; this.ultHold = 0; this.healT = 0; this.loop = null; this.glidePitch = 0; this.plQueued = false; this.plT = 0; this.cornerT = 0;
     this.anchor = new THREE.Vector3(); this.ropeLen = 20; this.ropeTarget = 20; this.swingT = 0;
     this.wingAssist = false; this.wingCd = 0; this.wingT = 0; this.noAnchorT = 0;
     this.hand = 0; this.swingLock = 0; this.swingTry = 0; this.reattach = 0;
@@ -180,10 +180,10 @@ export class SpiderMan extends Hero {
       { action: 'special', key: 'special', label: 'Upshot  (R1 + Jump)', cooldown: G.frac(5) },
       { action: 'special', key: 'special', label: 'Ricochet Web  (R1 + Dodge)', cooldown: G.frac(3) },
       { action: 'special', key: 'special', label: 'Sonic Burst  (R1 + L1)', cooldown: G.frac(7) },
-      { action: 'ability2', key: 'ability2', label: 'Symbiote Suit  (hold: Heal, 1 focus bar)', cooldown: this.cooldownFrac('suit'), active: sym },
+      { action: 'ability2', key: 'ability2', label: 'Symbiote Suit', cooldown: this.cooldownFrac('suit'), active: sym },
       { action: 'dodge', key: 'dodge', label: 'Dodge / Parry (on RED ring)', cooldown: this.cooldownFrac('dodge'), active: this.parryFx.red > 0 },
       { action: 'aim', key: 'aim', label: G.label(), cooldown: G.frac(), active: this.aiming },
-      { action: 'ultimate', key: 'ultimate', label: 'Web Bomb  (hold Q: Heal)', cooldown: 1 - this.focus / 100, active: this.focus >= 100 },
+      { action: 'ultimate', key: 'ultimate', label: 'Web Bomb (press at 100) / hold: Heal 1 bar', cooldown: 1 - this.focus / 100, active: this.focus >= 100 },
     ];
   }
 
@@ -977,6 +977,24 @@ export class SpiderMan extends Hero {
     this.vel.y = Math.max(this.vel.y, Math.min(sp * 0.6, 12));
     this.setAnim('wallrun', sp); this._play('land', { volume: 0.4 });
   }
+  /** Wall run corner turn: running sideways past the edge of a building wraps you onto the adjacent face. */
+  _cornerTurn(sgn) {
+    const n = this.wallN, mx = -n.z * sgn, mz = n.x * sgn;
+    const o = _x.set(this.pos.x + mx * 0.9 - n.x * 1.3, this.pos.y + this.height * 0.5, this.pos.z + mz * 0.9 - n.z * 1.3);
+    const hit = this.game.physics.raycast(o, _y.set(-mx, 0, -mz), 2.2, { ignoreGround: true });
+    if (!hit || Math.abs(hit.normal.y) > 0.3 || hit.normal.x * mx + hit.normal.z * mz < 0.7 || hit.box?.data?.type === 'prop') return false;
+    if (hit.box && hit.box.max.y < this.pos.y + 1.5) return false;
+    const sp = Math.max(6, Math.hypot(this.vel.x, this.vel.z));
+    this.cornerDir ||= new THREE.Vector3(); this.cornerDir.set(-n.x, 0, -n.z); this.cornerT = 0.7;
+    const nn = new THREE.Vector3(hit.normal.x, 0, hit.normal.z).normalize();
+    this.pos.set(hit.point.x + nn.x * (this.radius + 0.05), this.pos.y, hit.point.z + nn.z * (this.radius + 0.05));
+    this.wallN.copy(nn); this.wallNormal.copy(nn);
+    this.vel.set(this.cornerDir.x * sp, this.vel.y * 0.5, this.cornerDir.z * sp);
+    this.wallLost = 0; this._wallK = 0; this._wallBox = hit.box; this.yaw = Math.atan2(-nn.x, -nn.z);
+    this._fx('text', _a.set(this.pos.x, this.pos.y + 2.2, this.pos.z), 'CORNER', 0xffffff, { size: 0.8, life: 0.5 });
+    this._play('whoosh', { volume: 0.4 });
+    return true;
+  }
   _leaveWall() {
     this.state = 'free'; this.wallLock = 0.25; this.gravityScale = 1; this.sling = null;
     this.yaw = Math.atan2(this.wallN.x, this.wallN.z);
@@ -1030,6 +1048,7 @@ export class SpiderMan extends Hero {
     let side = mag > 0.05 ? wish.dot(t) : 0;
     if (mag > 0.05 && Math.abs(up) < 0.35 && Math.abs(side) < 0.35) { up = 0; side = 0; }
     if (aimHold || this.sling) { up = 0; side = 0; }
+    if (this.cornerT > 0 && mag > 0.05) { this.cornerT -= dt; side = clamp(this.cornerDir.x * t.x + this.cornerDir.z * t.z, -1, 1); up = Math.min(up, 0.3); }   // keep running round the corner
     const speed = input.down('sprint') ? TUNE.wallSprint : this.symbiote ? BS.wallSpeed : TUNE.wallSpeed;
     const tx = t.x * side * speed, tz = t.z * side * speed, ty = up * speed;
     const acc = 70 * dt;
@@ -1047,6 +1066,7 @@ export class SpiderMan extends Hero {
       return;
     }
     if (this.onGround && up < -0.1) { this.state = 'free'; this.wallLock = 0.3; this.gravityScale = 1; this.sling = null; return; }
+    if (this.wallLost > 0.04 && Math.abs(side) > 0.3 && !this.onGround && this._cornerTurn(Math.sign(side))) return;
     if (this.wallLost > 0.15) { this._leaveWall(); return; }
 
     // speed along the wall plane (ignores the stick-to-wall component)
@@ -1570,6 +1590,14 @@ export class SpiderMan extends Hero {
     else this.dodgeDir.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     if (this.state === 'swing') { this._endSwing(false); this.swingLock = 0.25; }
     if (this.state === 'wall') { this._leaveWall(); }
+    // dodge THROUGH an enemy (stick toward it, point blank): slide under / vault past it and come out behind
+    if (this.state === 'free') {
+      for (const e of this.game.enemies?.list ?? []) {
+        if (!e.alive || e.isBoss) continue;
+        const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z, d = Math.hypot(dx, dz);
+        if (d < 3.2 && d > 0.1 && (dx * this.dodgeDir.x + dz * this.dodgeDir.z) / d > 0.75) { this.underT = 0.5; this._fx('text', _a.set(this.pos.x, this.pos.y + 2.3, this.pos.z), 'UNDER', 0xffffff, { size: 0.8, life: 0.5 }); break; }
+      }
+    }
     if (this.state === 'zip') { this.lines.zip.hide(); this.state = 'free'; }
     if (this.state === 'glide') { this.state = 'free'; }
     this.state = 'free'; this.gravityScale = 1;
@@ -1585,7 +1613,8 @@ export class SpiderMan extends Hero {
   _updateDodge(dt) {
     this.dodgeT -= dt;
     const k = clamp(this.dodgeT / TUNE.dodgeTime, 0, 1);
-    const sp = 6 + 12 * k;
+    this.underT = Math.max(0, (this.underT || 0) - dt);
+    const sp = (6 + 12 * k) * (this.underT > 0 ? 1.6 : 1);
     this.vel.x = this.dodgeDir.x * sp; this.vel.z = this.dodgeDir.z * sp;
     if (this.state === 'free') this.setAnim('dodge', sp);
   }

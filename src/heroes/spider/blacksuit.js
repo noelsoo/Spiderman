@@ -33,7 +33,7 @@ export const BS = {
   swingMax: 60, swingPump: 11.5, launchUp: 24, wallSpeed: 11, glideSpeed: 25, diveSpeed: 52, diveFall: -32,
   reach: 4.0, lungeRange: 10,
   rageHit: 3.2, rageDrain: 100 / 14, rageIdle: 2.5, rageIdleDecay: 3, rageMul: 1.35, rageSpeed: 1.1, rageHp: 1.2,
-  strikeCd: 4.5, tearCd: 9, rampageCd: 7, whipCd: 0.5, grabCd: 5.5, decoyCd: 2.5, chord: 0.3,
+  strikeCd: 4.5, tearCd: 9, rampageCd: 7, punchCd: 6, whipCd: 0.5, grabCd: 5.5, decoyCd: 2.5, chord: 0.3,
   transform: 0.6,
 };
 
@@ -619,6 +619,7 @@ export class BlackSuit {
     const C = this.chord; C.t += dt;
     if (input.pressed('attack')) { input.consume('attack'); this.chord = null; this.tear(); return false; }
     if (input.pressed('jump')) { input.consume('jump'); this.chord = null; this.rampage(); return false; }
+    if (input.pressed('special')) { input.consume('special'); this.chord = null; h.pullUsed = true; h.holdSpecial = 0; this.punch(); return false; }
     if (!input.down('ability') || C.t >= BS.chord) { this.chord = null; this.strike(input); }
     return false;
   }
@@ -632,6 +633,14 @@ export class BlackSuit {
   tear() {
     const h = this.h;
     if (!P.tendrilTear(h, 'bsTear', BS.tearCd)) h._fx('text', _o.set(h.pos.x, h.pos.y + 2.3, h.pos.z), (h.cooldowns.bsTear || 0) > 0 ? 'COOLDOWN' : 'NO TARGETS', '#9fb0c8', { size: 0.8, life: 0.6 });
+  }
+  /** L1 + R1: Symbiote Punch, an instant wide tendril blast (the held attack charges a bigger one). */
+  punch() {
+    const h = this.h;
+    if (!h.useCooldown('bsPunch', BS.punchCd)) { h._fx('text', _o.set(h.pos.x, h.pos.y + 2.3, h.pos.z), 'COOLDOWN', '#9fb0c8', { size: 0.8, life: 0.6 }); return false; }
+    h._fx('text', _o.set(h.pos.x, h.pos.y + 2.8, h.pos.z), 'SYMBIOTE PUNCH', 0xc8a0ff, { size: 1.2, life: 0.9 });
+    P.symbiotePunch(h, 0.8);
+    return true;
   }
   /** Ground eruption: AoE knock-up, then a juggle hit on everything still airborne. */
   rampage() {
@@ -651,7 +660,7 @@ export class BlackSuit {
       h.tendrils.spawn({ from: new THREE.Vector3(bx, by, bz), to: new THREE.Vector3(bx + Math.cos(a) * 0.8, by + rnd(2.5, 4.5), bz + Math.sin(a) * 0.8), life: 0.55, grow: 0.1, width: 0.2, wiggle: 0.25, arc: 0.0, delay: i * 0.012 });
     }
     h._impact(0.9, true); g.cam.shake(0.5);
-    g.fx.text(_o.set(h.pos.x, h.pos.y + 2.8, h.pos.z), 'RAMPAGE', 0xc8a0ff, { size: 1.3, life: 0.9 });
+    g.fx.text(_o.set(h.pos.x, h.pos.y + 2.8, h.pos.z), 'SYMBIOTE BLAST', 0xc8a0ff, { size: 1.3, life: 0.9 });
     for (const e of hits) P.symImpact(h, e.center, 0.8);
     h._later(0.42, () => {
       for (const e of hits) {
@@ -938,14 +947,15 @@ export class BlackSuit {
     if (h.aiming) list.push({ action: 'ability', key: 'ability', label: 'Next Power', cooldown: 0 });
     else {
       list.push({ action: 'ability', key: 'ability', label: 'Symbiote Strike', cooldown: f('bsStrike') });
-      list.push({ action: 'ability', key: 'ability', label: 'Tendril Tear  + Atk', cooldown: f('bsTear') });
-      list.push({ action: 'ability', key: 'ability', label: 'Rampage  + Jump', cooldown: f('bsRampage') });
+      list.push({ action: 'ability', key: 'ability', label: 'Symbiote Yank  (L1 + Attack)', cooldown: f('bsTear') });
+      list.push({ action: 'ability', key: 'ability', label: 'Symbiote Blast  (L1 + Jump)', cooldown: f('bsRampage') });
+      list.push({ action: 'ability', key: 'ability', label: 'Symbiote Punch  (L1 + R1, hold Attack: charged)', cooldown: f('bsPunch') });
     }
     list.push(
       { action: 'ability2', key: 'ability2', label: this.raging ? 'Classic Suit  (RAGE)' : 'Classic Suit', cooldown: f('suit'), active: this.raging },
       { action: 'dodge', key: 'dodge', label: 'Symbiote Phase', cooldown: f('dodge') },
       { action: 'aim', key: 'aim', label: this.aimLabel(), cooldown: this.aimFrac(), active: h.aiming },
-      { action: 'ultimate', key: 'ultimate', label: 'Symbiote Surge', cooldown: 1 - h.focus / 100, active: h.focus >= 100 },
+      { action: 'ultimate', key: 'ultimate', label: 'Symbiote Surge  (hold: Heal 1 bar)', cooldown: 1 - h.focus / 100, active: h.focus >= 100 },
     );
     return list;
   }
