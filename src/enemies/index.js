@@ -15,6 +15,7 @@ import { rnd } from './Enemy.js';
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const MAX_ALIVE = 20;
+const HARD_CAP = 36;   // absolute ceiling on enemies in the scene, whoever spawns them (boss minions, clones, events)
 const WAVES = [
   { goons: 4, hunters: 0, cap: 4, label: 'Wave 1' },
   { goons: 6, hunters: 2, cap: 6, label: 'Wave 2' },
@@ -200,7 +201,21 @@ export class EnemyManager {
     return false;
   }
 
+  /** Keeps the scene bounded in long sessions: over the cap, the farthest non-boss enemy (dead ones first) is retired. */
+  _enforceCap() {
+    if (this.list.length < HARD_CAP) return;
+    const pp = this.game.player?.pos;
+    let pick = null, best = -1;
+    for (const e of this.list) {
+      if (e.isBoss || e.removed) continue;
+      const d = (pp ? e.pos.distanceToSquared(pp) : 0) + (e.alive ? 0 : 1e9);
+      if (d > best) { best = d; pick = e; }
+    }
+    if (pick) { pick.alive = false; pick.removed = true; }
+  }
+
   spawn(kind, pos, opts = {}) {
+    this._enforceCap();
     const wave = opts.wave ?? Math.max(1, this.stats.wave);
     let e;
     const Reg = ENEMY_KINDS.get(kind);

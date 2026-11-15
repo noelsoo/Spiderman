@@ -44,6 +44,8 @@ export const weapons = [
         qa.begin('spiderman');
         qa.put(g.player.pos.x, g.player.pos.z, 0);
         for (const d of w.catalog.filter((x) => x.kind !== 'item')) {
+          // this check is about the weapons, not survival: a rocket fired at a nearby wall must not end the run
+          g.player.invuln = 120; g.player.hp = g.player.maxHp;
           eco.cash = d.price + 10;
           const res = w.purchase(d);
           if (!res.ok) { bad.push(d.id + ' purchase: ' + res.msg); continue; }

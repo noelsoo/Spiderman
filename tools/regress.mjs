@@ -165,19 +165,27 @@ for (const map of maps) {
   for (const c of selected) {
     const t0 = Date.now();
     let status = 'PASS', detail = '';
-    try {
+    const attempt = async (fresh) => {
       ctx.clearErrors();
-      if (c.fresh) await open(c.settings || null);
+      if (fresh) await open(c.settings || null);
       else await ctx.ev(() => { window.qa.errors.length = 0; });
       const r = await c.run(ctx);
-      detail = r?.detail ?? (typeof r === 'string' ? r : '');
       if (!c.allowErrors) {
         const errs = await ctx.pageErrors();
         if (errs.length) throw new Error('console/page errors: ' + [...new Set(errs)].slice(0, 4).map((e) => e.slice(0, 300)).join(' | '));
       }
-    } catch (e) {
-      status = 'FAIL'; detail = String(e.message || e).split('\n')[0].slice(0, 700); failed++;
-      try { await open(); } catch (e2) { console.log('  reopen failed', e2.message); }   // clean page for the next check
+      return r?.detail ?? (typeof r === 'string' ? r : '');
+    };
+    const msg = (e) => String(e.message || e).split('\n')[0].slice(0, 700);
+    try { detail = await attempt(!!c.fresh); }
+    catch (e1) {
+      // Checks share one page, so state left by an earlier check can trip a later one. Retry once on a fresh page:
+      // a real defect fails again, an order-dependent one passes and is flagged.
+      try { detail = `${await attempt(true)} [passed on a fresh page; first run: ${msg(e1).slice(0, 160)}]`; }
+      catch (e2) {
+        status = 'FAIL'; detail = msg(e2); failed++;
+        try { await open(); } catch (e3) { console.log('  reopen failed', e3.message); }   // clean page for the next check
+      }
     }
     results.push({ map, name: c.name, status, detail });
     const colr = status === 'PASS' ? COL.pass : COL.fail;

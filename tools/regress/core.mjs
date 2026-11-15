@@ -115,12 +115,14 @@ export const core = [
         qa.begin('spiderman');
         // kill every hero one by one through combat so onPlayerDown runs
         for (const h of Object.values(g.heroes)) { if (h.hp > 0 && h !== g.player) h.hp = 0; }
-        g.combat.damagePlayer(99999, null, null);
+        g.player.invuln = 0;
+        const hit = g.combat.damagePlayer(99999, null, null);
         qa.step(10);
-      });
+        return { hit, hp: g.player.hp, dead: g.player.dead, id: g.player.id, state: g.state, alive: Object.values(g.heroes).filter((h) => h.hp > 0).map((h) => h.id) };
+      }).then((d) => { c.note?.(JSON.stringify(d)); c._death = d; });
       for (let i = 0; i < 20; i++) { await c.wait(400); const st = await c.ev(() => { window.qa.step(20); return window.game.state; }); if (st === 'gameover') break; }
       const over = await c.ev(() => ({ state: window.game.state, scr: window.game.hud.screen?.name }));
-      c.assert(over.state === 'gameover', `expected gameover, got ${over.state}`);
+      c.assert(over.state === 'gameover', `expected gameover, got ${over.state} ${JSON.stringify(c._death)}`);
       c.assert(over.scr === 'gameover', `expected gameover screen, got ${over.scr}`);
       const after = await c.ev(() => {
         const g = window.game, qa = window.qa;
