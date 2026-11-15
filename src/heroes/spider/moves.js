@@ -214,9 +214,16 @@ export function airLauncher(h, e) {
     h._task((dt) => {       // juggle: the enemy hovers (reduced gravity) for ~1.6 s so the air combo can land
       t += dt;
       if (!e.alive || t > 1.6) return true;
-      if (e.launched && !e.onGround) e.vel.y += 17 * dt;
+      // hang the enemy just above the hero's chest so the air combo stays in reach (it used to drift up out of range)
+      if (e.launched && !e.onGround) {
+        e.vel.y = clamp((h.pos.y + 0.5 - e.pos.y) * 6, -8, 8);
+        // and keep it about 1.4 m in front of him: air hits knock it back, which used to carry it out of reach
+        const fx = h.pos.x + Math.sin(h.yaw) * 1.4, fz = h.pos.z + Math.cos(h.yaw) * 1.4;
+        e.vel.x = clamp((fx - e.pos.x) * 6, -10, 10); e.vel.z = clamp((fz - e.pos.z) * 6, -10, 10);
+      }
       e.stunTimer = Math.max(e.stunTimer, 0.3);
-      if (!h.onGround && h.vel.y < -2 && t < 1.2) h.vel.y += 14 * dt;
+      // hang in the air while the juggle lasts, as in Spider-Man 2: attacking keeps him aloft, otherwise a slow drift down
+      if (!h.onGround) h.vel.y = Math.max(h.vel.y, h.atk?.air ? -0.5 : -3);
       return false;
     });
   });
