@@ -26,6 +26,8 @@ const AURA_TIME = 10, AURA_CD = 25, AURA_RADIUS = 7, AURA_TICK = 0.5, AURA_DMG =
 const BIFROST_CD = 8, BIFROST_DIST = 60, BIFROST_DMG = 85, BIFROST_RADIUS = 7;
 const ULT_RISE = 1.0, ULT_STORM = 3, ULT_RANGE = 40, ULT_HEIGHT = 18;
 const BLAST_RAISE = 1.0, BLAST_TIME = 4.5, BLAST_RANGE = 90, BLAST_WIDTH = 2.6, BLAST_TICK = 0.1, BLAST_DMG = 18;
+const ZONE_CD = 16, ZONE_TIME = 7, ZONE_RADIUS = 8, ZONE_TICK = 0.55, ZONE_DMG = 16, ZONE_RANGE = 45, HOLD_T = 0.35;
+const SLAM_CD = 5, SLAM_SPEED = 46, SLAM_DMG = 70, SLAM_RADIUS = 7.5, FLYDASH_CD = 1.4, FLYDASH_SPEED = 62;
 const BLUE = 0x66ccff, BOLT = 0x9fd8ff;
 const AIM_PRESET = { fov: 50, distance: 2.6, shoulder: 0.9, height: 1.7 };
 
@@ -53,6 +55,7 @@ export class Thor extends Hero {
     this.charged = false; this.hitStreak = 0;       // Mjolnir storm charge from combos
     this.auraT = 0; this.auraTick = 0; this.auraFx = 0;
     this.ult = null;
+    this._abHold = -1; this.zone = null; this.slam = false;   // hold-ability timer, active storm zone, air hammer slam
     this._impactVy = 0; this._noFocus = false;
     this.audioT = 0; this.sparkT = 0; this.crackleT = 0;
     this.glow = new GlowSprite(game.scene, 0x9fd8ff);
@@ -70,6 +73,7 @@ export class Thor extends Hero {
   onDeactivate() {
     this._resetHammer(true);
     this.flying = false; this.glideT = 0; this.auraT = 0; this.ult = null; this.dmgMul = 1; this.gravityScale = 1;
+    this.zone = null; this.slam = false; this._abHold = -1;
     this.charged = false; this.hitStreak = 0; this.tCharge = 0; this._noFocus = false;
     this.timers.clear();
     this.glow.set(_a, 1, 0); this.hGlow.set(_a, 1, 0); this.beam.hide(); this.beamOuter.hide(); this.beamT = 0;
@@ -82,7 +86,10 @@ export class Thor extends Hero {
   get abilityHints() {
     return [
       { action: 'special', label: this.hasHammer ? 'Hammer Throw' : 'Recall Hammer', cooldown: this.cooldownFrac('throw'), active: !this.hasHammer || this.charged },
-      { action: 'ability', label: 'Lightning Strike', cooldown: this.cooldownFrac('strike') },
+      this.offGroundT > 0.12 && !this.flying
+        ? { action: 'ability', label: 'Hammer Slam', cooldown: this.cooldownFrac('slam'), active: this.slam }
+        : { action: 'ability', label: 'Lightning Strike (hold: Storm Zone)', cooldown: Math.min(this.cooldownFrac('strike'), this.cooldownFrac('storm')), active: !!this.zone },
+      ...(this.flying ? [{ action: 'dodge', label: 'Storm Dash', cooldown: this.cooldownFrac('flydash') }] : []),
       { action: 'ability2', label: this.flying ? 'Bifrost' : 'God of Thunder', cooldown: this.flying ? this.cooldownFrac('bifrost') : this.cooldownFrac('aura'), active: this.auraT > 0 },
       { action: 'ultimate', label: this.flying || !this.onGround ? 'Thunder Storm' : 'God Blast', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
@@ -130,6 +137,7 @@ export class Thor extends Hero {
 
     this._hammer(dt);
     this._aura(dt);
+    this._zone(dt);
     if (this.ult) {
       setReticle(this, null);
       if (this.ult.type === 'blast') this._blastUpdate(dt, input); else this._ultUpdate(dt, input);
@@ -238,6 +246,7 @@ export class Thor extends Hero {
   onLand() {
     const g = this.game;
     const vy = -this._impactVy;
+    if (this.slam) { this._slamImpact(); return; }
     if (this.ult || this.flying) return;
     if (this.wasAirborneFlight || vy > 22) {
       const r = 3.5 + clamp(vy * 0.1, 0, 3);
@@ -261,7 +270,23 @@ export class Thor extends Hero {
       if (this.hasHammer && free && (this.cooldowns.throw || 0) <= 0) this._throw({ aimed: false, imbued: this.charged });
       else if (!this.hasHammer && this.hammerState === 'out') this._startReturn();
     }
-    if (input.pressed('ability') && free && (this.cooldowns.strike || 0) <= 0) this._strike();
+    // ability: in the air (not flying) = Hammer Slam; on the ground / in flight tap = Lightning Strike, hold = Storm Zone
+    if (input.pressed('ability') && free) {
+      if (this.offGroundT > 0.12 && !this.flying && this.hasHammer) { if ((this.cooldowns.slam || 0) <= 0) this._startSlam(); }
+      else this._abHold = 0;
+    }
+    if (this._abHold >= 0) {
+      const held = input.down('ability');
+      if (held) this._abHold += dt;
+      if (!held || this._abHold >= HOLD_T) {
+        const long = held && this._abHold >= HOLD_T;
+        this._abHold = -1;
+        if (long && (this.cooldowns.storm || 0) <= 0) this._startZone();
+        else if ((this.cooldowns.strike || 0) <= 0) this._strike();
+      }
+    }
+    // flight: dodge = Storm Dash, a short lightning burst forward
+    if (this.flying && input.pressed('dodge') && (this.cooldowns.flydash || 0) <= 0) this._flyDash(input);
     if (this.pressedAbility2()) {
       if (this.flying) { if ((this.cooldowns.bifrost || 0) <= 0) this._bifrost(); }
       else if ((this.cooldowns.aura || 0) <= 0 && this.auraT <= 0) this._startAura();
@@ -511,6 +536,96 @@ export class Thor extends Hero {
     g.fx?.lightning?.(this.center, this.center.add(_b.set(0, 8, 0)), BOLT, 0.2, 2);
     const charged = this.charged; if (charged) this.charged = false;
     this.timers.after(0.3, () => this._bolt(pt, STRIKE_DMG * (charged ? 1.4 : 1) * this.dmgMul, STRIKE_RADIUS * (charged ? 1.3 : 1), true));
+  }
+
+  // ---- Storm Zone: a lingering thundercloud that slows and keeps striking whoever stands in it --------------------------------
+  _startZone() {
+    const g = this.game;
+    this.useCooldown('storm', ZONE_CD);
+    const aa = assistAim(this, this.center, ZONE_RANGE, this.aiming ? 8 : 16, _as);
+    const pt = aa.target ? aa.target.pos.clone() : aa.point.clone();
+    if (pt.distanceTo(this.pos) > ZONE_RANGE) pt.sub(this.pos).setLength(ZONE_RANGE).add(this.pos);
+    pt.y = g.physics?.heightAt?.(pt.x, pt.z, pt.y + 2) ?? pt.y;
+    _a.subVectors(pt, this.pos).setY(0); if (_a.lengthSq() > 0.01) this.yaw = Math.atan2(_a.x, _a.z);
+    this.actionAnim = 'cast'; this.actionT = 0.7; this.setAnim('cast');
+    this.zone = { pos: pt, t: ZONE_TIME, tick: 0.25, ring: 0 };
+    g.audio?.play('thunder', { volume: 0.7, pitch: 0.8 });
+    g.fx?.shockwave?.(pt.clone(), ZONE_RADIUS, BOLT);
+    g.fx?.text?.(pt.clone().setY(pt.y + 3), 'STORM ZONE', BOLT, { size: 1.2 });
+    g.cam.shake(0.2); rumble(g, 0.5, 0.4, 200);
+  }
+
+  _zone(dt) {
+    const z = this.zone; if (!z) return;
+    const g = this.game;
+    z.t -= dt; z.tick -= dt; z.ring -= dt;
+    if (z.t <= 0) { this.zone = null; return; }
+    if (z.ring <= 0) {   // the visible edge of the storm, with stray bolts from the sky
+      z.ring = 0.45;
+      g.fx?.ring?.(z.pos.clone().setY(z.pos.y + 0.15), ZONE_RADIUS, BOLT, 0.5);
+      const a = Math.random() * Math.PI * 2, r = Math.random() * ZONE_RADIUS;
+      _b.set(z.pos.x + Math.cos(a) * r, z.pos.y, z.pos.z + Math.sin(a) * r);
+      g.fx?.lightning?.(_b.clone().setY(z.pos.y + 40), _b.clone(), 0xc8e8ff, 0.12, 2);
+    }
+    const inside = [];
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive) continue;
+      if (Math.hypot(e.pos.x - z.pos.x, e.pos.z - z.pos.z) > ZONE_RADIUS || Math.abs(e.pos.y - z.pos.y) > 12) continue;
+      e.slowTimer = Math.max(e.slowTimer || 0, e.isBoss ? 0.2 : 0.4);
+      inside.push(e);
+    }
+    if (z.tick <= 0 && inside.length) {
+      z.tick = ZONE_TICK;
+      for (let i = 0; i < Math.min(2, inside.length); i++) {
+        const e = inside.splice(Math.floor(Math.random() * inside.length), 1)[0];
+        this._bolt(e.pos.clone(), ZONE_DMG * this.dmgMul, 2.2, false);
+      }
+    }
+  }
+
+  // ---- Hammer Slam: from the air, dive hammer-first and crack the ground ------------------------------------------------------
+  _startSlam() {
+    const g = this.game;
+    this.useCooldown('slam', SLAM_CD);
+    this.slam = true; this.glideT = 0; this.customMovement = false; this.gravityScale = 1;
+    this.vel.x *= 0.3; this.vel.z *= 0.3; this.vel.y = -SLAM_SPEED;
+    this.invuln = Math.max(this.invuln, 0.4);
+    this.actionAnim = 'smash'; this.actionT = 0.6; this.setAnim('smash');
+    g.audio?.play('whoosh', { volume: 0.9 });
+    g.fx?.lightning?.(this.center.clone().setY(this.center.y + 12), this.center.clone(), BOLT, 0.15, 2);
+  }
+
+  _slamImpact() {
+    const g = this.game;
+    this.slam = false; this.wasAirborneFlight = false; this.flying = false; this.glideT = 0; this.gravityScale = 1;
+    const at = this.pos.clone();
+    g.combat?.aoe?.({ center: at, radius: SLAM_RADIUS, damage: SLAM_DMG * this.dmgMul, knockback: 13, up: 8, stun: 1.0, source: this });
+    impactFx(g, at, SLAM_RADIUS, BLUE, 0.6);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + Math.random();
+      _b.set(at.x + Math.cos(a) * SLAM_RADIUS * 0.7, at.y, at.z + Math.sin(a) * SLAM_RADIUS * 0.7);
+      g.fx?.lightning?.(at.clone().setY(at.y + 0.4), _b.clone().setY(at.y + 0.4), BOLT, 0.14, 2);
+    }
+    g.fx?.shockwave?.(at.clone(), SLAM_RADIUS, BOLT);
+    g.audio?.play('hammer'); g.audio?.play('thunder', { volume: 0.8 });
+    g.cam.shake(0.6); rumble(g, 0.9, 0.7, 260); hitStop(g, 0.06, 0.08);
+    this.actionAnim = 'land'; this.actionT = 0.45; this.setAnim('land');
+  }
+
+  // ---- Storm Dash: a burst of speed in flight that shocks anything it passes ---------------------------------------------------
+  _flyDash(input) {
+    const g = this.game;
+    this.useCooldown('flydash', FLYDASH_CD);
+    const w = g.cam.moveVector(input.move, _a); if (w.lengthSq() < 0.01) w.copy(g.cam.forward);
+    w.normalize();
+    const from = this.center.clone();
+    this.vel.copy(w).multiplyScalar(FLYDASH_SPEED);
+    this.invuln = Math.max(this.invuln, 0.3);
+    g.fx?.lightning?.(from, from.clone().addScaledVector(w, -6), BOLT, 0.16, 2);
+    g.fx?.ring?.(from, 2.5, BOLT, 0.25);
+    g.audio?.play('whoosh'); g.audio?.play('lightning', { volume: 0.4 });
+    beamDamage(this, from, w, 12, 2.4, 35 * this.dmgMul, 8, 0.5, 'lightning');
+    g.cam.fovKick = Math.max(g.cam.fovKick || 0, 8);
   }
 
   _bolt(pt, dmg, radius, big) {

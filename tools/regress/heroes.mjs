@@ -8,8 +8,7 @@ export const heroes = HEROES.map((hero) => ({
   async run(c) {
     const r = await c.ev(({ hero, KEYS }) => {
       const qa = window.qa, g = window.game, bad = [], thrown = [];
-      qa.begin(hero);
-      const spot = qa.roadSpot(); qa.put(spot.x, spot.z, spot.yaw);
+      const { spot, restore } = qa.arena(hero);
       const p = g.player;
       p.maxHp = p.hp = 99999;
       g.enemies.running = false;
@@ -48,6 +47,7 @@ export const heroes = HEROES.map((hero) => ({
       const dealt = Math.round(start - hpSum());
       for (const e of g.enemies.list) if (!qa.finite(e.pos)) { bad.push('NaN enemy'); break; }
       if (g.player.id !== hero) bad.push(`ended as ${g.player.id}`);
+      restore();
       safe('deactivate', () => { qa.begin(hero === 'spiderman' ? 'ironman' : 'spiderman'); qa.step(30); });
       return { bad, thrown: [...new Set(thrown)], dealt, errs: qa.errors.slice(0, 4) };
     }, { hero, KEYS });

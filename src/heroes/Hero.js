@@ -93,6 +93,8 @@ export class Hero {
     if (this.invuln > 0) this.invuln -= dt;
     if (this.comboTimer > 0) { this.comboTimer -= dt; if (this.comboTimer <= 0) this.combo = 0; }
     this.anim.t += dt;
+    // time since last ground contact; abilities with an airborne variant test this, not onGround, which can flicker for a frame
+    this.offGroundT = this.onGround ? 0 : (this.offGroundT || 0) + dt;
 
     this._updateAim(dt, input);
     if (!this.dead) this.updateAbilities(dt, input);

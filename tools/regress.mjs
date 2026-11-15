@@ -97,6 +97,18 @@ function installQA() {
       qa.put(px, pz, spot.yaw);
       return v;
     },
+    /** Hero checks need a quiet street: put the player on a road, clear nearby cars and pause traffic. Call the returned restore() when done. */
+    arena(hero) {
+      const game = g(), vs = game.vehicles;
+      qa.begin(hero);
+      const spot = qa.roadSpot() ?? { x: game.player.pos.x, z: game.player.pos.z, yaw: 0 };
+      for (const o of vs.list) if (o.active && !o.reserve && Math.hypot(o.pos.x - spot.x, o.pos.z - spot.z) < 70) { if (!vs._relocate(o)) vs._deactivate(o); }
+      const vUpdate = vs.update, pUpdate = game.peds.update;
+      vs.update = () => {}; game.peds.update = () => {};
+      qa.put(spot.x, spot.z, spot.yaw);
+      qa.step(20);
+      return { spot, restore() { vs.update = vUpdate; game.peds.update = pUpdate; } };
+    },
     finite(v) { return !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z); },
     snap() {
       const game = g(), p = game.player;

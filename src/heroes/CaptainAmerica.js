@@ -17,6 +17,7 @@ const PARRY_WINDOW = 0.2, BLOCK_ARC = 120, BLOCK_SPEED = 3.4;
 const BLOCK_HOLD = 0.16;                       // hold dodge this long = block, release earlier = roll
 const MAG = 12, PISTOL_DMG = 24, PISTOL_RATE = 0.2, PISTOL_RANGE = 90, RELOAD_T = 1.05, DRAWN_T = 1.2, HOLSTER_REFILL = 3;
 const ULT_RADIUS = 15, ULT_DMG = 85, RALLY_TIME = 15, RALLY_MUL = 1.3;
+const SLAM_CD = 6, SLAM_SPEED = 42, SLAM_DMG = 60, SLAM_RADIUS = 6.5, BASH_CD = 9, BASH_DMG = 38, BASH_RADIUS = 7, BASH_HOLD = 0.35;
 const BLUE = 0x2f6bd8, RED = 0xd8302f, WHITE = 0xffffff, GOLD = 0xffd060;
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _w = new THREE.Vector3(), _d = new THREE.Vector3(), _n = new THREE.Vector3();
@@ -72,6 +73,7 @@ export class CaptainAmerica extends Hero {
     this.dodgeT = 0;            // >0 while a dodge press is pending (tap = roll, hold = block)
     // sidearm
     this.pistol = null; this.ammo = MAG; this.pCd = 0; this.reloadT = 0; this.drawnT = 0; this.holstered = true; this.idleT = 0; this._crimeAt = 0;
+    this.slam = false; this._abHold = -1;   // air shield slam in progress; hold-ability timer
     this.stepT = 0; this.fov = 0; this._impactVy = 0; this.rallyFx = 0; this.ultT = 0; this.chargeFx = 0;
   }
 
@@ -89,6 +91,7 @@ export class CaptainAmerica extends Hero {
     this._setHeld(true);
   }
   onDeactivate() {
+    this.slam = false; this._abHold = -1;
     const g = this.game;
     this.timers.clear();
     if (this.proj) { this.proj.remove?.(); this._dropProj(); }
@@ -106,7 +109,9 @@ export class CaptainAmerica extends Hero {
     const rally = (this.game.rallyUntil ?? 0) > this.game.time;
     return [
       { action: 'special', label: 'Shield Throw', cooldown: this.shieldOut ? 1 : 0, active: this.shieldOut || this.holding },
-      { action: 'ability', label: 'Shield Charge', cooldown: this.cooldownFrac('charge'), active: this.mode === 'charge' },
+      this.offGroundT > 0.12
+        ? { action: 'ability', label: 'Shield Slam', cooldown: this.cooldownFrac('slam'), active: this.slam }
+        : { action: 'ability', label: 'Shield Charge (hold: Shockwave)', cooldown: Math.min(this.cooldownFrac('charge'), this.cooldownFrac('bash')), active: this.mode === 'charge' },
       { action: 'dodge', label: 'Roll / Block (hold)', cooldown: this.cooldownFrac('dodge'), active: this.blocking },
       { action: 'aim', label: this.reloadT > 0 ? 'Reloading...' : `Pistol ${this.ammo}/${MAG}`, cooldown: this.reloadT > 0 ? this.reloadT / RELOAD_T : 0, active: this.aiming },
       { action: 'ultimate', label: 'Avengers Assemble', cooldown: 1 - this.focus / 100, active: rally || this.mode === 'ult' },
@@ -248,7 +253,23 @@ export class CaptainAmerica extends Hero {
       else if (normal) this.bufferT = 0.3;
     }
     if (this.bufferT > 0) { this.bufferT -= dt; if (free && !this.holding && !this.blocking && normal) { this.bufferT = 0; this._combo(); } }
-    if (input.pressed('ability') && normal && !this.blocking && (this.cooldowns.charge || 0) <= 0) this._charge(input);
+    // ability: in the air = Shield Slam; on the ground tap = Shield Charge, hold = Shield Shockwave
+    if (input.pressed('ability') && normal && !this.blocking) {
+      if (this.offGroundT > 0.12) { if ((this.cooldowns.slam || 0) <= 0 && !this.shieldOut) this._startSlam(); }
+      else this._abHold = 0;
+    }
+    if (this._abHold >= 0) {
+      const held = input.down('ability');
+      if (held) this._abHold += dt;
+      if (!held || this._abHold >= BASH_HOLD) {
+        const long = held && this._abHold >= BASH_HOLD;
+        this._abHold = -1;
+        if (normal && !this.blocking) {
+          if (long && (this.cooldowns.bash || 0) <= 0 && !this.shieldOut) this._shockwave();
+          else if ((this.cooldowns.charge || 0) <= 0) this._charge(input);
+        }
+      }
+    }
     if (input.pressed('ultimate') && this.focus >= 100 && this.mode !== 'ult') this._startUlt();
 
     this._rally(dt);
@@ -442,6 +463,7 @@ export class CaptainAmerica extends Hero {
   onLand() {
     const g = this.game, vy = -this._impactVy;
     if (this.mode === 'ult' && this.ultPhase === 'slam') { this._ultImpact(); return; }
+    if (this.slam) { this._slamImpact(); return; }
     if (vy > 14) { g.audio?.play('land', { volume: Math.min(0.8, vy / 30) }); g.fx?.dust?.(this.pos.clone(), 6, 1.6); }
     if (vy > 22) { this.actionAnim = 'land'; this.actionT = 0.2; this.vel.x *= 0.4; this.vel.z *= 0.4; }
   }
@@ -640,6 +662,61 @@ export class CaptainAmerica extends Hero {
   }
 
   // ---- ability: Shield Charge ----------------------------------------------------------------------------
+  // ---- Shield Slam: from the air, drive the shield edge into the ground ------------------------------------------
+  _startSlam() {
+    const g = this.game;
+    this.useCooldown('slam', SLAM_CD);
+    this.slam = true;
+    this.vel.x *= 0.35; this.vel.z *= 0.35; this.vel.y = -SLAM_SPEED;
+    this.invuln = Math.max(this.invuln, 0.35);
+    this.actionAnim = 'smash'; this.actionT = 0.5; this.setAnim('smash');
+    g.audio?.play('whoosh', { pitch: 0.8 });
+  }
+
+  _slamImpact() {
+    const g = this.game;
+    this.slam = false;
+    const at = this.pos.clone();
+    g.combat?.aoe?.({ center: at, radius: SLAM_RADIUS, damage: SLAM_DMG * this.dm(), knockback: 11, up: 6, stun: 0.9, source: this });
+    impactFx(g, at, SLAM_RADIUS, BLUE, 0.5);
+    g.fx?.shockwave?.(at.clone(), SLAM_RADIUS, WHITE);
+    g.audio?.play('heavyhit'); g.audio?.play('land', { volume: 0.8 });
+    g.cam.shake(0.45); rumble(g, 0.8, 0.6, 220);
+    this.actionAnim = 'land'; this.actionT = 0.4; this.setAnim('land');
+    this.vel.x = 0; this.vel.z = 0;
+  }
+
+  // ---- Shield Shockwave: slam the shield down in place; a ring that staggers everything around Cap -----------------
+  _shockwave() {
+    const g = this.game;
+    this.useCooldown('bash', BASH_CD);
+    this.actionAnim = 'smash'; this.actionT = 0.65; this.setAnim('smash');
+    this.vel.x = 0; this.vel.z = 0;
+    g.audio?.play('whoosh', { pitch: 0.7 });
+    this.timers.after(0.28, () => {
+      if (!this.active || this.dead) return;
+      const at = this.pos.clone();
+      let n = 0;
+      for (const e of g.enemies?.list ?? []) {
+        if (!e.alive) continue;
+        const d = Math.hypot(e.pos.x - at.x, e.pos.z - at.z);
+        if (d > BASH_RADIUS || Math.abs(e.pos.y - at.y) > 4) continue;
+        const kb = _b.set(e.pos.x - at.x, 0, e.pos.z - at.z).normalize().multiplyScalar(7).setY(3.5).clone();
+        const dealt = e.takeDamage?.(BASH_DMG * this.dm(), { knockback: kb, stun: e.isBoss ? 0.6 : 2.4, source: this, kind: 'shield' });
+        if (dealt > 0) {
+          n++; this.registerHit?.(); g.fx?.hitSpark?.(enemyCenter(e, _c).clone(), WHITE, true);
+          // a heavy hit launches instead of stunning, so hold the stagger explicitly (short on bosses)
+          if (e.alive) e.stunTimer = Math.max(e.stunTimer, e.isBoss ? 0.6 : 2.4);
+        }
+      }
+      impactFx(g, at, BASH_RADIUS, BLUE, 0.35);
+      g.fx?.shockwave?.(at.clone(), BASH_RADIUS, WHITE);
+      g.fx?.ring?.(at.clone().setY(at.y + 0.15), BASH_RADIUS, RED, 0.45);
+      g.audio?.play('hammer', { pitch: 1.3 }); g.audio?.play('heavyhit', { volume: 0.7 });
+      g.cam.shake(0.35 + Math.min(0.2, n * 0.04)); rumble(g, 0.7, 0.5, 200);
+    });
+  }
+
   _charge(input) {
     const g = this.game;
     this.useCooldown('charge', CHARGE_CD);
