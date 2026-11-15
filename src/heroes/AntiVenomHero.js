@@ -83,7 +83,7 @@ export class AntiVenomHero extends SymbioteHero {
     return [
       { action: 'swing', label: 'Tendril Swing', cooldown: this.cooldownFrac('launch'), active: this.state === 'launch' },
       { action: 'special', label: 'Cure Burst', cooldown: this.cooldownFrac('cure') },
-      { action: 'ability', label: 'Antibody Spikes', cooldown: this.cooldownFrac('spikes') },
+      { action: 'ability', label: 'Antibody Spikes (hold: Restoration)', cooldown: Math.min(this.cooldownFrac('spikes'), this.cooldownFrac('aura')), active: this.auraT > 0 },
       { action: 'ability2', label: 'Purge', cooldown: this.cooldownFrac('purge'), active: !!this.purging },
       { action: 'attack', label: 'Purify Punch', cooldown: 0 },
       { action: 'ultimate', label: 'Purification Wave', cooldown: 1 - this.focus / 100, active: this.ultT > 0 },
@@ -136,12 +136,37 @@ export class AntiVenomHero extends SymbioteHero {
   }
 
   // ------------------------------------------------------------------ dispatcher
+  // Restoration: a 6 s white aura; heals Anti-Venom and pulses cleansing damage that hits symbiotes harder
+  _startAura() {
+    if (!this.useCooldown('aura', 18)) return;
+    this.auraT = 6; this.auraTick = 0;
+    this.actionT = 0.4; this.setAnim('cast');
+    this.game.audio?.play('whoosh', { pitch: 1.4 });
+    this.say?.('RESTORATION', HALO, 1.1);
+  }
+
+  _aura(dt) {
+    if (!(this.auraT > 0)) return;
+    const g = this.game;
+    this.auraT -= dt; this.auraTick -= dt;
+    if (!this.dead) this.hp = Math.min(this.maxHp, this.hp + 9 * dt);
+    if (this.auraTick > 0) return;
+    this.auraTick = 0.7;
+    const c = this.pos.clone();
+    g.fx?.ring?.(c.clone().setY(c.y + 0.15), 6, HALO, 0.5);
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || Math.hypot(e.pos.x - c.x, e.pos.z - c.z) > 6 || Math.abs(e.pos.y - c.y) > 4) continue;
+      e.takeDamage?.(10 * (isSymbiote(e) ? SYM_MUL : 1) * this.dmgMul, { stun: 0.3, source: this, kind: 'cure' });
+    }
+  }
+
   combat(dt, input) {
+    this._aura(dt);
     if (input.pressed('ultimate') && this.focus >= 100 && this.ultT <= 0 && this.state !== 'launch' && !this.purging) { this._startUlt(); return; }
     if (this.locked || this.state === 'launch' || this.actionT > 0) return;
     if (input.pressed('attack')) { this._punch(); return; }
     if (this.pressedSpecial()) { this._cure(); return; }
-    if (input.pressed('ability')) { this._spikes(); return; }
+    if (this.tapHold(input, dt, () => this._spikes(), () => this._startAura())) return;
     if (this.pressedAbility2()) this._purge();
   }
 

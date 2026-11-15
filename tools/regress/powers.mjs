@@ -148,3 +148,41 @@ powers.push({
     return JSON.stringify(r.info);
   },
 });
+
+// Symbiote hold-ability powers: Venom Hive Pull, Carnage Brood, Anti-Venom Restoration; the tap still does the old ability.
+const SYM = [
+  { hero: 'venom', cd: 'hive', tapCd: 'barrage' },
+  { hero: 'carnage', cd: 'brood', tapCd: 'spikes' },
+  { hero: 'antivenom', cd: 'aura', tapCd: 'spikes' },
+];
+for (const s of SYM) powers.push({
+  name: `power-${s.hero}`,
+  async run(c) {
+    await c.ev(install);
+    const r = await c.ev((s) => {
+      const { qa, g, p, foes, hp, restore } = window.qaPower(s.hero);
+      const bad = [], info = {};
+      const h0 = hp();
+      p.hp = p.maxHp * 0.5;
+      const hpBefore = p.hp;
+      qa.hold('KeyE'); qa.step(30); qa.release('KeyE');
+      if (!(p.cooldowns[s.cd] > 0)) bad.push(`hold ability did not use ${s.cd}`);
+      if (p.cooldowns[s.tapCd] > 0) bad.push(`hold also fired the tap ability (${s.tapCd})`);
+      if (s.hero === 'carnage') { info.clones = p.clones.length; if (p.clones.length < 2) bad.push('brood spawned ' + p.clones.length + ' clones'); }
+      qa.stepSec(4);
+      info.dmg = Math.round(h0 - hp());
+      if (!(info.dmg > 0)) bad.push('no damage to nearby goons');
+      if (s.hero === 'antivenom') { info.healed = Math.round(p.hp - hpBefore); if (!(info.healed > 10)) bad.push('restoration healed ' + info.healed); }
+      qa.stepSec(5);
+      if (s.hero === 'carnage' && p.clones.length) bad.push('brood clones never expired');
+      p.cooldowns[s.tapCd] = 0; qa.step(30);
+      qa.press('KeyE', 3);
+      if (!(p.cooldowns[s.tapCd] > 0)) bad.push(`tap no longer fires ${s.tapCd}`);
+      if (!qa.finite(p.pos)) bad.push('NaN position');
+      restore();
+      return { bad, info };
+    }, s);
+    c.assert(!r.bad.length, r.bad.join('; ') + ' ' + JSON.stringify(r.info));
+    return JSON.stringify(r.info);
+  },
+});

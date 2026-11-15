@@ -75,6 +75,7 @@ export class SymbioteHero extends Hero {
     this.onSymDeactivate?.();
   }
   _cleanup() {
+    this._abHold = -1; this.auraT = 0;
     this.timers.clear();
     this.pool?.clear();
     this.rope = null;
@@ -88,6 +89,22 @@ export class SymbioteHero extends Hero {
 
   get dmgMul() { return this.dmgOutMul; }
   dmg(n) { return n * this.dmgMul; }
+
+  /** Ability button with two uses: tap (released before `t` s) runs onTap, hold runs onHold as soon as `t` is reached.
+   *  Returns true while a press is being decided, so callers can skip their other inputs that frame. */
+  tapHold(input, dt, onTap, onHold, t = 0.35) {
+    if (this._abHold == null || this._abHold < 0) {
+      if (!input.pressed('ability')) return false;
+      this._abHold = 0;
+    }
+    const held = input.down('ability');
+    if (held) this._abHold += dt;
+    if (held && this._abHold < t) return true;
+    const long = held;
+    this._abHold = -1;
+    if (long) onHold(); else onTap();
+    return true;
+  }
 
   takeDamage(amount, fromPos) {
     if (this.dead || this.invuln > 0) return false;

@@ -92,7 +92,7 @@ export class CarnageHero extends SymbioteHero {
     return [
       { action: 'swing', label: 'Tendril Zip', cooldown: this.cooldownFrac('launch'), active: this.state === 'launch' },
       { action: 'special', label: 'Whip Storm', cooldown: this.cooldownFrac('storm'), active: !!this.storm },
-      { action: 'ability', label: 'Spike Field', cooldown: this.cooldownFrac('spikes') },
+      { action: 'ability', label: 'Spike Field (hold: Brood)', cooldown: Math.min(this.cooldownFrac('spikes'), this.cooldownFrac('brood')) },
       { action: 'ability2', label: 'Axe Throw', cooldown: this.cooldownFrac('axe'), active: this.axes.length > 0 },
       { action: 'attack', label: this.frenzy > 0.3 ? 'Frenzy x' + (1 + this.frenzy * 0.6).toFixed(1) : 'Blade Combo', cooldown: 0, active: this.frenzy > 0.3 },
       { action: 'ultimate', label: 'Maximum Carnage', cooldown: 1 - this.focus / 100, active: this.ultT > 0 },
@@ -159,6 +159,19 @@ export class CarnageHero extends SymbioteHero {
     }
   }
 
+  // Brood: tear off two small spawn that hunt the nearest enemies for a few seconds (max four alive)
+  _brood() {
+    const g = this.game;
+    if (this.clones.length >= 4 || !this.useCooldown('brood', 14)) return;
+    this.actionT = 0.5; this.setAnim('cast');
+    g.audio?.play('roar', { volume: 0.5, pitch: 1.4 });
+    for (const side of [-1, 1]) {
+      const p = this.pos.clone().add(new THREE.Vector3(Math.cos(this.yaw) * side * 1.6, 0, -Math.sin(this.yaw) * side * 1.6));
+      this.clones.push(new SymbioteClone(g, this, p, { life: 8, scale: 0.6, baseHeight: 2.1, dmg: 12, speed: 13 }));
+    }
+    this.say?.('BROOD', HOT, 1.1);
+  }
+
   landSlam(v) {
     if (v > 26) {
       const g = this.game;
@@ -175,7 +188,7 @@ export class CarnageHero extends SymbioteHero {
     if (this.storm) return;
     if (input.pressed('attack')) { this._blade(); return; }
     if (this.pressedSpecial()) { this._startStorm(); return; }
-    if (input.pressed('ability')) { this._spikeField(); return; }
+    if (this.tapHold(input, dt, () => this._spikeField(), () => this._brood())) return;
     if (this.pressedAbility2()) { this._axe(); }
   }
 

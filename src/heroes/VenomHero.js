@@ -97,7 +97,7 @@ export class VenomHero extends (SymbioteHero) {
     return [
       { action: 'swing', label: 'Tendril Launch', cooldown: this.cooldownFrac('launch'), active: this.state === 'launch' },
       { action: 'special', label: 'Tendril Grab', cooldown: this.cooldownFrac('grab') },
-      { action: 'ability', label: 'Tendril Barrage', cooldown: this.cooldownFrac('barrage') },
+      { action: 'ability', label: 'Tendril Barrage (hold: Hive Pull)', cooldown: Math.min(this.cooldownFrac('barrage'), this.cooldownFrac('hive')) },
       { action: 'ability2', label: devour ? 'Devour' : 'Camouflage', cooldown: devour ? this.cooldownFrac('devour') : this.cooldownFrac('camo'), active: this.camoT > 0 },
       { action: 'dodge', label: 'Roar (hold)', cooldown: this.cooldownFrac('roar') },
       { action: 'ultimate', label: 'We Are Venom', cooldown: 1 - this.focus / 100, active: this.ultT > 0 },
@@ -184,7 +184,7 @@ export class VenomHero extends (SymbioteHero) {
     if (busy) return;
     if (input.pressed('attack')) { this._claw(); return; }
     if (this.pressedSpecial()) { this._grab(); return; }
-    if (input.pressed('ability')) { this._barrage(); return; }
+    if (this.tapHold(input, dt, () => this._barrage(), () => this._hivePull())) return;
     if (this.pressedAbility2()) {
       const t = this._devourTarget();
       if (t && (this.cooldowns.devour || 0) <= 0) this._devour(t);
@@ -411,6 +411,37 @@ export class VenomHero extends (SymbioteHero) {
   }
 
   // ------------------------------------------------------------------ tendril barrage
+  // Hive Pull: tendrils lash every enemy in a wide cone, drag them into a heap at Venom's feet and slam them together
+  _hivePull() {
+    const g = this.game;
+    if (!this.useCooldown('hive', 11)) return;
+    const f = this.forward, at = this.pos.clone().addScaledVector(f, 2.2);
+    const caught = [];
+    for (const e of g.enemies?.list ?? []) {
+      if (!e.alive || e.isBoss) continue;
+      const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z, d = Math.hypot(dx, dz);
+      if (d > 16 || d < 0.5 || (dx * f.x + dz * f.z) / d < 0.2 || Math.abs(e.pos.y - this.pos.y) > 6) continue;
+      caught.push(e);
+      if (caught.length >= 6) break;
+    }
+    this.actionT = 0.9; this.setAnim('cast');
+    g.audio?.play('whoosh', { pitch: 0.6 }); g.audio?.play('roar', { volume: 0.5, pitch: 0.8 });
+    for (const e of caught) {
+      this.lash(enemyCenter(e, new THREE.Vector3()), { life: 0.45 });
+      e.interrupt?.(); e.stunTimer = Math.max(e.stunTimer, 1.2);
+      const v = new THREE.Vector3(at.x - e.pos.x, 0, at.z - e.pos.z);
+      e.vel.x = v.x * 3.2; e.vel.z = v.z * 3.2; e.vel.y = 5; e.onGround = false; e.kbTimer = 0.45;
+    }
+    this.timers.after(0.5, () => {
+      if (!this.active || this.dead) return;
+      g.combat?.aoe?.({ center: at, radius: 4.5, damage: this.dmg(55), knockback: 12, up: 9, stun: 1.4, source: this });
+      impactFx(g, at, 5, DUST, 0.6);
+      this.waves.spawn(at.clone().setY(at.y + 0.2), 6, 0xb090ff, 0.45, 0.4);
+      g.audio?.play('smash', { volume: 0.9 }); hitStop(g, 0.07, 0.06); rumble(g, 0.8, 0.6, 220);
+      if (caught.length) this.say?.(caught.length > 2 ? 'HIVE PULL x' + caught.length : 'HIVE PULL', 0xb090ff, 1.1);
+    });
+  }
+
   _barrage() {
     const g = this.game;
     if (!this.useCooldown('barrage', 9)) return;
