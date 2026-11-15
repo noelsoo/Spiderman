@@ -170,16 +170,9 @@ export class SpiderMan extends Hero {
     const f = (id) => A.cdFrac(id);
     return [
       { action: 'swing', key: 'swing', label: 'Web Swing', cooldown: 0, active: this.state === 'swing' },
-      { action: 'special', key: 'special', label: 'Web Shot  / Hold: Pull / Throw   + L1/Atk/Jump/Dodge: Gadgets', cooldown: this.cooldownFrac('special') },
-      { action: 'ability', key: 'ability', label: this.aiming ? 'Next Gadget' : 'Web Zip   + Atk Barrage  + Jump Rush  + Dodge Shock  + R1 Whiplash', cooldown: this.aiming ? 0 : this.cooldownFrac('zip'), active: this.state === 'zip' },
-      { action: 'ability', key: 'ability', label: 'Spider Barrage  (L1 + Attack)', cooldown: f('barrage') },
-      { action: 'ability', key: 'ability', label: 'Spider Rush  (L1 + Jump)', cooldown: f('rush') },
-      { action: 'ability', key: 'ability', label: 'Spider Shock  (L1 + Dodge)', cooldown: f('shock') },
-      { action: 'ability', key: 'ability', label: 'Spider Whiplash  (L1 + R1)', cooldown: f('whiplash') },
-      { action: 'special', key: 'special', label: 'Web Grabber  (R1 + Attack)', cooldown: G.frac(6) },
-      { action: 'special', key: 'special', label: 'Upshot  (R1 + Jump)', cooldown: G.frac(5) },
-      { action: 'special', key: 'special', label: 'Ricochet Web  (R1 + Dodge)', cooldown: G.frac(3) },
-      { action: 'special', key: 'special', label: 'Sonic Burst  (R1 + L1)', cooldown: G.frac(7) },
+      { action: 'special', key: 'special', label: 'Web Shot (hold: Pull)  R1+Atk/Jump/Dodge/L1: Gadgets', cooldown: this.cooldownFrac('special') },
+      { action: 'ability', key: 'ability', label: this.aiming ? 'Next Gadget' : 'Web Zip  L1+Atk/Jump/Dodge/R1: Spider Arms', cooldown: this.aiming ? 0 : Math.max(this.cooldownFrac('zip'), 0), active: this.state === 'zip' },
+      { action: 'ability', key: 'ability', label: 'Barrage / Rush / Shock / Whiplash', cooldown: Math.max(f('barrage'), f('rush'), f('shock'), f('whiplash')) > 0 ? Math.min(f('barrage'), f('rush'), f('shock'), f('whiplash')) : 0 },
       { action: 'ability2', key: 'ability2', label: 'Symbiote Suit', cooldown: this.cooldownFrac('suit'), active: sym },
       { action: 'dodge', key: 'dodge', label: 'Dodge / Parry (on RED ring)', cooldown: this.cooldownFrac('dodge'), active: this.parryFx.red > 0 },
       { action: 'aim', key: 'aim', label: G.label(), cooldown: G.frac(), active: this.aiming },
@@ -1224,7 +1217,7 @@ export class SpiderMan extends Hero {
     fall += W.up;      // street-canyon updraft carries you
     this.vel.y = approach(this.vel.y, fall, (dp > 0.3 ? 40 : this.wingT > 0 && this.vel.y > 0 ? TUNE.wingLift : 22) * dt);
     if (!dive && fall > 0 && W.up <= 0.1) this.glideSpeed = Math.max(GS, this.glideSpeed - 6 * dt);
-    this.setAnim('glide', this.glideSpeed);
+    this.setAnim(dive ? 'dive' : 'glide', this.glideSpeed);
     this._leanPose(_a.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)), 1.05 + 0.4 * dp, clamp(-turn / Math.max(dt, 1e-3) * 0.25, -0.5, 0.5), 8);
     if (dive && Math.random() < 0.5) this._fx('burst', this.pos.clone().setY(this.pos.y + 1), 0xffffff, 1, 1, 0.2, 0.08);
   }

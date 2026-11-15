@@ -949,7 +949,7 @@ export class BlackSuit {
       list.push({ action: 'ability', key: 'ability', label: 'Symbiote Strike', cooldown: f('bsStrike') });
       list.push({ action: 'ability', key: 'ability', label: 'Symbiote Yank  (L1 + Attack)', cooldown: f('bsTear') });
       list.push({ action: 'ability', key: 'ability', label: 'Symbiote Blast  (L1 + Jump)', cooldown: f('bsRampage') });
-      list.push({ action: 'ability', key: 'ability', label: 'Symbiote Punch  (L1 + R1, hold Attack: charged)', cooldown: f('bsPunch') });
+      list.push({ action: 'ability', key: 'ability', label: 'Symbiote Punch  (L1+R1)', cooldown: f('bsPunch') });
     }
     list.push(
       { action: 'ability2', key: 'ability2', label: this.raging ? 'Classic Suit  (RAGE)' : 'Classic Suit', cooldown: f('suit'), active: this.raging },

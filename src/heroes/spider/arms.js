@@ -23,9 +23,9 @@ class ArmsRig {
     const mat = new THREE.MeshStandardMaterial({ color: IRON, roughness: 0.28, metalness: 0.9, emissive: 0x222a33, emissiveIntensity: 0.4 });
     const joint = new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.4, metalness: 0.8, emissive: GLOW, emissiveIntensity: 0.6 });
     this.glow = joint;
-    const seg = new THREE.CylinderGeometry(0.035, 0.05, 1, 8); seg.translate(0, 0.5, 0);
-    const claw = new THREE.ConeGeometry(0.07, 0.3, 6); claw.translate(0, 0.15, 0);
-    const ball = new THREE.SphereGeometry(0.07, 10, 8);
+    const seg = new THREE.CylinderGeometry(0.06, 0.08, 1, 8); seg.translate(0, 0.5, 0);
+    const claw = new THREE.ConeGeometry(0.11, 0.4, 6); claw.translate(0, 0.15, 0);
+    const ball = new THREE.SphereGeometry(0.1, 10, 8);
     this.arms = [];
     for (let i = 0; i < 4; i++) {
       const s1 = new THREE.Mesh(seg, mat), s2 = new THREE.Mesh(seg, mat), c = new THREE.Mesh(claw, mat);
