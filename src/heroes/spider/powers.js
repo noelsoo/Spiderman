@@ -112,7 +112,7 @@ export function tendrilTear(h, key = 'tear', cd = 7) {
     h._fx('burst', h._center(new THREE.Vector3()), BLACK, 60, 12, 0.7, 0.36);
     tendrilBurst(h, 12, 8, 0.4);
     h._impact(1.0, true); h.game.cam.shake(0.8); h._play('heavyhit'); h._play('symbiote');
-    h._fx('text', _a.set(h.pos.x, h.pos.y + 2.6, h.pos.z), 'TENDRIL TEAR', 0xc8a0ff, { size: 1.3, life: 1 });
+    h._fx('text', _a.set(h.pos.x, h.pos.y + 2.6, h.pos.z), 'SYMBIOTE YANK', 0xc8a0ff, { size: 1.3, life: 1 });
     return true;
   });
   return true;
