@@ -118,8 +118,7 @@ export const core = [
         g.combat.damagePlayer(99999, null, null);
         qa.step(10);
       });
-      await c.wait(1700);
-      await c.ev(() => window.qa.step(30));
+      for (let i = 0; i < 20; i++) { await c.wait(400); const st = await c.ev(() => { window.qa.step(20); return window.game.state; }); if (st === 'gameover') break; }
       const over = await c.ev(() => ({ state: window.game.state, scr: window.game.hud.screen?.name }));
       c.assert(over.state === 'gameover', `expected gameover, got ${over.state}`);
       c.assert(over.scr === 'gameover', `expected gameover screen, got ${over.scr}`);

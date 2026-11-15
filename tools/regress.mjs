@@ -77,7 +77,8 @@ function installQA() {
       return { x: best.pos.x, z: best.pos.z, yaw: best.yaw };
     },
     /** park a car of `kind` on a road with the player standing beside it (on the ground). Returns the car. */
-    stageCar(kind = 'sedan', { ai = false, speed = 0, side = 3.2 } = {}) {
+    stageCar(kind = 'sedan', opts = {}) {
+      const { ai = false, speed = 0, side = 3.2 } = opts;
       const game = g(), vs = game.vehicles;
       const spot = qa.roadSpot();
       if (!spot) return null;
@@ -86,7 +87,7 @@ function installQA() {
         v = vs.list.find((c) => c.active && !c.reserve && !c.wrecked && c.kind !== 'bus' && c.kind !== 'police' && Math.hypot(c.pos.x - spot.x, c.pos.z - spot.z) > 15);
         vs._releaseModel(v); v.setKind(kind);
       }
-      for (const o of vs.list) if (o !== v && o.active && !o.reserve && Math.hypot(o.pos.x - spot.x, o.pos.z - spot.z) < 14) { if (!vs._relocate(o)) vs._deactivate(o); }
+      for (const o of vs.list) if (o !== v && o.active && !o.reserve && Math.hypot(o.pos.x - spot.x, o.pos.z - spot.z) < (opts.clear ?? 14)) { if (!vs._relocate(o)) vs._deactivate(o); }
       v.place(spot.x, spot.z, spot.yaw, speed);
       v.driver = ai ? 'ai' : null; v.ai = null; v.parked = !ai; v.asleep = !ai && speed === 0;
       if (ai) { vs._giveAI(v); v.driver = 'ai'; v.speed = speed; v.vel.set(Math.sin(v.yaw) * speed, 0, Math.cos(v.yaw) * speed); }
@@ -128,6 +129,7 @@ for (const map of maps) {
     page.setDefaultTimeout(600000);
     errors.length = 0;
     page.on('console', (m) => { const t = m.text(); consoleLog.push(t); if (m.type() === 'error' && !/Failed to load resource/.test(t)) errors.push(t); });
+    page.on('crash', () => console.log('  !! page crashed'));
     page.on('pageerror', (e) => errors.push('pageerror: ' + String(e.stack || e).slice(0, 500)));
     page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
     await page.addInitScript(({ s, map }) => {

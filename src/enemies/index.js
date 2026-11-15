@@ -418,6 +418,7 @@ export class EnemyManager {
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
       e.update(dt);
+      if (e.alive && !e.isBoss) this._unstick(e, dt);
       if (e.removed) { e.dispose(); list.splice(i, 1); if (this.boss === e) this.boss = null; }
     }
     this._separate();
@@ -428,6 +429,24 @@ export class EnemyManager {
       g.hud?.showBoss?.((b.bossTitle ?? b.name ?? 'BOSS').toUpperCase(), Math.max(0, b.hp), b.maxHp);
       this.objectivePos.copy(b.pos);
     }
+  }
+
+  /** Enemies that make no progress toward the player for 20 s (no path, wedged in geometry) are moved to a street spot near them. */
+  _unstick(e, dt) {
+    const pl = this.game.player;
+    if (!pl || !pl.active || this.game.state !== 'playing') return;
+    const d = Math.hypot(e.pos.x - pl.pos.x, e.pos.z - pl.pos.z);
+    if (e._bestD === undefined || d < e._bestD - 2 || d < 10) { e._bestD = d; e._noProg = 0; return; }
+    // ranged enemies and rooftop snipers are allowed to hold position while they can see the player
+    if (d < 70 && this.game.physics.lineOfSight(_w.set(e.pos.x, e.pos.y + 1.4, e.pos.z), _v.set(pl.pos.x, pl.pos.y + 1.4, pl.pos.z))) { e._noProg = 0; return; }
+    e._noProg += dt;
+    if (e._noProg < 20) return;
+    e._noProg = 0;
+    const p = this._pickZone(22, 40, _v);
+    e.pos.set(p.x, p.y, p.z); e.vel?.set(0, 0, 0);
+    e._bestD = Math.hypot(p.x - pl.pos.x, p.z - pl.pos.z);
+    this.stats.relocated = (this.stats.relocated || 0) + 1;
+    this.game.fx?.ring?.(_w.set(p.x, p.y + 0.15, p.z), 2.4, 0x7a2bd0, 0.5);
   }
 
   _separate() {

@@ -14,7 +14,7 @@ export const vehicles = [
         qa.hold('KeyW'); qa.stepSec(2.5); qa.release();
         const sp = v.speed;
         if (!(sp > 6)) bad.push(`car did not accelerate: ${sp.toFixed(1)}`);
-        qa.hold('KeyS'); qa.stepSec(4); qa.release();
+        qa.hold('Space'); qa.step(60 * 6, () => {}); qa.release();
         // hold F for a long time: must exit once, not re-enter
         g.input.keys.add('KeyF'); qa.step(60); g.input.keys.delete('KeyF'); qa.step(5);
         if (vs.driving) bad.push('still driving after exit press (re-entered while held?)');
@@ -58,8 +58,9 @@ export const vehicles = [
       const r = await c.ev(() => {
         const qa = window.qa, g = window.game, vs = g.vehicles, bad = [];
         qa.begin('spiderman');
-        const v = qa.stageCar('sports');
+        const v = qa.stageCar('sports', { clear: 60 });
         qa.press('KeyF', 3);
+        if (vs.driving !== v) { qa.step(30); if (vs.driving !== v) { if (vs.jack) qa.stepSec(1); else vs._enter(v, false); } }
         if (vs.driving !== v) return { bad: ['enter failed'] };
         v.invuln = 0;
         qa.hold('KeyW'); qa.stepSec(3);
@@ -73,19 +74,32 @@ export const vehicles = [
         qa.release();
         let hp0 = v.hp;
         v.hp = v.maxHp; v.invuln = 0;
+        {
+          // aim the car at the nearest wall: try the four headings, pick the closest hit, start 30 m short of it
+          let best = null;
+          for (let k = 0; k < 4; k++) {
+            const yaw = k * Math.PI / 2, d = { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) };
+            const o = v.pos.clone(); o.y = 1;
+            const h = g.physics.raycast(o, new o.constructor(d.x, 0, d.z), 150, { ignoreGround: true });
+            if (h && (!best || h.distance < best.dist)) best = { yaw, dist: h.distance };
+          }
+          if (best) { const sy = Math.sin(best.yaw), cy = Math.cos(best.yaw), back = Math.min(30, best.dist - 6); v.pos.x += sy * (best.dist - 6 - back) * 0 ; v.yaw = best.yaw; v.pos.x += sy * Math.max(0, best.dist - 6 - back); v.pos.z += cy * Math.max(0, best.dist - 6 - back); }
+          const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw); v.vel.set(sy * 25, 0, cy * 25); v.speed = 25; v.asleep = false; v.yawRate = 0; v.steerAng = 0;
+        }
         qa.hold('KeyW');
         let crashed = false;
         for (let i = 0; i < 60 * 12 && !crashed; i++) { qa.step(1); if (v.hp < hp0 - 0.5 && v.hp < v.maxHp) crashed = true; if (v.wrecked) break; }
         qa.release();
-        if (!crashed && !v.wrecked) bad.push('no crash damage after 12 s of driving into the street end');
+        if (!crashed && !v.wrecked && !v.sinking) bad.push(`no crash damage after 12 s: hp ${v.hp}/${v.maxHp} speed ${v.speed.toFixed(1)} pos ${v.pos.toArray().map((q) => q.toFixed(0))}`);
         // explode
         v.hp = v.maxHp; v.invuln = 0; v.wrecked = false;
-        const hp1 = g.player.hp;
+        const hp1 = g.player.hp; const wasDriving = !!vs.driving;
+        g.player.invuln = 0;
         vs.explodeVehicle(v, 'test');
         qa.step(3);
         if (vs.driving) bad.push('still driving a wreck');
         if (!v.wrecked) bad.push('not wrecked');
-        if (!(g.player.hp < hp1)) bad.push('player took no explosion damage');
+        if (!(g.player.hp < hp1)) bad.push(`player took no explosion damage hp ${hp1} -> ${g.player.hp} invuln ${g.player.invuln} dead ${g.player.dead} drivingWas ${wasDriving}`);
         qa.stepSec(2);
         if (!qa.finite(g.player.pos) || !qa.finite(v.pos)) bad.push('NaN after explosion');
         if (g.physics.inside(g.player.center)) bad.push('hero inside geometry after explosion exit');

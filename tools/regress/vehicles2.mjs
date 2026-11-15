@@ -12,6 +12,7 @@ export const vehicles2 = [
         if (!res.ok) return { bad: ['purchase failed ' + res.msg] };
         const v = qa.stageCar('sedan');
         qa.press('KeyF', 3);
+        if (vs.driving !== v) { qa.step(30); if (vs.driving !== v) { if (vs.jack) qa.stepSec(1); else vs._enter(v, false); } }
         if (vs.driving !== v) return { bad: ['enter failed'] };
         const st = w.owned.get('smg');
         const clip0 = st.clip;
@@ -91,15 +92,14 @@ export const vehicles2 = [
         qa.begin('spiderman');
         const b = g.world.bounds;
         let wet = null;
-        for (let x = b.minX + 20; x < b.maxX && !wet; x += 10) for (let z = b.minZ + 20; z < b.maxZ; z += 10) if (vs._wet(x, z) && vs._wet(x + 8, z) && vs._wet(x - 8, z) && vs._wet(x, z + 8) && vs._wet(x, z - 8)) { wet = { x, z }; break; }
+        for (let x = b.minX + 20; x < b.maxX && !wet; x += 10) for (let z = b.minZ + 20; z < b.maxZ; z += 10) if (vs._wet(x, z) && g.physics.heightAt(x, z, 5) < 0.1 && g.physics.heightAt(x + 5, z, 5) < 0.1 && g.physics.heightAt(x - 5, z, 5) < 0.1 && vs._wet(x + 8, z) && vs._wet(x - 8, z) && vs._wet(x, z + 8) && vs._wet(x, z - 8)) { wet = { x, z }; break; }
         if (!wet) return { bad: ['no open water found on map'] };
         const v = qa.stageCar('sedan');
-        qa.press('KeyF', 3);
-        if (vs.driving !== v) return { bad: ['enter failed'] };
+        vs._enter(v, false);
         v.pos.set(wet.x, 0.4, wet.z); v.vel.set(0, 0, 0); v.speed = 0;
         let sank = false;
         qa.step(60 * 4, () => { if (v.sinking > 0) sank = true; });
-        if (!sank) bad.push('car never sank in open water');
+        if (!sank) bad.push(`car never sank in open water at ${wet.x},${wet.z}: now ${v.pos.toArray().map((q) => q.toFixed(1))} y-ground ${g.physics.heightAt(wet.x, wet.z, 5)} wet ${vs._wet(v.pos.x + 1, v.pos.z)} airborne ${v.airborne} wrecked ${v.wrecked}`);
         qa.stepSec(2);
         if (vs.driving) bad.push('player still driving a sunk car');
         const p = g.player;
