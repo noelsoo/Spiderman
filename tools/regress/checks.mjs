@@ -7,6 +7,7 @@ import { weapons } from './weapons.mjs';
 import { campaign, settings } from './campaign.mjs';
 import { soak } from './soak.mjs';
 import { enemies } from './enemies.mjs';
+import { heroes } from './heroes.mjs';
 
 
-export const ALL_CHECKS = [...core, ...vehicles, ...vehicles2, ...weapons, ...campaign, ...settings, ...enemies, ...soak];
+export const ALL_CHECKS = [...core, ...vehicles, ...vehicles2, ...weapons, ...campaign, ...settings, ...enemies, ...heroes, ...soak];

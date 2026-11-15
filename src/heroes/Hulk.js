@@ -9,12 +9,21 @@
 //   ability2 R/L2         Hulk Out (rage: damage up, damage resist, health regen)
 //   jump (hold)           charge a super jump (camera pulls back at altitude)
 //   ultimate Q/R3         Worldbreaker Smash
+//   v3 powers (context variants, no new bindings):
+//   ability E/L1          TAP: Leap Smash (landing damage) | HOLD 0.25 s on ground: GROUND POUND (jump, crater, launches cars) | air: dive
+//   special K/R1 HOLD     grab nearest enemy, else RIP A CAR (vehicles.held), else tear up a LAMP POST / chunk of ground (alternates)
+//   holding a thing       dodge C/O = CLUB SWING (enemy or lamp post, wide arc);  attack = throw;  E = body slam
+//   dodge on foot         SHOULDER CHARGE: 0.6 s, smashes through everything, launches cars
+//   ability2 R/L2         HULK OUT (rage). The RAGE METER (HUD hint) fills from hits and damage taken: more damage, bigger Hulk;
+//                         at 100 a free Hulk Out is ready (no cooldown, consumes the meter)
+//   climbing              every move punches handholds into the wall (debris)
 import * as THREE from 'three';
 import { Hero, approach } from './Hero.js';
 import {
   Timers, aimInfo, assistAim, LockMarkers, PressureWaves, Craters, enemiesNear, enemyCenter, rumble, impactFx,
   setReticle, hitStop, clamp, damp,
 } from './avengers/util.js';
+import { launchCars, FearList, DebrisPool } from './avengers/util2.js';
 
 // ---- tuning ----------------------------------------------------------------
 const WALK = 7, RUN = 14, BULLDOZE = 24, CLIMB_SPEED = 8;
@@ -39,6 +48,19 @@ function rockMesh() {
   const m = new THREE.Mesh(ROCK_GEO, ROCK_MAT);
   m.scale.set(1.3, 1.1, 1.4); m.castShadow = true;
   return m;
+}
+
+let POLE_GEO = null;
+function poleMesh() {
+  if (!POLE_GEO) {
+    const pole = new THREE.CylinderGeometry(0.1, 0.16, 6.2, 8); pole.translate(0, 0, 0);
+    const head = new THREE.BoxGeometry(0.5, 0.22, 0.7); head.translate(0, 3.1, 0.3);
+    POLE_GEO = { pole, head, mat: new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.6, metalness: 0.7 }), lamp: new THREE.MeshBasicMaterial({ color: 0xffe9a0, toneMapped: false }) };
+  }
+  const g = new THREE.Group();
+  const a = new THREE.Mesh(POLE_GEO.pole, POLE_GEO.mat), b = new THREE.Mesh(POLE_GEO.head, POLE_GEO.lamp);
+  a.castShadow = true; g.add(a, b);
+  return g;
 }
 
 export class Hulk extends Hero {
@@ -66,6 +88,10 @@ export class Hulk extends Hero {
     this.craters = new Craters(game.scene, 8);
     this.marker = new LockMarkers(game.scene, 1);
     this._hitFocus = 0.75;
+    this.rageMeter = 0; this._meterIdle = 0; this.scaleK = 1;
+    this.debris = new DebrisPool(game.scene, 18, 0x6f685c);
+    this.fear = new FearList();
+    this._abT = 0; this._abArm = false; this.poundBig = false; this._ripAlt = false;
   }
 
   onActivate() {
@@ -84,6 +110,9 @@ export class Hulk extends Hero {
     this.mode = 'normal'; this.charging = false; this.rageT = 0; this.dmgMul = 1; this.speedMul = 1; this.ult = null;
     this.gravityScale = 1; this.punch = 0; this.camExtra = 0;
     this.waves.clear(); this.craters.clear(); this.marker.hideAll();
+    this.debris.clear(); this.fear.clear(); this.rageMeter = 0; this.scaleK = 1; this.poundBig = false; this._abArm = false;
+    this.model.group.scale.setScalar(1);
+    if (this.game.vehicles?.held) this.game.vehicles._dropHeld?.(true);
     for (const t of this.thrown) { if (t.e) t.e.gravity = t.grav; }
     this.thrown.length = 0;
     setReticle(this, null);
@@ -91,19 +120,34 @@ export class Hulk extends Hero {
   }
 
   get abilityHints() {
-    if (this.held) {
+    const meter = Math.round(this.rageMeter);
+    const rageLabel = this.rageT > 0 ? 'Hulk Out (active)' : this.rageMeter >= 100 ? 'HULK OUT (rage full)' : `Hulk Out (rage ${meter}%)`;
+    const rageCd = this.rageMeter >= 100 ? 0 : this.cooldownFrac('rage');
+    if (this.game.vehicles?.held) {
       return [
-        { action: 'attack', label: 'Throw' },
-        { action: 'ability', label: 'Body Slam' },
-        { action: 'ability2', label: 'Hulk Out', cooldown: this.cooldownFrac('rage'), active: this.rageT > 0 },
+        { action: 'attack', label: 'Throw car' },
+        { action: 'special', label: 'Throw car' },
+        { action: 'interact', label: 'Drop car' },
+        { action: 'ability2', label: rageLabel, cooldown: rageCd, active: this.rageT > 0 },
+        { action: 'ultimate', label: 'Worldbreaker', cooldown: 1 - this.focus / 100, active: !!this.ult },
+      ];
+    }
+    if (this.held) {
+      const pole = this.held.kind === 'pole';
+      return [
+        { action: 'attack', label: pole ? 'Swing pole' : 'Throw' },
+        { action: 'dodge', label: pole ? 'Swing pole' : 'Club swing', cooldown: this.cooldownFrac('club') },
+        { action: 'ability', label: pole ? 'Throw pole' : 'Body Slam' },
+        { action: 'ability2', label: rageLabel, cooldown: rageCd, active: this.rageT > 0 },
         { action: 'ultimate', label: 'Worldbreaker', cooldown: 1 - this.focus / 100, active: !!this.ult },
       ];
     }
     return [
-      { action: 'jump', label: 'Super Jump', cooldown: 0, active: this.charging && this.jumpCharge > CHARGE_MIN },
-      { action: 'special', label: 'Thunderclap / Grab', cooldown: Math.max(this.cooldownFrac('clap'), 0) },
-      { action: 'ability', label: this.onGround ? 'Leap Smash' : 'Ground Pound', cooldown: this.cooldownFrac('leap') },
-      { action: 'ability2', label: 'Hulk Out', cooldown: this.cooldownFrac('rage'), active: this.rageT > 0 },
+      { action: 'jump', label: 'Super Jump (hold)', cooldown: 0, active: this.charging && this.jumpCharge > CHARGE_MIN },
+      { action: 'special', label: 'Thunderclap (hold: grab / rip)', cooldown: Math.max(this.cooldownFrac('clap'), 0) },
+      { action: 'ability', label: this.onGround ? 'Leap Smash (hold: Ground Pound)' : 'Ground Pound', cooldown: Math.max(this.cooldownFrac('leap'), this.cooldownFrac('pound')), active: this.mode === 'dive' || this.mode === 'leap' },
+      { action: 'dodge', label: 'Shoulder Charge', cooldown: this.cooldownFrac('charge'), active: this.mode === 'dash' },
+      { action: 'ability2', label: rageLabel, cooldown: rageCd, active: this.rageT > 0 },
       { action: 'ultimate', label: 'Worldbreaker', cooldown: 1 - this.focus / 100, active: !!this.ult },
     ];
   }
@@ -111,12 +155,15 @@ export class Hulk extends Hero {
   registerHit() {
     this.combo++; this.comboTimer = 2.5;
     this.addFocus(4 * this._hitFocus);
+    this.rageMeter = Math.min(100, this.rageMeter + 2.2); this._meterIdle = 0;
     if (this.rageT > 0) this.rageT = Math.min(RAGE_MAX, this.rageT + 0.35);  // fury feeds on violence
   }
 
   takeDamage(amount, fromPos) {
     if (this.rageT > 0) amount *= RAGE_RESIST;
-    return super.takeDamage(amount, fromPos);
+    const ok = super.takeDamage(amount, fromPos);
+    if (ok) { this.rageMeter = Math.min(100, this.rageMeter + amount * 0.12); this._meterIdle = 0; }
+    return ok;
   }
 
   // ---- update ----------------------------------------------------------------
@@ -127,14 +174,16 @@ export class Hulk extends Hero {
     this.chainT -= dt; if (this.chainT <= 0) this.chain = 0;
     this.modeT += dt;
     this.customMovement = true;
-    this.waves.update(dt); this.craters.update(dt);
+    this.waves.update(dt); this.craters.update(dt); this.debris.update(dt); this.fear.update(dt);
 
     this._rage(dt);
+    this._meter(dt);
     this._ultTick(dt);
     this._thrownUpdate(dt);
 
     const busy = this.actionT > 0 || this.ult;
-    if (!this.ult) {
+    if (g.vehicles?.held) { this._abArm = false; this.specArmed = false; }       // the vehicle system owns attack / special while a car is lifted
+    else if (!this.ult) {
       if (this.held) this._holdUpdate(dt, input);
       else { this._abilities(dt, input, busy); this._grabInput(dt, input, busy); this._holdReticle(false); }
     }
@@ -167,17 +216,29 @@ export class Hulk extends Hero {
         if (gr && this.chain === 0) this._grab(gr); else this._meleeCombo();
       }
     }
+    // ability: tap = leap smash (on release), hold = ground pound, air = dive
     if (input.pressed('ability') && !busy) {
       if (!this.onGround) { if (this.mode !== 'dive') this._dive(); }
-      else if ((this.cooldowns.leap || 0) <= 0) this._leapSmash();
+      else { this._abArm = true; this._abT = 0; }
     }
-    if (input.pressed('ability2') && (this.cooldowns.rage || 0) <= 0 && this.rageT <= 0) this._startRage();
+    if (this._abArm) {
+      if (input.down('ability') && this.onGround) {
+        this._abT += dt;
+        if (this._abT >= 0.25 && (this.cooldowns.pound || 0) <= 0) { this._abArm = false; this._groundPound(); }
+        else if (this._abT >= 0.1 && Math.random() < 0.3) this.game.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.1), 3 - this._abT * 4, DUST, 0.2);
+      } else {
+        this._abArm = false;
+        if (this._abT < 0.25 && this.onGround && !busy && (this.cooldowns.leap || 0) <= 0) this._leapSmash();
+      }
+    }
+    if (input.pressed('ability2') && this.rageT <= 0 && ((this.cooldowns.rage || 0) <= 0 || this.rageMeter >= 100)) this._startRage();
     if (input.pressed('ultimate') && this.focus >= 100 && !this.ult) this._startUlt();
     if (input.pressed('dodge') && this.onGround && (this.cooldowns.charge || 0) <= 0 && !busy && !this.charging) this._shoulderCharge(input);
   }
 
   // special: tap = Thunderclap, hold = grab / rip boulder
   _grabInput(dt, input, busy) {
+    const g = this.game;
     if (this.mode === 'climb' || this.ult) { this.specArmed = false; return; }
     if (input.pressed('special') && !busy) { this.specT = 0; this.specArmed = true; }
     if (!this.specArmed) return;
@@ -186,7 +247,10 @@ export class Hulk extends Hero {
       if (this.specT >= GRAB_HOLD && this.onGround) {
         this.specArmed = false;
         const e = this._grabbable(GRAB_RANGE, 120, false);
-        if (e) this._grab(e); else this._ripRock();
+        const car = !e && g.vehicles?.nearestEnterable?.(this.pos, 6);
+        if (e) this._grab(e);
+        else if (car && !g.vehicles.held) this._ripCar(car);
+        else this._ripRock();
       }
     } else {
       this.specArmed = false;
@@ -373,6 +437,9 @@ export class Hulk extends Hero {
     if (this.stepT <= 0 && Math.abs(this.climbV) > 1) {
       this.stepT = 0.4; g.cam.shake(0.06); rumble(g, 0.12, 0.1, 50);
       g.fx?.burst?.(this.pos.clone().setY(this.pos.y + this.height * 0.8), DUST, 5, 4, 0.5, 0.3);
+      _d.set(this.pos.x - n.x * (this.radius + 0.1), this.pos.y + this.height * (0.6 + Math.random() * 0.4), this.pos.z - n.z * (this.radius + 0.1));
+      for (let i = 0; i < 3; i++) this.debris.spawn(_d, 0.12 + Math.random() * 0.14, 1.1, _a.set(n.x * 2 + (Math.random() - 0.5) * 2, 1 + Math.random() * 2, n.z * 2 + (Math.random() - 0.5) * 2));
+      g.fx?.ring?.(_d.clone(), 0.9, 0xcfc6b0, 0.25);
       g.audio?.play('punch', { volume: 0.35, pitch: 0.6 });
     }
   }
@@ -383,7 +450,7 @@ export class Hulk extends Hero {
     const vy = -this._impactVy;
     let r = 0, dmg = 0, shake = 0, kind = 'normal';
     if (this.mode === 'ultSlam') { this._ultImpact(); return; }
-    if (this.mode === 'dive') { r = 9; dmg = 85; shake = 1.0; kind = 'dive'; }
+    if (this.mode === 'dive') { r = this.poundBig ? 12 : 9; dmg = this.poundBig ? 115 : 85; shake = this.poundBig ? 1.4 : 1.0; kind = 'dive'; }
     else if (this.mode === 'leap') { r = 8; dmg = 70; shake = 0.9; kind = 'leap'; }
     else if (this.mode === 'super' || vy > 20) { r = clamp(4 + vy * 0.2, 4, 15); dmg = 25 + vy * 1.4; shake = clamp(0.3 + vy * 0.016, 0.3, 1.2); kind = 'super'; }
     else if (vy > 13) { r = 3.5; dmg = 12; shake = 0.2; }
@@ -392,6 +459,12 @@ export class Hulk extends Hero {
       const hits = g.combat?.aoe?.({ center: this.pos.clone(), radius: r, damage: dmg * this.dmgMul, knockback: 12 + r, up: 8, stun: 1.0, source: this }) ?? [];
       impactFx(g, this.pos, r, GREEN, shake);
       g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.1), r * 0.6, DUST, 0.7);
+      if (kind !== 'normal') {
+        const n = launchCars(g, this.pos, r * 1.2, kind === 'dive' ? 16 : 11, dmg * 0.5);
+        if (n) g.fx?.text?.(this.pos.clone().setY(this.pos.y + 3), 'CARS LAUNCHED', 0xffd24a, { size: 1.2, life: 1 });
+        for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283; this.debris.spawn(_d.set(this.pos.x + Math.cos(a) * r * 0.4, this.pos.y + 0.3, this.pos.z + Math.sin(a) * r * 0.4), 0.3 + Math.random() * 0.3, 1.4, _a.set(Math.cos(a) * 6, 6 + Math.random() * 4, Math.sin(a) * 6)); }
+      }
+      this.poundBig = false;
       g.audio?.play('smash'); if (kind !== 'normal') g.audio?.play('heavyhit', { volume: 0.7 });
       rumble(g, clamp(shake, 0.3, 1), 0.6, 120 + shake * 300);
       if (kind !== 'normal') {
@@ -438,6 +511,17 @@ export class Hulk extends Hero {
     });
   }
 
+  _groundPound() {
+    const g = this.game;
+    this.useCooldown('pound', 9);
+    this.poundBig = true;
+    this.vel.y = 25; this.onGround = false; this.mode = 'normal'; this.actionT = 0;
+    this.setAnim('jump');
+    g.audio?.play('roar', { volume: 0.6 }); g.fx?.ring?.(this.pos.clone().setY(this.pos.y + 0.1), 6, DUST, 0.4);
+    this.timers.after(0.55, () => { if (this.active && this.poundBig && !this.onGround) this._dive(); });
+    this.timers.after(2.5, () => { this.poundBig = false; });
+  }
+
   _dive() {
     const g = this.game;
     this.mode = 'dive'; this.modeT = 0; this.charging = false;
@@ -453,8 +537,8 @@ export class Hulk extends Hero {
     this.useCooldown('charge', 1.6);
     const w = g.cam.moveVector(input.move, _a); if (w.lengthSq() < 0.01) w.copy(this.forward);
     w.setY(0).normalize();
-    this.dashDir = w.clone(); this.mode = 'dash'; this.modeT = 0; this.dashT = 0.45; this.hitT = 0;
-    this.yaw = Math.atan2(w.x, w.z); this.invuln = Math.max(this.invuln, 0.45);
+    this.dashDir = w.clone(); this.mode = 'dash'; this.modeT = 0; this.dashT = 0.6; this.hitT = 0;
+    this.yaw = Math.atan2(w.x, w.z); this.invuln = Math.max(this.invuln, 0.6);
     g.audio?.play('roar', { volume: 0.5 }); g.cam.shake(0.2); this.punch += 4;
   }
   _dashMove(dt) {
@@ -468,6 +552,7 @@ export class Hulk extends Hero {
       this._hitFocus = 0.5;
       const hits = g.combat?.melee?.({ origin: this.center, forward: this.dashDir, range: 3.4, arc: 150, damage: 30 * this.dmgMul, knockback: 22, up: 5, stun: 1.0, source: this }) ?? [];
       if (hits.length) { g.audio?.play('heavyhit'); g.cam.shake(0.3); rumble(g, 0.6, 0.4, 120); hitStop(g, 0.05, 0.08); }
+      launchCars(g, this.center.addScaledVector(this.dashDir, 2.5), 3.8, 9, 30);
       this._hitFocus = 0.75;
     }
     this.stepT -= dt; if (this.stepT <= 0) { this.stepT = 0.15; g.cam.shake(0.07); g.fx?.burst?.(this.pos.clone().setY(this.pos.y + 0.1), DUST, 4, 3, 0.4, 0.3); g.fx?.dust?.(this.pos, 3, 2); }
@@ -599,11 +684,53 @@ export class Hulk extends Hero {
     g.fx?.dust?.(ground, 12, 4);
     g.fx?.ring?.(ground.clone().setY(ground.y + 0.1), 3.5, DUST, 0.5);
     this._crater(ground, 2.4);
-    const mesh = rockMesh(); mesh.position.copy(ground); g.scene.add(mesh);
-    this.held = { kind: 'rock', mesh, t: 0 };
+    this._ripAlt = !this._ripAlt;
+    const pole = this._ripAlt;
+    const mesh = pole ? poleMesh() : rockMesh(); mesh.position.copy(ground); g.scene.add(mesh);
+    this.held = { kind: pole ? 'pole' : 'rock', mesh, t: 0, swings: 0 };
+    if (pole) { for (let i = 0; i < 4; i++) this.debris.spawn(ground.clone().setY(ground.y + 0.3), 0.25 + Math.random() * 0.2, 1.4); g.hud?.toast?.('LAMP POST: attack / C swing, E throw'); this.actionAnim = 'cast'; this.actionT = 0.5; this.setAnim('cast'); g.audio?.play('smash', { volume: 0.7 }); g.cam.shake(0.3); return; }
     this.actionAnim = 'cast'; this.actionT = 0.5; this.setAnim('cast');
     g.audio?.play('smash', { volume: 0.7 }); g.cam.shake(0.3); rumble(g, 0.5, 0.4, 150);
     g.hud?.toast?.('BOULDER: LMB throw, hold aim to target');
+  }
+
+  _ripCar(v) {
+    const g = this.game;
+    this.useCooldown('rip', 1.5);
+    g.fx?.dust?.(v.pos.clone(), 10, 3);
+    this.actionAnim = 'cast'; this.actionT = 0.5; this.setAnim('cast');
+    g.audio?.play('smash', { volume: 0.7 }); g.cam.shake(0.3); rumble(g, 0.5, 0.4, 150);
+    g.vehicles._hulkGrab(v);
+  }
+
+  /** Swing whatever is held (enemy or lamp post) as a club. */
+  _club() {
+    const g = this.game, h = this.held;
+    if (!h || h.slam) return;
+    this.useCooldown('club', 0.75);
+    this.actionAnim = 'smash'; this.actionT = 0.7; this.setAnim('smash');
+    g.audio?.play('whoosh', { volume: 0.8, pitch: 0.55 });
+    h.swinging = true;
+    this.timers.after(0.28, () => {
+      if (!this.active || this.held !== h) return;
+      h.swinging = false; h.swings = (h.swings ?? 0) + 1;
+      const fwd = this.forward;
+      const hits = (g.combat?.melee?.({ origin: this.center, forward: fwd, range: 5.2, arc: 170, damage: (h.kind === 'pole' ? 55 : 42) * this.dmgMul, knockback: 20, up: 5, stun: 1.0, source: this, heavy: true }) ?? []).filter((x) => x !== h.e);
+      const c = this.pos.clone().addScaledVector(fwd, 3.2);
+      g.fx?.ring?.(c.clone().setY(c.y + 0.15), 4, 0xffffff, 0.3);
+      g.fx?.burst?.(c.clone().setY(c.y + 1), DUST, 14, 7, 0.4, 0.25);
+      this.waves.spawn(c.clone().setY(c.y + 1), 5, 0xffffff, 0.3, 0.7);
+      g.audio?.play('heavyhit', { volume: 0.8 }); g.cam.shake(0.3); rumble(g, 0.7, 0.4, 150);
+      if (hits.length) hitStop(g, 0.07, 0.05);
+      launchCars(g, c, 5, 7, 25);
+      if (h.kind === 'enemy' && h.e?.alive) h.e.takeDamage?.(14, { stun: 1, source: this, kind: 'club' });
+      const max = h.kind === 'pole' ? 3 : 4;
+      if (h.swings >= max) {
+        for (let i = 0; i < 6; i++) this.debris.spawn(this._holdPoint(_a).clone().add(_d.set(0, 0.4, 0)), 0.22 + Math.random() * 0.2, 1.4);
+        this.say?.('BROKE'); g.fx?.text?.(this._holdPoint(_a).clone().setY(this.pos.y + this.height + 1.2), h.kind === 'pole' ? 'POLE SNAPPED' : 'DROPPED', 0xffd24a, { size: 1.2, life: 1 });
+        this._release(false);
+      }
+    });
   }
 
   /** Where the held object rides: above and slightly ahead of the head. */
@@ -628,7 +755,12 @@ export class Hulk extends Hero {
       if (Math.random() < 0.08) g.fx?.burst?.(enemyCenter(e, _b).clone(), 0xffffff, 1, 1.5, 0.2, 0.1);
     } else {
       this._holdPoint(_a, 0.5 + Math.sin(g.time * 3) * 0.05);
-      h.mesh.position.copy(_a); h.mesh.rotation.y += dt * 0.6;
+      h.mesh.position.copy(_a);
+      if (h.kind === 'pole') {
+        const sw = h.swinging ? Math.min(1, (this.actionT) / 0.7) : 0;
+        h.mesh.rotation.set(Math.PI / 2 - 0.5 + sw * 1.0, this.yaw, 0, 'YXZ');
+        h.mesh.position.addScaledVector(this.forward, 1.6);
+      } else h.mesh.rotation.y += dt * 0.6;
     }
     // aim (zoomed throw view)
     const aiming = input.down('aim') && !g.weapons?.equipped;
@@ -642,11 +774,13 @@ export class Hulk extends Hero {
       if (aa.target) this.marker.set(0, enemyCenter(aa.target, _c), 1, g.camera.position); else this.marker.hideAll();
     } else this.marker.hideAll();
     if (rawBusy || h.slam || h.t < 0.25) return;
+    if (h.kind === 'pole' && input.pressed('attack') && !aiming) { this._club(); return; }
     if (input.pressed('attack') || input.pressed('fire')) { this._throwHeld(aiming); return; }
     if (input.pressed('ability')) { if (h.kind === 'enemy') this._bodySlam(); else this._throwHeld(aiming); return; }
-    if (input.pressed('ability2') && (this.cooldowns.rage || 0) <= 0 && this.rageT <= 0) this._startRage();
+    if (input.pressed('ability2') && this.rageT <= 0 && ((this.cooldowns.rage || 0) <= 0 || this.rageMeter >= 100)) this._startRage();
     if (input.pressed('ultimate') && this.focus >= 100 && !this.ult) { this._release(false); this._startUlt(); return; }
-    if (input.pressed('dodge')) this._release(false);          // drop it
+    if (input.pressed('dodge') && (this.cooldowns.club || 0) <= 0) this._club();
+    if (h.t > 9) this._release(false);                        // gets heavy: dropped
   }
 
   _holdReticle(on) {
@@ -674,7 +808,7 @@ export class Hulk extends Hero {
     g.cam.shake(0.35); rumble(g, 0.7, 0.5, 160); this.punch += 5;
     g.audio?.play('roar', { volume: 0.5 });
     g.fx?.ring?.(from.clone(), 3, 0xffffff, 0.3);
-    if (h.kind === 'rock') { this._launchRock(h.mesh, from, to, aa.target); return; }
+    if (h.kind !== 'enemy') { this._launchRock(h.mesh, from, to, aa.target); return; }   // rock or ripped pole: both fly as a projectile
     const e = h.e;
     const dir = to.clone().sub(from); const dist = dir.length(); dir.normalize();
     const tt = dist / THROW_SPEED;
@@ -775,7 +909,8 @@ export class Hulk extends Hero {
   // ---- Hulk Out (rage) ---------------------------------------------------------------------------------------
   _startRage() {
     const g = this.game;
-    this.useCooldown('rage', RAGE_CD);
+    if (this.rageMeter >= 100 && (this.cooldowns.rage || 0) > 0) this.cooldowns.rage = 0; else this.useCooldown('rage', RAGE_CD);
+    if (this.rageMeter >= 100) this.rageMeter = 35;
     this.rageT = RAGE_TIME; this.dmgMul = RAGE_DMG; this.speedMul = RAGE_SPEED;
     this.actionAnim = 'cast'; this.actionT = 1.0; this.setAnim('cast');          // chest-beating roar
     this.invuln = Math.max(this.invuln, 0.9);
@@ -787,6 +922,17 @@ export class Hulk extends Hero {
     g.fx?.dust?.(this.pos, 10, 4);
     g.hud?.toast?.('HULK OUT!');
   }
+  /** Rage meter: bonus damage + a bigger Hulk; bleeds away out of combat. */
+  _meter(dt) {
+    this._meterIdle += dt;
+    if (this._meterIdle > 4 && this.rageT <= 0) this.rageMeter = Math.max(0, this.rageMeter - 3 * dt);
+    const f = this.rageMeter / 100;
+    this.dmgMul = (this.rageT > 0 ? RAGE_DMG : 1) * (1 + 0.35 * f);
+    const want = 1 + 0.1 * f + (this.rageT > 0 ? 0.15 : 0);
+    this.scaleK = damp(this.scaleK, want, 5, dt);
+    if (this.rageMeter >= 100 && !this._full) { this._full = true; this.game.hud?.toast?.('RAGE FULL: R for a free Hulk Out'); }
+    if (this.rageMeter < 60) this._full = false;
+  }
   _rage(dt) {
     if (this.rageT <= 0) return;
     this.rageT -= dt;
@@ -795,7 +941,7 @@ export class Hulk extends Hero {
     this._rageFx = (this._rageFx ?? 0) - dt;
     if (this._rageFx <= 0) { this._rageFx = 0.14; this.game.fx?.burst?.(this.center.add(_a.set((Math.random() - 0.5) * 1.4, (Math.random() - 0.3), (Math.random() - 0.5) * 1.4)), GREEN, 2, 2.5, 0.5, 0.28); }
     if (!this.dead) this.heal?.(dt * RAGE_REGEN);
-    if (this.rageT <= 0) { this.dmgMul = 1; this.speedMul = 1; this.model.setTint?.(0x44ff22, 0); this.game.hud?.toast?.('Rage over'); }
+    if (this.rageT <= 0) { this.speedMul = 1; this.model.setTint?.(0x44ff22, 0); this.game.hud?.toast?.('Rage over'); }
   }
 
   // ---- ultimate: Worldbreaker Smash --------------------------------------------------------------------------
@@ -867,6 +1013,6 @@ export class Hulk extends Hero {
   }
 
   updateVisuals(dt) {
-    // enemy meshes are positioned by the enemy manager; nothing scene-side to maintain here
+    this.model.group.scale.setScalar(this.scaleK);
   }
 }
